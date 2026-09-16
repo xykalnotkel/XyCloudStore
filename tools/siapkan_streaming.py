@@ -32,7 +32,7 @@ if 'xySendKey' not in s:
             long now = android.os.SystemClock.uptimeMillis();
             android.view.KeyEvent ev = new android.view.KeyEvent(now, now,
                     isUp ? android.view.KeyEvent.ACTION_UP : android.view.KeyEvent.ACTION_DOWN,
-                    keyCode, 0, metaState, 0);
+                    keyCode, 0, metaState);
             short translated = keyboardTranslator.translate(keyCode, -1);
             if (translated != 0) {
                 conn.sendKeyboardInput(translated,
