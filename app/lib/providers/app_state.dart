@@ -19,7 +19,7 @@ import '../data/stiker_store.dart';
 
 /// State global aplikasi + jembatan ke channel realtime.
 class AppState extends ChangeNotifier {
-  AppState() {
+  AppState({bool mulaiOtomatis = true}) {
     _api = ApiClient();
     _api.onPerawatan = (pesan) {
       perawatan = true;
@@ -29,6 +29,9 @@ class AppState extends ChangeNotifier {
     };
     _api.onSesiBerakhir=(){if(user!=null&&!sedangKeluar)unawaited(logout());};
     _repo = XyRepository.create(_api);
+    // Mode non-otomatis dipakai widget test/screenshot agar tidak menyalakan
+    // jaringan, plugin native, realtime, atau pemulihan sesi di latar belakang.
+    if (!mulaiOtomatis) return;
     unawaited(muatKonfigurasi());
     unawaited(muatPromosi());
     unawaited(muatTema());

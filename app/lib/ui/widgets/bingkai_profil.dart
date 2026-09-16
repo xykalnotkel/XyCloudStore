@@ -86,16 +86,10 @@ class AvatarBingkai extends StatefulWidget {
 
 class _AvatarBingkaiState extends State<AvatarBingkai>
     with TickerProviderStateMixin {
-  late final AnimationController _putar = AnimationController(
-    vsync: this,
-    duration: const Duration(seconds: 5),
-  );
+  late final AnimationController _putar;
 
   /// Partikel melayang untuk bingkai aset AI (bara api naik / bintang mengorbit).
-  late final AnimationController _apung = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 2600),
-  );
+  late final AnimationController _apung;
 
   bool get _animasi =>
       widget.bingkai == 'aurora' || _idAsetAi.contains(widget.bingkai ?? '');
@@ -109,6 +103,16 @@ class _AvatarBingkaiState extends State<AvatarBingkai>
   @override
   void initState() {
     super.initState();
+    // Jangan lazy-init dari dispose: TickerProvider membutuhkan context yang
+    // masih aktif, termasuk saat bingkai yang dipilih adalah Polos.
+    _putar = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 5),
+    );
+    _apung = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2600),
+    );
     if (_animasi) _putar.repeat();
     if (_pakaiApung) _apung.repeat();
   }
@@ -210,20 +214,28 @@ class _AvatarBingkaiState extends State<AvatarBingkai>
       width: widget.size + tebal * 2,
       height: widget.size + tebal * 2,
       child: Stack(alignment: Alignment.center, children: [
-        Positioned.fill(child: cincin()),
-        // Kilau kaca tipis di setengah atas cincin.
-        Positioned.fill(
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.center,
-                colors: [Colors.white.withOpacity(.30), Colors.white.withOpacity(0)],
+        // Cincin CSS/gradasi harus menjadi alas karena bentuknya lingkaran
+        // penuh. Artwork AI punya lubang transparan, jadi dirender SETELAH
+        // foto agar ornamen bingkai benar-benar berada di depan avatar.
+        if (!_asetAi) Positioned.fill(child: cincin()),
+        if (!_asetAi)
+          Positioned.fill(
+            child: IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.center,
+                    colors: [
+                      Colors.white.withOpacity(.30),
+                      Colors.white.withOpacity(0),
+                    ],
+                  ),
+                ),
               ),
             ),
           ),
-        ),
         Container(
           width: widget.size,
           height: widget.size,
@@ -231,7 +243,11 @@ class _AvatarBingkaiState extends State<AvatarBingkai>
           clipBehavior: Clip.antiAlias,
           child: widget.child,
         ),
-        // Batch J: elemen melayang untuk bingkai aset AI.
+        if (_asetAi)
+          Positioned.fill(
+            child: IgnorePointer(child: cincin()),
+          ),
+        // Elemen melayang juga berada di lapisan paling depan.
         if (id == 'galaksi')
           Positioned.fill(
               child: _BintangOrbit(size: widget.size, tebal: tebal, putar: _putar)),

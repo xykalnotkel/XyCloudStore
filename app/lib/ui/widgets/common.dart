@@ -778,11 +778,11 @@ class _RingPainter extends CustomPainter {
 }
 
 /// ------------------------------------------------------------
-///  XyBarisMenu — baris menu berkartu (ikon bulat + judul + sub).
+///  XyBarisMenu — baris menu datar (ikon + judul + sub + pemisah).
 /// ------------------------------------------------------------
-///  Sebelumnya disalin tiga kali sebagai `_Baris`/`_Menu` di berkas
-///  pengaturan, tentang, dan profil dengan ukuran teks yang berbeda-beda.
-///  Sekarang satu widget supaya jarak, ukuran ikon, dan tipografinya sama.
+///  Daftar pengaturan sengaja tidak memakai kartu per item: lebih ringkas,
+///  mudah dipindai, dan tidak terlihat seperti tumpukan kotak. Tetap satu
+///  widget agar jarak, ukuran ikon, serta tipografinya konsisten.
 class XyBarisMenu extends StatelessWidget {
   const XyBarisMenu({
     super.key,
@@ -803,35 +803,40 @@ class XyBarisMenu extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = XyTheme.of(context);
     final warna = ikonWarna ?? XyTheme.primary;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: XyCard(
-        padding: const EdgeInsets.all(15),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(XyRadius.sm),
         onTap: onTap ?? () => Navigator.push(context, xyRoute(tujuan!)),
-        child: Row(children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: warna.withOpacity(.11),
-              borderRadius: BorderRadius.circular(14),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(4, 12, 2, 12),
+          decoration: BoxDecoration(
+            border: Border(bottom: BorderSide(color: t.lineSoft)),
+          ),
+          child: Row(children: [
+            SizedBox(
+              width: 38,
+              height: 38,
+              child: Icon(ikon, size: 21, color: warna),
             ),
-            child: Icon(ikon, size: 20, color: warna),
-          ),
-          const SizedBox(width: 13),
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(judul, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
-              const SizedBox(height: 3),
-              Text(sub,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: XyTheme.of(context).muted, fontSize: 11.5)),
-            ]),
-          ),
-          Icon(Icons.chevron_right_rounded, color: XyTheme.of(context).muted),
-        ]),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(judul,
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w700, fontSize: 14)),
+                const SizedBox(height: 3),
+                Text(sub,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: t.muted, fontSize: 11.5)),
+              ]),
+            ),
+            Icon(Icons.chevron_right_rounded, color: t.muted, size: 21),
+          ]),
+        ),
       ),
     );
   }

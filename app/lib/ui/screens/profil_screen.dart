@@ -244,9 +244,17 @@ class _ProfilScreenState extends State<ProfilScreen> {
               const SectionHeader('Akun'),
               XyBarisMenu(
                 ikon: Icons.badge_outlined,
-                judul: 'Ubah Profil',
-                sub: 'Nama, username, WhatsApp, bio, dan banner',
-                onTap: () => Navigator.push(context, xyRoute(const pengaturan.UbahProfilScreen())),
+                judul: 'Identitas Profil',
+                sub: 'Nama, username, WhatsApp, bio, foto, dan tautan',
+                onTap: () => Navigator.push(context,
+                    xyRoute(const pengaturan.UbahProfilScreen())),
+              ),
+              XyBarisMenu(
+                ikon: Icons.auto_awesome_rounded,
+                judul: 'Kustomisasi Profil',
+                sub: 'Badge, bingkai, lencana, style nama, banner, dan tema',
+                onTap: () => Navigator.push(context,
+                    xyRoute(const pengaturan.KustomProfilScreen())),
               ),
               XyBarisMenu(
                 ikon: Icons.language_rounded,
@@ -360,24 +368,49 @@ class _ProfilScreenState extends State<ProfilScreen> {
                 sub: 'FAQ, tutorial, CS',
                 onTap: () => Navigator.push(context, xyRoute(const BantuanScreen())),
               ),
-              XyBarisMenu(ikon: Icons.delete_forever_outlined, judul: 'Hapus Akun', sub: 'Kelola penghapusan akun secara aman', onTap: () => Navigator.push(context, xyRoute(const HapusAkunScreen()))),
               const SizedBox(height: 18),
-              OutlinedButton.icon(
-                onPressed: () async {
-                  final yakin = await konfirmasi(
-                    context,
-                    judul: 'Keluar dari akun?',
-                    pesan: 'Kamu perlu masuk lagi untuk memakai aplikasi.',
-                    tombolYa: 'Keluar',
-                    ikon: Icons.logout_rounded,
-                    bahaya: true,
-                  );
-                  if (yakin && context.mounted) context.read<AppState>().logout();
-                },
-                icon: Icon(Icons.logout_rounded, size: 18, color: XyTheme.danger),
-                label: const Text('Keluar',
-                    style: TextStyle(color: XyTheme.danger, fontWeight: FontWeight.w700)),
-              ),
+              Row(children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 8)),
+                    onPressed: () => Navigator.push(
+                        context, xyRoute(const HapusAkunScreen())),
+                    icon: const Icon(Icons.delete_forever_outlined,
+                        size: 18, color: XyTheme.danger),
+                    label: const Text('Hapus Akun',
+                        style: TextStyle(
+                            color: XyTheme.danger,
+                            fontWeight: FontWeight.w700)),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 8)),
+                    onPressed: () async {
+                      final yakin = await konfirmasi(
+                        context,
+                        judul: 'Keluar dari akun?',
+                        pesan: 'Kamu perlu masuk lagi untuk memakai aplikasi.',
+                        tombolYa: 'Keluar',
+                        ikon: Icons.logout_rounded,
+                        bahaya: true,
+                      );
+                      if (yakin && context.mounted) {
+                        context.read<AppState>().logout();
+                      }
+                    },
+                    icon: const Icon(Icons.logout_rounded,
+                        size: 18, color: XyTheme.danger),
+                    label: const Text('Keluar',
+                        style: TextStyle(
+                            color: XyTheme.danger,
+                            fontWeight: FontWeight.w700)),
+                  ),
+                ),
+              ]),
             ]),
           ),
         ],

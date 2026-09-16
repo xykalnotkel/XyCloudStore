@@ -15,6 +15,7 @@ import '../../core/motion.dart';
 import '../../core/theme.dart';
 import '../../models/models.dart';
 import '../../providers/app_state.dart';
+import '../widgets/banner_profil.dart';
 import '../widgets/bingkai_profil.dart';
 import '../widgets/gaya_nama.dart';
 import '../widgets/common.dart';
@@ -48,9 +49,15 @@ class PengaturanScreen extends StatelessWidget {
           const _Judul('Akun'),
           XyBarisMenu(
             ikon: Icons.badge_outlined,
-            judul: 'Ubah Profil',
-            sub: 'Nama, nomor WhatsApp, dan foto',
+            judul: 'Identitas Profil',
+            sub: 'Nama, username, WhatsApp, bio, foto, dan tautan',
             tujuan: const UbahProfilScreen(),
+          ),
+          const XyBarisMenu(
+            ikon: Icons.auto_awesome_rounded,
+            judul: 'Kustomisasi Profil',
+            sub: 'Badge, bingkai, lencana, style nama, banner, dan tema',
+            tujuan: KustomProfilScreen(),
           ),
           XyBarisMenu(
             ikon: Icons.lock_outline_rounded,
@@ -100,9 +107,43 @@ class PengaturanScreen extends StatelessWidget {
             tujuan: const PembaruanScreen(),
           ),
           const _Judul('Sesi dan akun'),
-          XyBarisMenu(ikon: Icons.delete_forever_outlined, judul: 'Hapus Akun', sub: 'Konfirmasi identitas sebelum menghapus', tujuan: const HapusAkunScreen()),
-          ListTile(contentPadding: const EdgeInsets.symmetric(horizontal: 8), leading: Icon(Icons.logout_rounded, color: XyTheme.danger), title: Text('Keluar dari Akun'),
-            onTap: () async { if (await konfirmasi(context, judul:'Keluar dari akun?', pesan:'Data sesi di HP akan dibersihkan. Akunmu tidak dihapus.', tombolYa:'Keluar', bahaya:true) && context.mounted) { await context.read<AppState>().logout(); } }),
+          Row(children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 8)),
+                onPressed: () => Navigator.push(
+                    context, xyRoute(const HapusAkunScreen())),
+                icon: const Icon(Icons.delete_forever_outlined,
+                    size: 18, color: XyTheme.danger),
+                label: const Text('Hapus Akun',
+                    style: TextStyle(
+                        color: XyTheme.danger, fontWeight: FontWeight.w700)),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 8)),
+                onPressed: () async {
+                  final keluar = await konfirmasi(context,
+                      judul: 'Keluar dari akun?',
+                      pesan: 'Data sesi di HP akan dibersihkan. Akunmu tidak dihapus.',
+                      tombolYa: 'Keluar',
+                      bahaya: true);
+                  if (keluar && context.mounted) {
+                    await context.read<AppState>().logout();
+                  }
+                },
+                icon: const Icon(Icons.logout_rounded,
+                    size: 18, color: XyTheme.danger),
+                label: const Text('Keluar',
+                    style: TextStyle(
+                        color: XyTheme.danger, fontWeight: FontWeight.w700)),
+              ),
+            ),
+          ]),
           const _Judul('Legal dan kebijakan'),
           XyBarisMenu(
             ikon: Icons.description_outlined,
@@ -156,26 +197,256 @@ class _Judul extends StatelessWidget {
 
 
 // ============================================================
-//  Ubah profil
+//  Kustomisasi profil — setiap kategori membuka layar yang relevan
 // ============================================================
+class KustomProfilScreen extends StatelessWidget {
+  const KustomProfilScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final u = context.watch<AppState>().user;
+    if (u == null) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    return Scaffold(
+      appBar: AppBar(title: const Text('Kustomisasi Profil')),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 30),
+        children: [
+          BannerProfil(
+            tema: u.banner,
+            media: u.bannerMedia,
+            borderRadius: BorderRadius.circular(XyRadius.xl),
+            child: SizedBox(
+              height: 190,
+              child: Padding(
+                padding: const EdgeInsets.all(18),
+                child: Row(children: [
+                  SizedBox(
+                    width: 112,
+                    height: 112,
+                    child: Center(
+                      child: AvatarBingkai(
+                        bingkai: u.bingkai,
+                        size: 84,
+                        child: (u.foto ?? '').isNotEmpty
+                            ? Image.network(u.foto!, fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) =>
+                                    _InisialKustom(u.nama))
+                            : _InisialKustom(u.nama),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        GayaNama(
+                          u.nama,
+                          gaya: u.gayaNama,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 20,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        const SizedBox(height: 5),
+                        Text('@${u.username ?? 'username'}',
+                            style: TextStyle(
+                                color: Colors.white.withOpacity(.78),
+                                fontSize: 12)),
+                        const SizedBox(height: 10),
+                        Wrap(spacing: 6, runSpacing: 6, children: [
+                          _ChipKustom(u.tier.toUpperCase()),
+                          if (u.badge != null) _ChipKustom(u.badge!),
+                        ]),
+                      ],
+                    ),
+                  ),
+                ]),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            'Pratinjau langsung. Bingkai dan elemen animasi berada di depan foto.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: XyTheme.of(context).muted, fontSize: 11.5),
+          ),
+          const _Judul('Pilih kategori'),
+          XyBarisMenu(
+            ikon: Icons.workspace_premium_outlined,
+            judul: 'Badge',
+            sub: u.badge == null
+                ? 'Belum ada badge khusus'
+                : 'Aktif: ${u.badge}',
+            tujuan: const _StatusKustomScreen(jenis: _StatusKustomJenis.badge),
+          ),
+          XyBarisMenu(
+            ikon: Icons.filter_frames_rounded,
+            judul: 'Bingkai',
+            sub: 'Pilih bingkai statis, animasi, atau premium',
+            tujuan: const UbahProfilScreen(fokus: FokusProfil.bingkai),
+          ),
+          XyBarisMenu(
+            ikon: Icons.military_tech_outlined,
+            judul: 'Lencana',
+            sub: 'Lencana tier ${u.tier.toUpperCase()} dan benefit',
+            tujuan: const _StatusKustomScreen(jenis: _StatusKustomJenis.lencana),
+          ),
+          XyBarisMenu(
+            ikon: Icons.text_fields_rounded,
+            judul: 'Style Nama',
+            sub: 'Font, gradasi, neon, pelangi, ombak, dan ketik',
+            tujuan: const UbahProfilScreen(fokus: FokusProfil.gayaNama),
+          ),
+          XyBarisMenu(
+            ikon: Icons.panorama_outlined,
+            judul: 'Banner',
+            sub: 'Warna, GIF, atau video yang otomatis menjadi GIF',
+            tujuan: const UbahProfilScreen(fokus: FokusProfil.banner),
+          ),
+          const XyBarisMenu(
+            ikon: Icons.palette_outlined,
+            judul: 'Tema Aplikasi',
+            sub: 'Terang, gelap, atau mengikuti sistem',
+            tujuan: TemaScreen(),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _InisialKustom extends StatelessWidget {
+  const _InisialKustom(this.nama);
+  final String nama;
+
+  @override
+  Widget build(BuildContext context) => ColoredBox(
+        color: XyTheme.violet,
+        child: Center(
+          child: Text(
+            nama.isEmpty ? 'X' : nama[0].toUpperCase(),
+            style: const TextStyle(
+                color: Colors.white, fontSize: 31, fontWeight: FontWeight.w900),
+          ),
+        ),
+      );
+}
+
+class _ChipKustom extends StatelessWidget {
+  const _ChipKustom(this.teks);
+  final String teks;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: Colors.black.withOpacity(.28),
+          borderRadius: BorderRadius.circular(XyRadius.pill),
+          border: Border.all(color: Colors.white.withOpacity(.30)),
+        ),
+        child: Text(teks,
+            style: const TextStyle(
+                color: Colors.white,
+                fontSize: 9,
+                fontWeight: FontWeight.w800,
+                letterSpacing: .5)),
+      );
+}
+
+enum _StatusKustomJenis { badge, lencana }
+
+class _StatusKustomScreen extends StatelessWidget {
+  const _StatusKustomScreen({required this.jenis});
+  final _StatusKustomJenis jenis;
+
+  @override
+  Widget build(BuildContext context) {
+    final u = context.watch<AppState>().user;
+    final badge = jenis == _StatusKustomJenis.badge;
+    final nilai = badge ? (u?.badge ?? 'Belum punya badge') : (u?.tier ?? 'basic').toUpperCase();
+    return Scaffold(
+      appBar: AppBar(title: Text(badge ? 'Badge Profil' : 'Lencana Tier')),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(22, 34, 22, 30),
+        children: [
+          Center(
+            child: TweenAnimationBuilder<double>(
+              tween: Tween(begin: .86, end: 1),
+              duration: const Duration(milliseconds: 520),
+              curve: Curves.easeOutBack,
+              builder: (_, skala, child) => Transform.scale(scale: skala, child: child),
+              child: Container(
+                width: 104,
+                height: 104,
+                decoration: BoxDecoration(
+                  gradient: badge ? XyTheme.gradPrimary : XyTheme.gradGold,
+                  shape: BoxShape.circle,
+                  boxShadow: XyTheme.shadowMd,
+                ),
+                child: Icon(
+                  badge ? Icons.workspace_premium_rounded : Icons.military_tech_rounded,
+                  color: Colors.white,
+                  size: 48,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 22),
+          Text(nilai,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w900)),
+          const SizedBox(height: 9),
+          Text(
+            badge
+                ? 'Badge khusus diberikan oleh admin untuk kreator, staf, moderator, event, atau pencapaian tertentu. Badge aktif tampil di samping namamu dan tidak bisa dipalsukan.'
+                : 'Lencana mengikuti tier akun secara otomatis dari transaksi yang valid. Makin tinggi tier, makin banyak bingkai, style nama, dan benefit yang terbuka.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: XyTheme.of(context).muted, height: 1.55, fontSize: 13),
+          ),
+          if (!badge) ...[
+            const SizedBox(height: 24),
+            GradientButton(
+              label: 'Lihat Tier & Benefit',
+              icon: Icons.diamond_outlined,
+              onPressed: () => Navigator.push(context, xyRoute(const TierScreen())),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+// ============================================================
+//  Ubah profil — bisa dibuka langsung ke kategori tertentu
+// ============================================================
+enum FokusProfil { identitas, bingkai, gayaNama, banner }
+
 class UbahProfilScreen extends StatefulWidget {
-  const UbahProfilScreen({super.key});
+  const UbahProfilScreen({super.key, this.fokus = FokusProfil.identitas});
+
+  final FokusProfil fokus;
 
   @override
   State<UbahProfilScreen> createState() => _UbahProfilScreenState();
 }
 
 class _UbahProfilScreenState extends State<UbahProfilScreen> {
-  late final _nama = TextEditingController(text: context.read<AppState>().user?.nama ?? '');
-  late final _phone = TextEditingController(text: context.read<AppState>().user?.phone ?? '');
-  late final _bio = TextEditingController(text: context.read<AppState>().user?.bio ?? '');
-  // Batch L: slogan + bio link + gaya nama.
-  late final _slogan = TextEditingController(text: context.read<AppState>().user?.slogan ?? '');
-  late final _bioLink = TextEditingController(text: context.read<AppState>().user?.bioLink ?? '');
-  late String _gayaNama = context.read<AppState>().user?.gayaNama ?? 'normal';
-  late String _banner = context.read<AppState>().user?.banner ?? 'ungu';
-  late String? _bingkai = context.read<AppState>().user?.bingkai ?? 'polos';
-  late final _username = TextEditingController(text: context.read<AppState>().user?.username ?? '');
+  final _scrollProfil = ScrollController();
+  late final TextEditingController _nama;
+  late final TextEditingController _phone;
+  late final TextEditingController _bio;
+  late final TextEditingController _slogan;
+  late final TextEditingController _bioLink;
+  late final TextEditingController _username;
+  late String _gayaNama;
+  late String _banner;
+  late String? _bingkai;
   Timer? _cekTimer;
   String? _cekStatus; // null | 'cek' | 'ok' | 'galat'
   String _cekPesan = '';
@@ -190,7 +461,25 @@ class _UbahProfilScreenState extends State<UbahProfilScreen> {
   static final RegExp _formatUsername = RegExp(r'^[a-z0-9_.]{3,20}$');
 
   @override
+  void initState() {
+    super.initState();
+    // Semua controller dibuat saat context masih aktif. Editor kategori hanya
+    // membangun sebagian field, tetapi penyimpanan tetap memakai snapshot utuh.
+    final u = context.read<AppState>().user;
+    _nama = TextEditingController(text: u?.nama ?? '');
+    _phone = TextEditingController(text: u?.phone ?? '');
+    _bio = TextEditingController(text: u?.bio ?? '');
+    _slogan = TextEditingController(text: u?.slogan ?? '');
+    _bioLink = TextEditingController(text: u?.bioLink ?? '');
+    _username = TextEditingController(text: u?.username ?? '');
+    _gayaNama = u?.gayaNama ?? 'normal';
+    _banner = u?.banner ?? 'ungu';
+    _bingkai = u?.bingkai ?? 'polos';
+  }
+
+  @override
   void dispose() {
+    _scrollProfil.dispose();
     _nama.dispose();
     _phone.dispose();
     _bio.dispose();
@@ -316,7 +605,10 @@ class _UbahProfilScreenState extends State<UbahProfilScreen> {
     }
     final f = await GaleriPicker.pilihGambar(
       context,
-      bolehVideo: video,
+      jenis: video
+          ? const {JenisGaleri.video, JenisGaleri.gif}
+          : const {JenisGaleri.gif},
+      awal: video ? JenisGaleri.video : JenisGaleri.gif,
       judul: video ? 'Pilih Video / GIF' : 'Pilih GIF',
     );
     if (f == null || !mounted) return;
@@ -325,6 +617,7 @@ class _UbahProfilScreenState extends State<UbahProfilScreen> {
         ? f.uri.pathSegments.last.toLowerCase()
         : '';
     final bytes = await f.readAsBytes();
+    if (!mounted) return;
     final mb = bytes.length / (1024 * 1024);
 
     String mime;
@@ -428,6 +721,20 @@ class _UbahProfilScreenState extends State<UbahProfilScreen> {
     }
   }
 
+  String get _judulHalaman => switch (widget.fokus) {
+        FokusProfil.identitas => 'Identitas Profil',
+        FokusProfil.bingkai => 'Bingkai Profil',
+        FokusProfil.gayaNama => 'Style Nama',
+        FokusProfil.banner => 'Banner Profil',
+      };
+
+  String get _labelSimpan => switch (widget.fokus) {
+        FokusProfil.identitas => 'Simpan Identitas',
+        FokusProfil.bingkai => 'Pakai Bingkai',
+        FokusProfil.gayaNama => 'Pakai Style Nama',
+        FokusProfil.banner => 'Simpan Banner',
+      };
+
   @override
   Widget build(BuildContext context) {
     final u = context.watch<AppState>().user;
@@ -441,13 +748,16 @@ class _UbahProfilScreenState extends State<UbahProfilScreen> {
     final langganan = u != null && u.tier != 'basic';
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Ubah Profil')),
+      appBar: AppBar(title: Text(_judulHalaman)),
       body: ListView(
+        controller: _scrollProfil,
         padding: const EdgeInsets.fromLTRB(20, 14, 20, 30),
         children: [
-          // ---------- avatar + bingkai ----------
-          Center(
-            child: Stack(children: [
+          // ---------- avatar / pratinjau bingkai ----------
+          if (widget.fokus == FokusProfil.identitas ||
+              widget.fokus == FokusProfil.bingkai)
+            Center(
+              child: Stack(children: [
               AvatarBingkai(
                 bingkai: _bingkai,
                 size: 104,
@@ -466,11 +776,12 @@ class _UbahProfilScreenState extends State<UbahProfilScreen> {
                       : null,
                 ),
               ),
-              Positioned(
-                right: 0,
-                bottom: 0,
-                child: Pressable(
-                  onTap: proses ? null : _gantiFoto,
+              if (widget.fokus == FokusProfil.identitas)
+                Positioned(
+                  right: 0,
+                  bottom: 0,
+                  child: Pressable(
+                    onTap: proses ? null : _gantiFoto,
                   child: Container(
                     width: 34,
                     height: 34,
@@ -485,9 +796,12 @@ class _UbahProfilScreenState extends State<UbahProfilScreen> {
                   ),
                 ),
               ),
-            ]),
-          ),
-          const SizedBox(height: 16),
+              ]),
+            ),
+          if (widget.fokus == FokusProfil.identitas ||
+              widget.fokus == FokusProfil.bingkai)
+            const SizedBox(height: 16),
+          if (widget.fokus == FokusProfil.bingkai) ...[
           const XyLabel('Bingkai Profil'),
           PilihBingkai(
             nilai: _bingkai,
@@ -501,7 +815,9 @@ class _UbahProfilScreenState extends State<UbahProfilScreen> {
             style: TextStyle(color: t.muted, fontSize: 11.5, height: 1.5),
           ),
           const SizedBox(height: 18),
+          ],
 
+          if (widget.fokus == FokusProfil.identitas) ...[
           // ---------- nama ----------
           XyLabel(namaTerkunci
               ? 'Nama Tampilan (bisa diganti lagi ${_tanggalBoleh(u?.namaDiubahPada, 7)})'
@@ -627,7 +943,9 @@ class _UbahProfilScreenState extends State<UbahProfilScreen> {
             ),
           ),
           const SizedBox(height: 18),
+          ],
 
+          if (widget.fokus == FokusProfil.gayaNama) ...[
           // ---------- gaya nama (Batch L) ----------
           const XyLabel('Gaya Nama'),
           const SizedBox(height: 4),
@@ -704,7 +1022,9 @@ class _UbahProfilScreenState extends State<UbahProfilScreen> {
             ]),
           ),
           const SizedBox(height: 18),
+          ],
 
+          if (widget.fokus == FokusProfil.banner) ...[
           // ---------- banner ----------
           const XyLabel('Banner Profil'),
           if (u?.bannerMedia != null) ...[
@@ -937,6 +1257,9 @@ class _UbahProfilScreenState extends State<UbahProfilScreen> {
             ),
           ],
           const SizedBox(height: 10),
+          ],
+
+          if (widget.fokus == FokusProfil.identitas) ...[
           Text('Nomor WhatsApp dipakai admin untuk menghubungimu soal pesanan.',
               style: TextStyle(color: t.muted, fontSize: 12, height: 1.5)),
           if (u?.email != null) ...[
@@ -959,12 +1282,18 @@ class _UbahProfilScreenState extends State<UbahProfilScreen> {
             Text('Email tidak bisa diubah sendiri. Hubungi admin kalau perlu diganti.',
                 style: TextStyle(color: t.muted, fontSize: 11.5)),
           ],
+          ],
           if (pesan != null) ...[
             const SizedBox(height: 16),
             _KotakGalat(pesan!),
           ],
           const SizedBox(height: 24),
-          GradientButton(label: 'Simpan Perubahan', icon: Icons.check_rounded, loading: proses, onPressed: _simpan),
+          GradientButton(
+            label: _labelSimpan,
+            icon: Icons.check_rounded,
+            loading: proses,
+            onPressed: _simpan,
+          ),
         ],
       ),
     );

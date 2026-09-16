@@ -53,10 +53,7 @@ class GayaNama extends StatefulWidget {
 
 class _GayaNamaState extends State<GayaNama>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _anim = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 2800),
-  );
+  late final AnimationController _anim;
 
   bool get _hidup => const ['pelangi', 'ombak', 'ketik', 'emas']
       .contains(widget.gaya ?? 'normal');
@@ -64,6 +61,12 @@ class _GayaNamaState extends State<GayaNama>
   @override
   void initState() {
     super.initState();
+    // Selalu buat controller saat elemen masih aktif. Inisialisasi lazy di
+    // dispose bisa mencoba membaca TickerMode dari context yang sudah mati.
+    _anim = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2800),
+    );
     if (_hidup) _anim.repeat();
   }
 
