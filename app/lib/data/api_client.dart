@@ -35,6 +35,9 @@ class ApiClient {
   Map<String, String> get _headers => {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
+        // Payment UI v2 dapat menampilkan nomor VA, biaya, dan kedaluwarsa.
+        // Server membatasi APK lama ke hosted QRIS agar tetap kompatibel.
+        'X-Xy-Payment-Version': '2',
         ...DeviceIdentity.headers,
         if (_token != null) 'Authorization': 'Bearer $_token',
       };

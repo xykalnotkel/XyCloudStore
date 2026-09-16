@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { adminFetch } from "@/lib/api";
-import { KeySquare, Plus, Search, SlidersHorizontal, Trash2 } from "lucide-react";
+import { KeySquare, Plus, Search, ShieldAlert, SlidersHorizontal, Trash2 } from "lucide-react";
 import { Chip, EmptyBox, ErrBox, Header, jam, Load } from "@/components/ui/kit";
 import { konfirm } from "@/components/ui/dialog";
 
@@ -26,6 +26,9 @@ export default function SetelanPage() {
   async function simpan() {
     const k = kunci.trim();
     if (!/^[a-z0-9_.-]{1,64}$/.test(k)) { setErr("Nama kunci hanya huruf/angka/titik/garis bawah (a–z, 0–9, ., _, -)."); return; }
+    if (/(secret|token|password|passwd|credential|terenkripsi|encrypted|api[._-]?key|private[._-]?key|client[._-]?secret|admin[._-]?key|jwt[._-]?secret)/i.test(k)) {
+      setErr("Secret/API key tidak boleh disimpan di D1. Gunakan Cloudflare Worker Secret."); return;
+    }
     setBusy(true); setErr(""); setHasil("");
     try {
       await adminFetch("/api/admin/setelan", { method: "POST", body: { kunci: k, nilai } });
@@ -51,6 +54,10 @@ export default function SetelanPage() {
       <Header icon={SlidersHorizontal} title="Setelan Umum" sub="Penyimpanan kunci–nilai (key–value) di tabel setelan — diatur Worker & dashboard"
         right={<span className="text-xs px-3 py-1.5 rounded-full bg-[#F3F0FF] border border-[#E9E3F5] font-medium">{rows.length} kunci</span>} />
       {hasil && <div className="px-4 py-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/25 text-emerald-700 text-[12.5px] font-semibold">{hasil}</div>}
+      <div className="px-4 py-3 rounded-2xl bg-amber-500/10 border border-amber-500/25 text-amber-800 text-[12px] font-medium flex items-start gap-2">
+        <ShieldAlert size={16} className="shrink-0 mt-0.5" />
+        <span>Hanya konfigurasi non-rahasia. API key, token, password, dan client secret wajib disimpan dengan <code>wrangler secret put</code>; server menolak nama kunci sensitif.</span>
+      </div>
 
       <div className="xy-card rounded-[20px] p-4">
         <div className="flex items-center gap-2 mb-3"><KeySquare size={15} className="text-[#7C3AED]" /><span className="text-[12px] font-semibold text-[#1E1B2E]">Tambah / ubah setelan</span></div>
@@ -75,9 +82,9 @@ export default function SetelanPage() {
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2 flex-wrap">
                   <code className="text-[12px] font-mono font-semibold text-[#1E1B2E]">{r.kunci}</code>
-                  {String(r.nilai || "").length > 0 && <Chip tone="netral">{String(r.nilai).length} karakter</Chip>}
+                  {r.rahasia ? <Chip tone="bad">{r.kunci === "integrasi_giphy_terenkripsi" ? "terenkripsi — kelola di menu Stiker" : "rahasia lama — hapus/pindahkan"}</Chip> : String(r.nilai || "").length > 0 && <Chip tone="netral">{String(r.nilai).length} karakter</Chip>}
                 </div>
-                <div className="text-[12px] text-[#6B5A8A] mt-0.5 font-mono break-all">{r.nilai}</div>
+                <div className={`text-[12px] mt-0.5 font-mono break-all ${r.rahasia ? "text-rose-600 font-semibold" : "text-[#6B5A8A]"}`}>{r.nilai}</div>
                 <div className="text-[10.5px] text-[#7C738F] mt-1">diperbarui {jam(r.diperbarui)}</div>
               </div>
               <button onClick={() => hapus(r.kunci)} disabled={busy} className="shrink-0 p-2 rounded-lg bg-white border border-[#E9E3F5] hover:border-rose-300 disabled:opacity-50"><Trash2 size={13} className="text-rose-500" /></button>

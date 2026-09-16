@@ -50,7 +50,7 @@ function bersihkanUser(env, u) {
 import { kirimEmail } from './mail.js';
 import { kirimPush, siarkanPush } from './push.js';
 import { unggahGambar, unggahAudio, unggahVideoBanner, imporFotoSosial, samarkanGambar, samarkanKMedia, samarkanBannerMedia, layaniGambar, layaniMedia } from './upload.js';
-import { penyediaBayar, metodeTersedia, buatTagihan, bacaPemberitahuan, cekStatusPenyedia } from './bayar.js';
+import { penyediaBayar, metodeTersedia, infoKonfigurasiPembayaran, buatTagihan, bacaPemberitahuan, cekStatusPenyedia, batalkanTagihan } from './bayar.js';
 import { setelan, simpanSetelan, jalankanPemeliharaan, statistikLengkap, catatLog, pantauKesehatan } from './sistem.js';
 import { TIER, diskonTier, segarkanTier, cekVoucher, pakaiVoucher, pakaiVoucherStrict, buatCadangan } from './loyal.js';
 import { halamanLegal, isiLegal } from './legal.js';
@@ -69,16 +69,42 @@ function rateMem(key, max, windowSec) {
 // bersihkan map tiap 10 menit biar tidak bocor memori
 // cleanup moved to scheduled handler (global setInterval not allowed in Workers)
 
+const HEADER_CORS = 'Content-Type, Authorization, x-admin-key, x-xy-device, x-xy-device-kind, x-xy-device-model, x-xy-referral-ticket, x-xy-payment-version';
+
+function envUntukPermintaan(env, req) {
+  const salin = Object.create(env || null);
+  const asal = String(req.headers.get('Origin') || '').trim();
+  const daftar = String(env?.ALLOWED_ORIGINS || env?.ALLOW_ORIGIN || '')
+    .split(',').map((x) => x.trim()).filter(Boolean);
+  let cors = '';
+  if (asal) {
+    if (daftar.includes('*') || daftar.includes(asal)) cors = asal;
+    else {
+      try {
+        // Request same-origin ke salah satu custom domain Worker tetap diizinkan.
+        if (new URL(asal).host === new URL(req.url).host) cors = asal;
+      } catch (_) { /* origin rusak tidak diberi header CORS */ }
+    }
+  } else if (daftar.length && daftar[0] !== '*') {
+    cors = daftar[0];
+  }
+  Object.defineProperty(salin, '__CORS_ORIGIN', { value: cors, enumerable: false });
+  return salin;
+}
+
 const securityHeaders = (env) => ({
   'Content-Type': 'application/json',
-  'Access-Control-Allow-Origin': env?.ALLOW_ORIGIN || '*',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-admin-key, x-xy-device, x-xy-device-kind, x-xy-device-model, x-xy-referral-ticket',
+  ...(env?.__CORS_ORIGIN ? {
+    'Access-Control-Allow-Origin': env.__CORS_ORIGIN,
+    'Vary': 'Origin',
+  } : {}),
+  'Access-Control-Allow-Headers': HEADER_CORS,
   'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS',
   'X-Content-Type-Options': 'nosniff',
   'X-Frame-Options': 'SAMEORIGIN',
-  'Referrer-Policy': 'strict-origin-when-cross-origin',
+  'Referrer-Policy': 'no-referrer',
   'Permissions-Policy': 'geolocation=(), microphone=(), camera=()',
-  'Content-Security-Policy': "default-src 'self'; img-src 'self' https://res.cloudinary.com https://*.giphy.com https://media.giphy.com data:; script-src 'self' 'unsafe-inline' https://*.onesignal.com; connect-src 'self' https://api.xycloud.my.id wss://*.xycloud.my.id https://*.onesignal.com; frame-ancestors 'self'",
+  'Content-Security-Policy': "default-src 'self'; img-src 'self' https://res.cloudinary.com https://*.giphy.com https://media.giphy.com data:; script-src 'self' 'unsafe-inline' https://*.onesignal.com; connect-src 'self' https://api.xycloud.my.id wss://*.xycloud.my.id https://*.onesignal.com; object-src 'none'; base-uri 'self'; frame-ancestors 'self'",
   'Cache-Control': 'no-store',
 });
 
@@ -673,22 +699,36 @@ async function sign(payload, secret) {
   return `${body}.${b64u(sig)}`;
 }
 
-async function verify(token, secret) {
-  if (!token) return null;
-  const [body, sig] = token.split('.');
-  if (!body || !sig) return null;
+function bukaB64u(value) {
+  const s = String(value || '').replace(/-/g, '+').replace(/_/g, '/');
+  const padded = s + '='.repeat((4 - (s.length % 4)) % 4);
+  const bin = atob(padded);
+  return Uint8Array.from(bin, (c) => c.charCodeAt(0));
+}
 
-  let isi;
+async function verify(token, secret) {
+  if (!token || !secret || String(token).length > 8192) return null;
+  const bagian = String(token).split('.');
+  if (bagian.length !== 2) return null;
+  const [body, sig] = bagian;
+
+  let isi, tanda;
   try {
-    isi = JSON.parse(atob(body.replace(/-/g, '+').replace(/_/g, '/')));
+    isi = JSON.parse(new TextDecoder().decode(bukaB64u(body)));
+    tanda = bukaB64u(sig);
   } catch (_) {
     return null;
   }
 
-  const expected = await sign(isi, secret);
-  if (expected !== token) return null;
+  try {
+    const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret),
+      { name: 'HMAC', hash: 'SHA-256' }, false, ['verify']);
+    const sah = await crypto.subtle.verify('HMAC', key, tanda, new TextEncoder().encode(body));
+    if (!sah) return null;
+  } catch (_) {
+    return null;
+  }
 
-  // token lama tanpa exp tetap diterima, yang baru wajib belum kedaluwarsa
   if (isi.v!==2 || !isi.sub || !Number.isFinite(Number(isi.exp)) || Number(isi.exp)<=Date.now()) return null;
   return isi;
 }
@@ -925,32 +965,62 @@ async function klaimAtribusiReferral(env, ctx, req, userId, body = {}) {
   };
 }
 
-/** Cek admin key dari header x-admin-key atau query ?key= */
-function isAdmin(req, env) {
-  const url = new URL(req.url);
-  const k = req.headers.get('x-admin-key') || url.searchParams.get('key');
-  return !!env.ADMIN_KEY && k === env.ADMIN_KEY;
+/** Bandingkan secret tanpa keluar lebih cepat pada byte pertama yang berbeda. */
+async function rahasiaSama(a, b) {
+  if (!a || !b) return false;
+  const [ha, hb] = await Promise.all([
+    crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(a))),
+    crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(b))),
+  ]);
+  const x = new Uint8Array(ha), y = new Uint8Array(hb);
+  let beda = x.length ^ y.length;
+  for (let i = 0; i < Math.min(x.length, y.length); i++) beda |= x[i] ^ y[i];
+  return beda === 0;
+}
+
+function previewKunciAdmin(kunci) {
+  const s = String(kunci || '');
+  return s.startsWith('xya_') && s.length >= 12 ? `xya_••••${s.slice(-4)}` : '••••••••';
+}
+
+function kunciSetelanSensitif(kunci) {
+  return /(?:secret|token|password|passwd|credential|terenkripsi|encrypted|api[._-]?key|private[._-]?key|client[._-]?secret|admin[._-]?key|jwt[._-]?secret)/i
+    .test(String(kunci || ''));
+}
+
+async function markerKunciAdmin(env, kunci) {
+  return 'h1:' + await securityHash(env, 'admin-key', String(kunci));
 }
 
 /**
- * Kenali admin beserta perannya.
- * Kunci utama pada secret berperan sebagai pemilik, kunci tambahan
- * disimpan di tabel admin_kunci dengan peran cs atau moderator.
+ * Kenali admin dari header. Query string sengaja tidak diterima agar key tidak
+ * bocor ke URL, riwayat browser, referrer, atau access log. Admin tambahan
+ * disimpan sebagai HMAC; baris plaintext lama di-upgrade saat login berikutnya.
  */
 async function kenaliAdmin(req, env) {
-  const url = new URL(req.url);
-  const k = req.headers.get('x-admin-key') || url.searchParams.get('key');
-  if (!k) return null;
+  const k = String(req.headers.get('x-admin-key') || '');
+  if (!k || k.length > 256) return null;
 
-  if (env.ADMIN_KEY && k === env.ADMIN_KEY) {
+  if (env.ADMIN_KEY && await rahasiaSama(k, env.ADMIN_KEY)) {
     return { nama: 'Pemilik', peran: 'pemilik' };
   }
 
   try {
-    const baris = await env.DB.prepare('SELECT * FROM admin_kunci WHERE kunci = ? AND aktif = 1').bind(k).first();
+    const marker = await markerKunciAdmin(env, k);
+    const baris = await env.DB.prepare(
+      'SELECT id,nama,kunci,kunci_preview,peran,aktif,terakhir FROM admin_kunci WHERE (kunci=? OR kunci=?) AND aktif=1 LIMIT 1'
+    ).bind(marker, k).first();
     if (!baris) return null;
-    await env.DB.prepare('UPDATE admin_kunci SET terakhir = ? WHERE id = ?')
-      .bind(new Date().toISOString(), baris.id).run();
+
+    const sekarang = new Date().toISOString();
+    if (!String(baris.kunci).startsWith('h1:')) {
+      await env.DB.prepare(
+        'UPDATE admin_kunci SET kunci=?,kunci_preview=?,terakhir=? WHERE id=? AND kunci=?'
+      ).bind(marker, previewKunciAdmin(k), sekarang, baris.id, k).run();
+    } else if (!baris.terakhir || Date.now() - Date.parse(baris.terakhir) > 300_000) {
+      // Hindari satu write D1 pada setiap request dashboard.
+      await env.DB.prepare('UPDATE admin_kunci SET terakhir=? WHERE id=?').bind(sekarang, baris.id).run();
+    }
     return { id: baris.id, nama: baris.nama, peran: baris.peran };
   } catch (_) {
     return null;
@@ -959,8 +1029,10 @@ async function kenaliAdmin(req, env) {
 
 /** Hak akses tiap peran. Pemilik boleh semua. */
 const HAK_PERAN = {
-  cs: ['cs/', 'users', 'orders', 'topup', 'sesi', 'statistik', 'laporan', 'forum'],
-  moderator: ['forum', 'ulasan', 'laporan', 'konten/', 'users', 'statistik'],
+  // Akhiran slash sengaja eksplisit: CS dapat memproses order/top up, tetapi
+  // tidak otomatis mendapat endpoint sensitif users/saldo atau users/*.
+  cs: ['cs', 'cs/', 'ws-ticket', 'bayar/info', 'users', 'orders', 'orders/', 'topup', 'topup/', 'sesi', 'sesi/', 'statistik', 'laporan', 'forum'],
+  moderator: ['forum', 'forum/', 'ulasan', 'ulasan/', 'ulasan-pc', 'ulasan-pc/', 'laporan', 'laporan/', 'moderasi/', 'konten/', 'users', 'statistik'],
 };
 
 function bolehAkses(peran, jalur) {
@@ -996,70 +1068,220 @@ async function kirimBanner(env) {
 }
 
 // ============================================================
-//  PEMBAYARAN OTOMATIS — persetujuan top up satu pintu.
-//  Webhook penyedia, cron pemeriksa, tombol "cek sekarang" di
-//  aplikasi, dan "verifikasi otomatis" dashboard admin semuanya
-//  lewat fungsi ini. Klaim atomik (UPDATE bersyarat) menjamin
-//  saldo tidak pernah bertambah dua kali walau dipanggil bareng.
+//  PEMBAYARAN — kredit idempoten + rekonsiliasi server-to-server.
 // ============================================================
-async function setujuiTopupOtomatis(env, idTopup, catatan) {
-  const waktu = new Date().toISOString();
-  const klaim = await env.DB.prepare(
-    "UPDATE topup SET status='disetujui', catatan=?, diproses=? WHERE id=? AND status NOT IN ('disetujui','ditolak')"
-  ).bind(catatan, waktu, idTopup).run();
-  if (!klaim.meta?.changes) return false;
+function providerTopup(env, t) {
+  const p = String(t?.provider || '').toLowerCase();
+  if (['pakasir', 'tripay', 'midtrans'].includes(p)) return p;
+  if ((p === 'legacy' || !p) && Number(t?.kode_unik) === 0) return penyediaBayar(env);
+  return 'manual';
+}
 
-  const t = await env.DB.prepare('SELECT * FROM topup WHERE id = ?').bind(idTopup).first();
-  const nominal = Number(t?.nominal) || 0;
-  if (t && nominal > 0 && t.user_id) {
-    await env.DB.batch([
-      env.DB.prepare('UPDATE users SET saldo = saldo + ? WHERE id = ?').bind(nominal, t.user_id),
-      env.DB.prepare('INSERT INTO transaksi (id,user_id,judul,tipe,nominal) VALUES (?,?,?,?,?)')
-        .bind(uid('t_'), t.user_id, 'Top up saldo otomatis', 'topup', nominal),
-    ]);
+function topupGateway(env, t) {
+  return Number(t?.kode_unik) === 0 && providerTopup(env, t) !== 'manual';
+}
 
-    const u = await env.DB.prepare('SELECT saldo, nama, email FROM users WHERE id = ?')
-      .bind(t.user_id).first();
-    try {
-      await push(env, `user:${t.user_id}`, 'wallet.update', { saldo: u?.saldo ?? 0 });
-      await kirimPush(env, {
-        userId: t.user_id,
-        judul: 'Saldo berhasil ditambahkan',
-        pesan: `Pembayaran Rp${nominal.toLocaleString('id-ID')} sudah kami terima.`,
-        data: { tipe: 'wallet' },
-      });
-      if (u?.email) {
-        await kirimEmail(env, {
-          to: u.email, template: 'struk',
-          data: { nama: u.nama, kode: t.id.toUpperCase(), judul: 'Top up saldo', total: nominal, metode: t.metode },
-        });
-      }
-    } catch (_) { /* notifikasi gagal tidak boleh membatalkan top up */ }
+/** APK lama belum dapat menampilkan nomor VA saja; batasi ke hosted QRIS. */
+function metodeBayarUntukKlien(env, req) {
+  const semua = metodeTersedia(env);
+  const versi = Number(req.headers.get('x-xy-payment-version') || 1);
+  if (penyediaBayar(env) === 'pakasir' && versi < 2) {
+    return semua.filter((m) => m.kode === 'qris');
   }
-  return true;
+  return semua;
+}
+
+function topupUntukKlien(env, t) {
+  const otomatis = topupGateway(env, t);
+  const aman = { ...(t || {}) };
+  delete aman.checkout_url;
+  delete aman.payment_qr;
+  delete aman.payment_code;
+  const adaInstruksi = Boolean(t?.checkout_url || t?.payment_qr || t?.payment_code);
+  const masihDapatDibayar = ['menunggu', 'diperiksa'].includes(String(t?.status || ''));
+  return {
+    ...aman,
+    otomatis,
+    provider: providerTopup(env, t),
+    bayar: otomatis && masihDapatDibayar && adaInstruksi ? {
+      url: t.checkout_url || null,
+      qr: t.payment_qr || null,
+      kode: t.payment_code || null,
+      kedaluwarsa: t.provider_expires_at || null,
+      biaya: t.provider_fee ?? null,
+      total_final: !(providerTopup(env, t) === 'pakasir' && t.provider_fee == null),
+    } : {},
+  };
 }
 
 /**
- * Jaring pengaman cron: tanya penyedia secara aktif untuk top up gateway
- * (ditandai kode_unik=0) yang masih 'menunggu' 24 jam terakhir — supaya
- * pembayaran QRIS/DANA tetap terdeteksi walau webhook telat atau hilang.
+ * Klaim, tambah saldo, tulis buku besar, lalu ubah status dalam satu DB.batch.
+ * D1 mengeksekusi batch secara transaksional; topup_credit.topup_id yang unik
+ * membuat retry/webhook paralel mustahil menambah saldo dua kali.
  */
-async function pollPembayaran(env) {
-  const penyedia = penyediaBayar(env);
-  if (penyedia === 'manual') return;
-  const { results } = await env.DB.prepare(
-    "SELECT id FROM topup WHERE status='menunggu' AND kode_unik=0 AND datetime(dibuat) >= datetime('now','-1 day') LIMIT 12"
-  ).all();
-  for (const t of results || []) {
-    const cek = await cekStatusPenyedia(env, t.id);
-    if (cek.status === 'lunas') {
-      await setujuiTopupOtomatis(env, t.id, `Lunas — pemeriksaan otomatis via ${penyedia}`);
-    } else if (cek.status === 'gagal') {
-      await env.DB.prepare(
-        "UPDATE topup SET status='ditolak', catatan='Kedaluwarsa atau dibatalkan (cek penyedia)' WHERE id=? AND status='menunggu'"
-      ).bind(t.id).run();
+async function setujuiTopupOtomatis(env, idTopup, catatan, sumber = 'gateway') {
+  const waktu = new Date().toISOString();
+  const labelSumber = String(sumber || 'gateway').slice(0, 60);
+  const hasil = await env.DB.batch([
+    env.DB.prepare(
+      `INSERT INTO topup_credit(topup_id,user_id,nominal,sumber,created_at)
+       SELECT t.id,t.user_id,t.nominal,?,? FROM topup t
+        JOIN users u ON u.id=t.user_id
+       WHERE t.id=? AND t.status IN ('menunggu','diperiksa') AND t.nominal>0
+       ON CONFLICT(topup_id) DO NOTHING`
+    ).bind(labelSumber, waktu, idTopup),
+    env.DB.prepare(
+      `UPDATE users SET saldo=saldo+COALESCE((
+         SELECT nominal FROM topup_credit WHERE topup_id=? AND credited_at IS NULL
+       ),0)
+       WHERE id=(SELECT user_id FROM topup_credit WHERE topup_id=? AND credited_at IS NULL)
+         AND EXISTS(SELECT 1 FROM topup_credit WHERE topup_id=? AND credited_at IS NULL)`
+    ).bind(idTopup, idTopup, idTopup),
+    env.DB.prepare(
+      `INSERT INTO transaksi(id,user_id,judul,tipe,nominal)
+       SELECT 't_topup_'||topup_id,user_id,'Top up saldo','topup',nominal
+         FROM topup_credit WHERE topup_id=? AND credited_at IS NULL`
+    ).bind(idTopup),
+    env.DB.prepare(
+      'UPDATE topup_credit SET credited_at=? WHERE topup_id=? AND credited_at IS NULL'
+    ).bind(waktu, idTopup),
+    env.DB.prepare(
+      `UPDATE topup SET status='disetujui',catatan=?,diproses=?
+       WHERE id=? AND status IN ('menunggu','diperiksa')
+         AND EXISTS(SELECT 1 FROM topup_credit c WHERE c.topup_id=topup.id AND c.credited_at IS NOT NULL)`
+    ).bind(String(catatan || 'Disetujui').slice(0, 500), waktu, idTopup),
+  ]);
+
+  const baru = Number(hasil?.[1]?.meta?.changes || 0) === 1;
+  const t = await env.DB.prepare('SELECT * FROM topup WHERE id=?').bind(idTopup).first();
+  if (!baru || !t) return { baru: false, topup: t || null, saldo: null };
+
+  const nominal = Number(t.nominal) || 0;
+  const u = await env.DB.prepare('SELECT saldo,nama,email FROM users WHERE id=?').bind(t.user_id).first();
+  try {
+    await push(env, `user:${t.user_id}`, 'wallet.update', { saldo: u?.saldo ?? 0 });
+    await kirimPush(env, {
+      userId: t.user_id,
+      judul: 'Saldo berhasil ditambahkan',
+      pesan: `Pembayaran Rp${nominal.toLocaleString('id-ID')} sudah kami terima.`,
+      data: { tipe: 'wallet' },
+    });
+    if (u?.email) {
+      await kirimEmail(env, {
+        to: u.email,
+        template: 'struk',
+        data: { nama: u.nama, kode: t.id.toUpperCase(), judul: 'Top up saldo', total: nominal, metode: t.provider_method || t.metode },
+      });
+    }
+  } catch (_) { /* notifikasi gagal tidak boleh membatalkan transaksi */ }
+  return { baru: true, topup: t, saldo: u?.saldo ?? null };
+}
+
+async function simpanHasilCekPembayaran(env, t, cek) {
+  const waktu = new Date().toISOString();
+  await env.DB.prepare(
+    `UPDATE topup SET provider_status=?,provider_method=COALESCE(?,provider_method),
+      provider_amount=COALESCE(?,provider_amount),provider_fee=COALESCE(?,provider_fee),
+      provider_expires_at=COALESCE(?,provider_expires_at),provider_checked_at=?
+     WHERE id=?`
+  ).bind(
+    String(cek.status_asli || cek.status || 'tidak_diketahui').slice(0, 40),
+    cek.metode ? String(cek.metode).slice(0, 64) : null,
+    Number.isSafeInteger(Number(cek.total)) && Number(cek.total) > 0 ? Number(cek.total) : null,
+    Number.isFinite(Number(cek.biaya)) && Number(cek.biaya) >= 0 ? Number(cek.biaya) : null,
+    cek.kedaluwarsa ? String(cek.kedaluwarsa).slice(0, 80) : null,
+    waktu,
+    t.id,
+  ).run();
+}
+
+/** Tanya provider, simpan metadata, dan kredit hanya bila order+nominal cocok. */
+async function periksaDanSinkronTopup(env, input, sumber, { intervalDetik = 0, tolakJikaGagal = false, periksaFinal = false } = {}) {
+  const t = typeof input === 'string'
+    ? await env.DB.prepare('SELECT * FROM topup WHERE id=?').bind(input).first()
+    : input;
+  if (!t) return { ok: false, status: 'tidak_ditemukan', alasan: 'Top up tidak ditemukan.' };
+  if (!['menunggu', 'diperiksa'].includes(String(t.status)) && !periksaFinal) {
+    return { ok: true, status: t.status, topup: t, sudah_final: true };
+  }
+  if (!topupGateway(env, t)) {
+    return { ok: false, status: 'manual', topup: t, alasan: 'Top up bukan transaksi gateway.' };
+  }
+
+  if (intervalDetik > 0) {
+    const kunci = await env.DB.prepare(
+      `UPDATE topup SET provider_checked_at=? WHERE id=? AND status IN ('menunggu','diperiksa')
+       AND (provider_checked_at IS NULL OR datetime(provider_checked_at)<=datetime('now',?))`
+    ).bind(new Date().toISOString(), t.id, `-${Math.max(1, intervalDetik)} seconds`).run();
+    if (!kunci.meta?.changes) {
+      const kini = await env.DB.prepare('SELECT * FROM topup WHERE id=?').bind(t.id).first();
+      return { ok: true, status: kini?.status || t.status, topup: kini || t, dibatasi: true };
     }
   }
+
+  const cek = await cekStatusPenyedia(env, t);
+  await simpanHasilCekPembayaran(env, t, cek);
+  if (!cek.cocok) {
+    await auditSecurity(env, 'payment_mismatch', t.id,
+      `${providerTopup(env, t)}:${String(cek.alasan || 'detail tidak cocok').slice(0, 100)}`, '/bayar/webhook');
+    const kini = await env.DB.prepare('SELECT * FROM topup WHERE id=?').bind(t.id).first();
+    return { ok: false, status: 'tidak_diketahui', topup: kini || t, cek, alasan: cek.alasan || 'Detail provider tidak cocok.' };
+  }
+
+  let kredit = null;
+  if (cek.status === 'lunas') {
+    kredit = await setujuiTopupOtomatis(
+      env, t.id, `Lunas — ${String(sumber || 'verifikasi')} via ${providerTopup(env, t)}`,
+      `${providerTopup(env, t)}:${String(sumber || 'verifikasi')}`,
+    );
+  } else if (cek.status === 'gagal' && tolakJikaGagal) {
+    await env.DB.prepare(
+      `UPDATE topup SET status='ditolak',catatan='Kedaluwarsa atau dibatalkan (terverifikasi provider)',diproses=?
+       WHERE id=? AND status IN ('menunggu','diperiksa')
+         AND NOT EXISTS(SELECT 1 FROM topup_credit WHERE topup_id=?)`
+    ).bind(new Date().toISOString(), t.id, t.id).run();
+  }
+  const kini = await env.DB.prepare('SELECT * FROM topup WHERE id=?').bind(t.id).first();
+  return { ok: true, status: kini?.status || t.status, topup: kini || t, cek, kredit };
+}
+
+async function catatWebhookPembayaran(env, { provider, topupId, eventStatus, amount, verified, outcome, ip }) {
+  try {
+    const sourceHash = ip ? (await securityHash(env, 'payment-webhook-ip', ip)).slice(0, 24) : null;
+    await env.DB.prepare(
+      `INSERT INTO payment_webhook_event(id,provider,topup_id,event_status,amount,verified,outcome,source_hash)
+       VALUES (?,?,?,?,?,?,?,?)`
+    ).bind(
+      uid('pwe_'), String(provider || 'unknown').slice(0, 24), topupId || null,
+      String(eventStatus || '').slice(0, 40) || null,
+      Number.isSafeInteger(Number(amount)) ? Number(amount) : null,
+      verified ? 1 : 0, String(outcome || '').slice(0, 160), sourceHash,
+    ).run();
+  } catch (_) { /* audit webhook tidak boleh mematikan endpoint */ }
+}
+
+async function rekonsiliasiPembayaran(env, batas = 20, sumber = 'rekonsiliasi') {
+  const { results } = await env.DB.prepare(
+    `SELECT * FROM topup WHERE status IN ('menunggu','diperiksa') AND kode_unik=0
+      AND datetime(dibuat)>=datetime('now','-2 days') ORDER BY dibuat LIMIT ?`
+  ).bind(Math.max(1, Math.min(50, Number(batas) || 20))).all();
+  const ringkas = { diperiksa: 0, disetujui: 0, ditolak: 0, menunggu: 0, galat: 0 };
+  for (const t of results || []) {
+    try {
+      const r = await periksaDanSinkronTopup(env, t, sumber, { tolakJikaGagal: true });
+      ringkas.diperiksa += 1;
+      if (r.status === 'disetujui') ringkas.disetujui += 1;
+      else if (r.status === 'ditolak') ringkas.ditolak += 1;
+      else ringkas.menunggu += 1;
+    } catch (_) { ringkas.galat += 1; }
+  }
+  return ringkas;
+}
+
+/** Jaring pengaman per jam bila webhook hilang. */
+async function pollPembayaran(env) {
+  if (penyediaBayar(env) === 'manual') return;
+  await rekonsiliasiPembayaran(env, 12, 'cron');
 }
 
 // ============================================================
@@ -1092,6 +1314,7 @@ export default {
       env.DB.prepare("UPDATE referral_attribution SET status='kedaluwarsa' WHERE claimed_by IS NULL AND status NOT IN ('ditolak','kedaluwarsa') AND datetime(expires_at)<datetime('now')"),
       env.DB.prepare("DELETE FROM referral_attribution WHERE claimed_by IS NULL AND datetime(expires_at)<datetime('now','-30 days')"),
       env.DB.prepare("DELETE FROM social_deletion_request WHERE status='selesai' AND datetime(completed_at)<datetime('now','-180 days')"),
+      env.DB.prepare("DELETE FROM payment_webhook_event WHERE datetime(received_at)<datetime('now','-90 days')"),
     ]).catch(() => {}));
     // cadangan otomatis sekali sehari pada jam 19 UTC (dini hari WIB)
     if (new Date().getUTCHours() === 19) {
@@ -1103,6 +1326,7 @@ export default {
   },
 
   async fetch(req, env, ctx) {
+    env = envUntukPermintaan(env, req);
     const url = new URL(req.url);
     const path = url.pathname;
 
@@ -1110,11 +1334,8 @@ export default {
       return new Response(null, {
         status: 204,
         headers: {
-          'Access-Control-Allow-Origin': env?.ALLOW_ORIGIN || '*',
-          'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-admin-key, x-xy-device, x-xy-device-kind, x-xy-device-model, x-xy-referral-ticket',
-          'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS',
+          ...securityHeaders(env),
           'Access-Control-Max-Age': '86400',
-          'Cache-Control': 'no-store',
         },
       });
     }
@@ -1128,11 +1349,17 @@ export default {
     // atau mode pemeliharaan sedang menyala.
     if (path === '/health') return json({ ok: true, at: new Date().toISOString() }, 200, env);
 
-    // Private rooms require a valid user token or an authorized admin key.
+    // Private rooms require a user token or a short-lived admin WebSocket ticket.
+    // ADMIN_KEY tidak pernah diterima lewat query string.
     if (path.startsWith('/ws/')) {
       const room = decodeURIComponent(path.slice(4));
       if (!['forum','katalog'].includes(room)) {
-        const admin = await kenaliAdmin(req, env);
+        let admin = null;
+        const wsTicket = await verify(url.searchParams.get('ticket') || '', env.JWT_SECRET);
+        if (wsTicket?.typ === 'admin-ws' && wsTicket.room === room
+            && ['pemilik','cs'].includes(wsTicket.peran)) {
+          admin = { nama: wsTicket.nama || 'Admin', peran: wsTicket.peran };
+        }
         const wsHeaders=new Headers(req.headers);wsHeaders.set('Authorization','Bearer '+(url.searchParams.get('token')||''));
         const user = await auth(new Request(req.url,{headers:wsHeaders}),env);
         const exists = user && await env.DB.prepare('SELECT id FROM users WHERE id=?').bind(user.sub).first();
@@ -1339,12 +1566,27 @@ footer{position:fixed;left:0;right:0;bottom:0;z-index:2;background:rgba(10,5,28,
               'Cache-Control': 'no-store, max-age=0, must-revalidate',
               'CDN-Cache-Control': 'no-store',
               'X-Content-Type-Options': 'nosniff',
-              'Access-Control-Allow-Origin': '*',
+              'X-Frame-Options': 'DENY',
+              'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
+              'Referrer-Policy': 'no-referrer',
+              'Permissions-Policy': 'geolocation=(), microphone=(), camera=(), payment=(), usb=()',
+              'Cross-Origin-Opener-Policy': 'same-origin',
+              'Cross-Origin-Resource-Policy': 'same-origin',
+              'Content-Security-Policy': "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://api.xycloud.my.id https://res.cloudinary.com https://*.giphy.com https://media.giphy.com; font-src 'self' data:; connect-src 'self' https://api.xycloud.my.id wss://api.xycloud.my.id; manifest-src 'self'; worker-src 'self' blob:; upgrade-insecure-requests",
             },
           });
         } catch (e) {
           return new Response(ADMIN_HTML, {
-            headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
+            headers: {
+              'Content-Type': 'text/html; charset=utf-8',
+              'Cache-Control': 'no-store',
+              'X-Content-Type-Options': 'nosniff',
+              'X-Frame-Options': 'DENY',
+              'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
+              'Referrer-Policy': 'no-referrer',
+              'Permissions-Policy': 'geolocation=(), microphone=(), camera=(), payment=(), usb=()',
+              'Content-Security-Policy': "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' https://api.xycloud.my.id https://res.cloudinary.com data: blob:; font-src 'self' https://fonts.gstatic.com data:; connect-src 'self' https://api.xycloud.my.id",
+            },
           });
         }
       }
@@ -1358,10 +1600,13 @@ footer{position:fixed;left:0;right:0;bottom:0;z-index:2;background:rgba(10,5,28,
             'Content-Type': 'text/html; charset=utf-8',
             'Cache-Control': 'no-store',
             'X-Content-Type-Options': 'nosniff',
-            'X-Frame-Options': 'SAMEORIGIN',
-            'Content-Security-Policy': "default-src 'self' https://api.xycloud.my.id https://res.cloudinary.com https://*.giphy.com data: blob:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' https://res.cloudinary.com https://*.giphy.com data: blob:; connect-src 'self' https://api.xycloud.my.id wss://*.xycloud.my.id; frame-ancestors 'self'",
-            'Referrer-Policy': 'strict-origin-when-cross-origin',
-            'Permissions-Policy': 'geolocation=(), microphone=(), camera=()',
+            'X-Frame-Options': 'DENY',
+            'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
+            'Cross-Origin-Opener-Policy': 'same-origin',
+            'Cross-Origin-Resource-Policy': 'same-origin',
+            'Content-Security-Policy': "default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' https://api.xycloud.my.id https://res.cloudinary.com https://*.giphy.com data: blob:; connect-src 'self' https://api.xycloud.my.id wss://*.xycloud.my.id; frame-ancestors 'none'; form-action 'self'",
+            'Referrer-Policy': 'no-referrer',
+            'Permissions-Policy': 'geolocation=(), microphone=(), camera=(), payment=(), usb=()',
           },
         });
       }
@@ -1371,9 +1616,13 @@ footer{position:fixed;left:0;right:0;bottom:0;z-index:2;background:rgba(10,5,28,
           'Content-Type': 'text/html; charset=utf-8',
           'Cache-Control': 'no-store',
           'X-Content-Type-Options': 'nosniff',
-          'X-Frame-Options': 'SAMEORIGIN',
-          'Content-Security-Policy': "default-src 'self' https://api.xycloud.my.id https://res.cloudinary.com https://*.giphy.com data: blob: https://fonts.googleapis.com https://fonts.gstatic.com; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' https://res.cloudinary.com https://*.giphy.com data: blob: /brand/; font-src 'self' https://fonts.gstatic.com data:; connect-src 'self' https://api.xycloud.my.id wss://*.xycloud.my.id; frame-ancestors 'self'",
-          'Referrer-Policy': 'strict-origin-when-cross-origin',
+          'X-Frame-Options': 'DENY',
+          'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
+          'Cross-Origin-Opener-Policy': 'same-origin',
+          'Cross-Origin-Resource-Policy': 'same-origin',
+          'Content-Security-Policy': "default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' https://api.xycloud.my.id https://res.cloudinary.com https://*.giphy.com data: blob:; font-src 'self' https://fonts.gstatic.com data:; connect-src 'self' https://api.xycloud.my.id wss://*.xycloud.my.id; frame-ancestors 'none'; form-action 'self'",
+          'Referrer-Policy': 'no-referrer',
+          'Permissions-Policy': 'geolocation=(), microphone=(), camera=(), payment=(), usb=()',
         },
       });
     }
@@ -1384,6 +1633,14 @@ footer{position:fixed;left:0;right:0;bottom:0;z-index:2;background:rgba(10,5,28,
         headers: {
           'Content-Type': 'text/html; charset=utf-8',
           'Cache-Control': 'no-store',
+          'X-Content-Type-Options': 'nosniff',
+          'X-Frame-Options': 'DENY',
+          'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
+          'Cross-Origin-Opener-Policy': 'same-origin',
+          'Cross-Origin-Resource-Policy': 'same-origin',
+          'Content-Security-Policy': "default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' https://api.xycloud.my.id https://res.cloudinary.com https://*.giphy.com data: blob:; connect-src 'self' https://api.xycloud.my.id wss://*.xycloud.my.id; frame-ancestors 'none'; form-action 'self'",
+          'Referrer-Policy': 'no-referrer',
+          'Permissions-Policy': 'geolocation=(), microphone=(), camera=(), payment=(), usb=()',
         },
       });
     }
@@ -1540,23 +1797,79 @@ ${halaman.map(([u, p2, f]) => `  <url>
       });
     }
 
-    // pemberitahuan dari penyedia pembayaran
+    // Pemberitahuan penyedia pembayaran. Semua provider — terutama Pakasir
+    // yang webhook-nya tidak bertanda tangan — diverifikasi ulang lewat API
+    // detail sebelum status lokal/saldo boleh berubah.
     if (path.startsWith('/bayar/webhook/')) {
-      const provider = path.split('/')[3];
-      const teks = await req.text();
-      const hasil = await bacaPemberitahuan(env, provider, req, teks);
-      if (!hasil.sah) return new Response('signature tidak sah', { status: 401 });
+      try {
+      const provider = String(path.split('/')[3] || '').toLowerCase();
+      const ipWebhook = req.headers.get('CF-Connecting-IP') || 'tanpa-ip';
+      if (req.method !== 'POST') return err('Method not allowed', 405, env);
+      if (!['pakasir', 'tripay', 'midtrans'].includes(provider)) return err('Provider tidak dikenal', 404, env);
+      if (!(await bolehLanjut(env, `webhook:${provider}:${ipWebhook}`, 120, 60))) {
+        return err('Terlalu banyak webhook', 429, env);
+      }
+      const panjang = Number(req.headers.get('content-length') || 0);
+      if (panjang > 65_536) return err('Payload terlalu besar', 413, env);
 
-      if (hasil.status === 'lunas') {
-        // Klaim atomik + penambahan saldo + notifikasi: satu pintu di
-        // setujuiTopupOtomatis (dipakai juga oleh cron dan verifikasi admin).
-        await setujuiTopupOtomatis(env, hasil.id, `Lunas otomatis lewat ${provider}`);
-      } else if (hasil.status === 'gagal') {
-        await env.DB.prepare("UPDATE topup SET status='ditolak', catatan='Pembayaran kedaluwarsa atau dibatalkan' WHERE id = ? AND status != 'disetujui'")
-          .bind(hasil.id).run();
+      let teks = '';
+      try {
+        const raw = await req.arrayBuffer();
+        if (raw.byteLength > 65_536) return err('Payload terlalu besar', 413, env);
+        teks = new TextDecoder().decode(raw);
+      } catch (_) {
+        return err('Payload tidak dapat dibaca', 400, env);
       }
 
-      return new Response('OK', { status: 200 });
+      const hasil = await bacaPemberitahuan(env, provider, req, teks);
+      if (!hasil.sah) {
+        await catatWebhookPembayaran(env, {
+          provider, topupId: hasil.id || null, eventStatus: hasil.status,
+          amount: hasil.nominal, verified: false, outcome: hasil.alasan || 'payload ditolak', ip: ipWebhook,
+        });
+        return err('Webhook tidak sah', 401, env);
+      }
+
+      const t = await env.DB.prepare('SELECT * FROM topup WHERE id=?').bind(hasil.id).first();
+      const providerLokal = providerTopup(env, t);
+      const nominalCocok = Number(hasil.nominal) === Number(t?.nominal);
+      if (!t || providerLokal !== provider || !nominalCocok || Number(t.kode_unik) !== 0) {
+        await catatWebhookPembayaran(env, {
+          provider, topupId: hasil.id, eventStatus: hasil.status, amount: hasil.nominal,
+          verified: false, outcome: !t ? 'order lokal tidak ditemukan' : 'provider/nominal lokal tidak cocok', ip: ipWebhook,
+        });
+        await auditSecurity(env, 'payment_webhook_denied', hasil.id || provider,
+          !t ? 'order lokal tidak ditemukan' : 'provider/nominal tidak cocok', path);
+        return err('Transaksi lokal tidak cocok', 403, env);
+      }
+
+      await env.DB.prepare('UPDATE topup SET webhook_count=webhook_count+1 WHERE id=?').bind(t.id).run();
+      const sinkron = await periksaDanSinkronTopup(env, t, 'webhook', { tolakJikaGagal: true, periksaFinal: true });
+      const terverifikasi = sinkron.cek?.cocok === true && sinkron.cek?.ditemukan === true;
+      if (t.status === 'ditolak' && sinkron.cek?.status === 'lunas' && sinkron.cek?.cocok) {
+        await auditSecurity(env, 'payment_after_rejection', t.id,
+          'Provider mengonfirmasi lunas setelah top up lokal ditolak; perlu rekonsiliasi pemilik.', path);
+      }
+      await catatWebhookPembayaran(env, {
+        provider, topupId: t.id, eventStatus: hasil.status, amount: hasil.nominal,
+        verified: terverifikasi,
+        outcome: t.status === 'ditolak' && sinkron.cek?.status === 'lunas'
+          ? 'lunas setelah penolakan; perlu rekonsiliasi'
+          : sinkron.status === 'disetujui' ? 'lunas dan dikreditkan'
+            : sinkron.status === 'ditolak' ? 'gagal terverifikasi'
+              : sinkron.alasan || `diterima; status lokal ${sinkron.status}`,
+        ip: ipWebhook,
+      });
+      // 200 menghentikan retry provider. Polling aplikasi + cron tetap menjadi
+      // jaring pengaman bila status detail provider belum konsisten saat webhook.
+      return json({ ok: true, status: sinkron.status }, 200, env);
+      } catch (e) {
+        // Respons non-2xx meminta provider mencoba lagi; detail internal maupun
+        // kredensial tidak pernah dipantulkan ke pengirim webhook.
+        ctx.waitUntil(catatLog(env, 'pembayaran',
+          `Webhook gagal diproses: ${String(e?.message || 'galat internal').slice(0, 120)}`).catch(() => {}));
+        return err('Webhook sementara tidak dapat diproses', 503, env);
+      }
     }
 
     if (!path.startsWith('/api/')) return err('Not found', 404, env);
@@ -1832,7 +2145,8 @@ ${halaman.map(([u, p2, f]) => `  <url>
           pembayaran: {
             otomatis: penyediaBayar(env) !== 'manual',
             penyedia: penyediaBayar(env),
-            metode: metodeTersedia(env),
+            versi: 2,
+            metode: metodeBayarUntukKlien(env, req),
           },
           tier: TIER,
           versiMinimal: await setelan(env, 'versi_minimal', ''),
@@ -2229,12 +2543,17 @@ async function statistikPublik(env) {
 
       // ================= ADMIN =================
       if (p.startsWith('admin/')) {
-        if (!(await bolehLanjut(env, `admin:${ip}`, 240, 60))) {
+        const admin = await kenaliAdmin(req, env);
+        if (!admin) {
+          if (!(await bolehLanjut(env, `admin-auth-gagal:${ip}`, 12, 900))) {
+            return err('Terlalu banyak percobaan akses admin. Coba lagi nanti.', 429, env);
+          }
+          return err('Forbidden', 403, env);
+        }
+        const adminRateId = admin.id || 'pemilik';
+        if (!(await bolehLanjut(env, `admin:${adminRateId}:${ip}`, 300, 60))) {
           return err('Terlalu banyak permintaan admin.', 429, env);
         }
-
-        const admin = await kenaliAdmin(req, env);
-        if (!admin) return err('Forbidden', 403, env);
 
         const jalurAdmin = p.slice(6);
         if (!bolehAkses(admin.peran, jalurAdmin)) {
@@ -2244,6 +2563,23 @@ async function statistikPublik(env) {
           ctx.waitUntil(catatAdmin(env, admin, `${req.method} ${jalurAdmin}`, null));
         }
         const a = jalurAdmin;
+
+        if (a === 'ws-ticket' && req.method === 'POST') {
+          if (!['pemilik', 'cs'].includes(admin.peran)) return err('Akses realtime ditolak', 403, env);
+          const b = await req.json().catch(() => ({}));
+          const roomTiket = String(b.room || 'cs:inbox');
+          if (roomTiket !== 'cs:inbox') return err('Room admin tidak diizinkan', 403, env);
+          const token = await sign({
+            v: 2,
+            sub: 'admin-ws',
+            typ: 'admin-ws',
+            room: roomTiket,
+            nama: String(admin.nama || 'Admin').slice(0, 80),
+            peran: admin.peran,
+            exp: Date.now() + 60_000,
+          }, env.JWT_SECRET);
+          return json({ ticket: token, room: roomTiket, expires_in: 60 }, 201, env);
+        }
 
         if(a==='security'||a.startsWith('security/')||a==='devices'||a.startsWith('devices/')||a==='audit'||/^users\/[^/]+\/(trash|restore|permanent)$/.test(a)){
           const result=await adminSecurity(env,admin,a,req);
@@ -2261,7 +2597,7 @@ async function statistikPublik(env) {
             q('SELECT COUNT(*) c FROM users'),
             q('SELECT COUNT(*) c FROM orders'),
             q("SELECT COUNT(*) c FROM orders WHERE status IN ('aktif','provisioning','dibayar','pending')"),
-            q("SELECT COALESCE(SUM(ABS(nominal)),0) c FROM transaksi WHERE nominal < 0"),
+            q("SELECT COALESCE(SUM(ABS(nominal)),0) c FROM transaksi WHERE nominal<0 AND tipe NOT IN ('transfer_keluar','transfer_masuk','penyesuaian','refund')"),
             q('SELECT COUNT(*) c FROM akun_produk'),
             q('SELECT COUNT(*) c FROM cs_messages'),
           ]);
@@ -2553,15 +2889,33 @@ async function statistikPublik(env) {
         }
 
         if (a === 'users/saldo' && req.method === 'POST') {
-          const { user_id, nominal, catatan } = await req.json();
-          await env.DB.batch([
-            env.DB.prepare('UPDATE users SET saldo = saldo + ? WHERE id = ?').bind(nominal, user_id),
-            env.DB.prepare('INSERT INTO transaksi (id,user_id,judul,tipe,nominal) VALUES (?,?,?,?,?)')
-              .bind(uid('t_'), user_id, catatan || 'Penyesuaian saldo oleh admin', nominal > 0 ? 'topup' : 'sewa', nominal),
+          if (admin.peran !== 'pemilik') return err('Hanya pemilik', 403, env);
+          const b = await req.json().catch(() => ({}));
+          const userId = String(b.user_id || '');
+          const nominal = Number(b.nominal);
+          const catatan = String(b.catatan || '').trim().slice(0, 300);
+          if (!Number.isSafeInteger(nominal) || nominal === 0 || Math.abs(nominal) > 10_000_000) {
+            return err('Penyesuaian saldo harus bilangan bulat nonnol, maksimum Rp10.000.000.', 400, env);
+          }
+          if (catatan.length < 8) return err('Alasan penyesuaian minimal 8 karakter.', 400, env);
+          const ledgerId = uid('t_adj_');
+          const hasil = await env.DB.batch([
+            env.DB.prepare(
+              `INSERT INTO transaksi(id,user_id,judul,tipe,nominal)
+               SELECT ?,id,?,'penyesuaian',? FROM users
+                WHERE id=? AND deleted_at IS NULL AND saldo+?>=0`
+            ).bind(ledgerId, catatan, nominal, userId, nominal),
+            env.DB.prepare(
+              'UPDATE users SET saldo=saldo+? WHERE id=? AND deleted_at IS NULL AND saldo+?>=0'
+            ).bind(nominal, userId, nominal),
           ]);
-          const u = await env.DB.prepare('SELECT saldo FROM users WHERE id=?').bind(user_id).first();
-          ctx.waitUntil(push(env, `user:${user_id}`, 'wallet.update', { saldo: u.saldo }));
-          return json({ saldo: u.saldo }, 200, env);
+          if (Number(hasil?.[1]?.meta?.changes || 0) !== 1) {
+            return err('Pengguna tidak ditemukan atau saldo akan menjadi negatif.', 409, env);
+          }
+          const u = await env.DB.prepare('SELECT saldo FROM users WHERE id=?').bind(userId).first();
+          ctx.waitUntil(push(env, `user:${userId}`, 'wallet.update', { saldo: u?.saldo ?? 0 }));
+          await auditSecurity(env, 'balance_adjustment', userId, `${nominal}:${catatan}`, '/api/admin/users/saldo');
+          return json({ saldo: u?.saldo ?? 0 }, 200, env);
         }
 
         // ---- unggah gambar dari dashboard ----
@@ -2575,94 +2929,152 @@ async function statistikPublik(env) {
         if (a === 'topup' && req.method === 'GET') {
           const { results } = await env.DB.prepare(
             `SELECT t.*, u.nama, u.email, u.phone FROM topup t
-             JOIN users u ON u.id = t.user_id ORDER BY
+             LEFT JOIN users u ON u.id = t.user_id ORDER BY
              CASE t.status WHEN 'diperiksa' THEN 0 WHEN 'menunggu' THEN 1 ELSE 2 END, t.dibuat DESC LIMIT 200`
           ).all();
-          return json(results, 200, env);
+          return json((results || []).map((r) => {
+            const aman = { ...r };
+            delete aman.checkout_url;
+            delete aman.payment_qr;
+            delete aman.payment_code;
+            return aman;
+          }), 200, env);
         }
 
-        // ---- info penyedia pembayaran (QRIS/DANA otomatis sudah siap?) ----
+        // ---- diagnostik penyedia pembayaran, tanpa membocorkan secret ----
         if (a === 'bayar/info' && req.method === 'GET') {
           const py = penyediaBayar(env);
-          return json({ penyedia: py, otomatis: py !== 'manual', metode: metodeTersedia(env) }, 200, env);
+          const q = (sql) => env.DB.prepare(sql).first();
+          const [pending, webhook24, webhookTolak24, kredit24, terakhir] = await Promise.all([
+            q("SELECT COUNT(*) n FROM topup WHERE status IN ('menunggu','diperiksa') AND kode_unik=0"),
+            q("SELECT COUNT(*) n FROM payment_webhook_event WHERE datetime(received_at)>=datetime('now','-1 day')"),
+            q("SELECT COUNT(*) n FROM payment_webhook_event WHERE verified=0 AND datetime(received_at)>=datetime('now','-1 day')"),
+            q("SELECT COUNT(*) n,COALESCE(SUM(nominal),0) nominal FROM topup_credit WHERE datetime(credited_at)>=datetime('now','-1 day')"),
+            env.DB.prepare('SELECT provider,event_status,verified,outcome,received_at FROM payment_webhook_event ORDER BY received_at DESC LIMIT 1').first(),
+          ]);
+          return json({
+            penyedia: py,
+            otomatis: py !== 'manual',
+            metode: metodeTersedia(env),
+            konfigurasi: infoKonfigurasiPembayaran(env),
+            webhook_url: py === 'manual' ? null : `${env.PUBLIC_URL || 'https://api.xycloud.my.id'}/bayar/webhook/${py}`,
+            webhook_signature: py === 'pakasir' ? 'tidak_disediakan_provider' : 'diverifikasi',
+            verifikasi_detail_wajib: true,
+            boleh_rekonsiliasi: admin.peran === 'pemilik',
+            statistik: {
+              pending_gateway: Number(pending?.n || 0),
+              webhook_24_jam: Number(webhook24?.n || 0),
+              webhook_ditolak_24_jam: Number(webhookTolak24?.n || 0),
+              kredit_24_jam: Number(kredit24?.n || 0),
+              nominal_kredit_24_jam: Number(kredit24?.nominal || 0),
+            },
+            webhook_terakhir: terakhir || null,
+          }, 200, env);
         }
 
-        // ---- verifikasi otomatis: tanya penyedia apakah top up benar-benar dibayar ----
+        if (a === 'bayar/events' && req.method === 'GET') {
+          if (admin.peran !== 'pemilik') return err('Hanya pemilik', 403, env);
+          const { results } = await env.DB.prepare(
+            'SELECT id,provider,topup_id,event_status,amount,verified,outcome,received_at FROM payment_webhook_event ORDER BY received_at DESC LIMIT 100'
+          ).all();
+          return json(results || [], 200, env);
+        }
+
+        if (a === 'bayar/rekonsiliasi' && req.method === 'POST') {
+          if (admin.peran !== 'pemilik') return err('Hanya pemilik', 403, env);
+          const hasil = await rekonsiliasiPembayaran(env, 30, 'admin-rekonsiliasi');
+          await catatLog(env, 'topup', `Rekonsiliasi pembayaran: ${JSON.stringify(hasil)}`);
+          return json({ ok: true, ...hasil }, 200, env);
+        }
+
+        // ---- verifikasi otomatis: selalu tanya detail provider server-to-server ----
         if (a.startsWith('topup/') && a.endsWith('/verifikasi') && req.method === 'POST') {
           const id = a.split('/')[1];
           const t = await env.DB.prepare('SELECT * FROM topup WHERE id=?').bind(id).first();
           if (!t) return err('Top up tidak ditemukan', 404, env);
-          if (t.status !== 'menunggu' && t.status !== 'diperiksa') return err(`Status sudah '${t.status}'.`, 409, env);
-          if (penyediaBayar(env) === 'manual' || Number(t.kode_unik) !== 0) {
-            return err('Top up ini bukan lewat penyedia pembayaran aktif — verifikasi manual.', 422, env);
-          }
-          const cek = await cekStatusPenyedia(env, id);
-          if (cek.status === 'lunas') {
-            await setujuiTopupOtomatis(env, id, `Lunas — verifikasi admin via ${penyediaBayar(env)}`);
-            await catatLog(env, 'topup', `Verifikasi otomatis top up ${id}: lunas, saldo ditambahkan`);
-            return json({ ok: true, status: 'disetujui', pesan: 'Lunas — saldo ditambahkan otomatis.' }, 200, env);
-          }
-          if (cek.status === 'gagal') {
-            await env.DB.prepare("UPDATE topup SET status='ditolak', catatan='Kedaluwarsa atau dibatalkan (cek penyedia)' WHERE id=? AND status IN ('menunggu','diperiksa')").bind(id).run();
-            await catatLog(env, 'topup', `Verifikasi otomatis top up ${id}: kedaluwarsa/dibatalkan`);
-            return json({ ok: true, status: 'ditolak', pesan: 'Penyedia: kedaluwarsa atau dibatalkan.' }, 200, env);
-          }
-          return json({ ok: false, status: 'menunggu', pesan: 'Penyedia masih menunjukkan pembayaran menunggu.' }, 200, env);
+          if (!['menunggu', 'diperiksa'].includes(String(t.status))) return err(`Status sudah '${t.status}'.`, 409, env);
+          if (!topupGateway(env, t)) return err('Top up ini memakai verifikasi manual.', 422, env);
+          const hasil = await periksaDanSinkronTopup(env, t, 'verifikasi-admin', { tolakJikaGagal: true });
+          await catatLog(env, 'topup', `Verifikasi provider ${id}: ${hasil.status}`);
+          const pesan = hasil.status === 'disetujui' ? 'Lunas — saldo ditambahkan otomatis.'
+            : hasil.status === 'ditolak' ? 'Provider mengonfirmasi transaksi kedaluwarsa atau dibatalkan.'
+              : hasil.alasan || 'Provider masih menunjukkan pembayaran menunggu.';
+          return json({ ok: hasil.ok, status: hasil.status, pesan }, 200, env);
         }
 
         // ---- setujui atau tolak top up ----
         if (a.startsWith('topup/') && req.method === 'PATCH') {
           const id = a.split('/')[1];
-          const { status, catatan } = await req.json();
-          const waktu = new Date().toISOString();
-          if (status === 'disetujui') {
-            // Klaim atomik: hanya sekali yang boleh menandai 'disetujui' sehingga
-            // setujui berulang/bersamaan tidak pernah menggandakan saldo.
-            const klaim = await env.DB.prepare(
-              "UPDATE topup SET status='disetujui', catatan=?, diproses=? WHERE id=? AND status IN ('menunggu','diperiksa')"
-            ).bind(catatan || 'Disetujui admin', waktu, id).run();
-            if (!klaim.meta?.changes) {
-              const kini = await env.DB.prepare('SELECT status FROM topup WHERE id=?').bind(id).first();
-              if (kini?.status === 'disetujui') return err('Top up ini sudah disetujui', 409, env);
-              if (kini?.status === 'ditolak') return err('Top up ini sudah ditolak sebelumnya', 409, env);
-              return err('Permintaan tidak ditemukan', 404, env);
-            }
-            const t2 = await env.DB.prepare('SELECT * FROM topup WHERE id=?').bind(id).first();
-            const nominal = Number(t2?.nominal) || 0;
-            if (!t2 || nominal <= 0 || !t2.user_id) return err('Top up tidak valid', 400, env);
-            await env.DB.batch([
-              env.DB.prepare('UPDATE users SET saldo = saldo + ? WHERE id = ?').bind(nominal, t2.user_id),
-              env.DB.prepare('INSERT INTO transaksi (id,user_id,judul,tipe,nominal) VALUES (?,?,?,?,?)')
-                .bind(uid('t_'), t2.user_id, 'Top up saldo', 'topup', nominal),
-            ]);
-            const u = await env.DB.prepare('SELECT saldo, nama, email FROM users WHERE id = ?').bind(t2.user_id).first();
-            ctx.waitUntil(push(env, `user:${t2.user_id}`, 'wallet.update', { saldo: u.saldo }));
-            ctx.waitUntil(kirimPush(env, {
-              userId: t2.user_id, judul: 'Top up berhasil',
-              pesan: `Saldo Rp${nominal.toLocaleString('id-ID')} sudah masuk ke dompetmu.`,
-              data: { tipe: 'wallet' },
-            }));
-            if (u?.email) {
-              ctx.waitUntil(kirimEmail(env, {
-                to: u.email, template: 'struk',
-                data: { nama: u.nama, kode: id.toUpperCase(), judul: 'Top up saldo', total: nominal, metode: t2.metode },
-              }));
-            }
-            return json({ ok: true, saldo: u.saldo }, 200, env);
-          }
-
-          const tr = await env.DB.prepare('SELECT * FROM topup WHERE id = ?').bind(id).first();
+          const b = await req.json().catch(() => ({}));
+          const status = String(b.status || '');
+          const catatan = String(b.catatan || '').trim().slice(0, 500);
+          if (!['disetujui', 'ditolak'].includes(status)) return err('Status tidak valid', 400, env);
+          const tr = await env.DB.prepare('SELECT * FROM topup WHERE id=?').bind(id).first();
           if (!tr) return err('Permintaan tidak ditemukan', 404, env);
           if (tr.status === 'disetujui') return err('Top up ini sudah disetujui', 409, env);
           if (tr.status === 'ditolak') return err('Top up ini sudah ditolak', 409, env);
-          await env.DB.prepare("UPDATE topup SET status='ditolak', catatan=?, diproses=? WHERE id=?")
-            .bind(catatan || 'Bukti transfer tidak cocok', waktu, id).run();
+
+          const gateway = topupGateway(env, tr);
+          if (status === 'disetujui') {
+            if (gateway) {
+              const cek = await periksaDanSinkronTopup(env, tr, 'persetujuan-admin');
+              if (cek.status === 'disetujui') {
+                return json({ ok: true, saldo: cek.kredit?.saldo ?? null, terverifikasi_provider: true }, 200, env);
+              }
+              const bolehOverride = admin.peran === 'pemilik'
+                && b.override_gateway === true
+                && b.konfirmasi === 'KREDIT MANUAL'
+                && catatan.length >= 20;
+              if (!bolehOverride) {
+                return err('Provider belum mengonfirmasi lunas. Gunakan tombol verifikasi; override pemilik memerlukan alasan minimal 20 karakter.', 422, env);
+              }
+              await auditSecurity(env, 'payment_credit_override', id, catatan, `/api/admin/topup/${id}`);
+            }
+            const kredit = await setujuiTopupOtomatis(
+              env, id, catatan || (gateway ? 'Override gateway oleh pemilik' : 'Disetujui admin'),
+              gateway ? 'admin-override' : 'admin-manual',
+            );
+            if (!kredit.baru) return err('Top up gagal diklaim atau sudah diproses', 409, env);
+            return json({ ok: true, saldo: kredit.saldo, override: gateway }, 200, env);
+          }
+
+          // Jangan menolak tagihan gateway yang mungkin sudah dibayar. Cek dulu;
+          // bila masih pending, coba batalkan di provider. Override hanya pemilik.
+          if (gateway) {
+            const cek = await periksaDanSinkronTopup(env, tr, 'penolakan-admin', { tolakJikaGagal: true });
+            if (cek.status === 'disetujui') {
+              return json({ ok: true, status: 'disetujui', pesan: 'Provider mengonfirmasi lunas; saldo dikreditkan dan penolakan dibatalkan.' }, 200, env);
+            }
+            if (cek.status === 'ditolak') {
+              return json({ ok: true, status: 'ditolak', pesan: 'Provider mengonfirmasi transaksi gagal/kedaluwarsa.' }, 200, env);
+            }
+            const batal = await batalkanTagihan(env, tr);
+            if (!batal.ok) {
+              const bolehOverride = admin.peran === 'pemilik'
+                && b.override_gateway === true
+                && b.konfirmasi === 'TOLAK GATEWAY'
+                && catatan.length >= 20;
+              if (!bolehOverride) {
+                return err('Tagihan gateway belum dapat dibatalkan. Penolakan dihentikan agar pembayaran pengguna tidak hilang.', 422, env);
+              }
+              await auditSecurity(env, 'payment_reject_override', id, catatan, `/api/admin/topup/${id}`);
+            }
+          }
+
+          const waktu = new Date().toISOString();
+          const tolak = await env.DB.prepare(
+            `UPDATE topup SET status='ditolak',catatan=?,diproses=? WHERE id=?
+             AND status IN ('menunggu','diperiksa')
+             AND NOT EXISTS(SELECT 1 FROM topup_credit WHERE topup_id=?)`
+          ).bind(catatan || (gateway ? 'Tagihan dibatalkan di provider' : 'Bukti transfer tidak cocok'), waktu, id, id).run();
+          if (!tolak.meta?.changes) return err('Top up berubah saat diproses; muat ulang data.', 409, env);
           ctx.waitUntil(kirimPush(env, {
-            userId: tr.user_id, judul: 'Top up ditolak',
-            pesan: catatan || 'Bukti transfer tidak cocok. Hubungi CS untuk bantuan.',
+            userId: tr.user_id,
+            judul: 'Top up ditolak',
+            pesan: catatan || 'Pembayaran tidak dapat diverifikasi. Hubungi CS untuk bantuan.',
             data: { tipe: 'wallet' },
           }));
-          return json({ ok: true }, 200, env);
+          return json({ ok: true, status: 'ditolak' }, 200, env);
         }
 
         // ---- ulasan produk ----
@@ -2939,36 +3351,51 @@ async function statistikPublik(env) {
         // ---- kunci admin dan peran ----
         if (a === 'peran' && req.method === 'GET') {
           if (admin.peran !== 'pemilik') return err('Hanya pemilik yang boleh membuka bagian ini', 403, env);
-          const { results } = await env.DB.prepare('SELECT * FROM admin_kunci ORDER BY dibuat DESC').all();
-          return json(results, 200, env);
+          const { results } = await env.DB.prepare(
+            'SELECT id,nama,peran,aktif,terakhir,dibuat,kunci,kunci_preview FROM admin_kunci ORDER BY dibuat DESC'
+          ).all();
+          return json((results || []).map((r) => ({
+            id: r.id,
+            nama: r.nama,
+            peran: r.peran,
+            aktif: r.aktif,
+            terakhir: r.terakhir,
+            dibuat: r.dibuat,
+            kunci_preview: r.kunci_preview || previewKunciAdmin(r.kunci),
+            legacy_unhashed: !String(r.kunci || '').startsWith('h1:'),
+          })), 200, env);
         }
 
         if (a === 'peran' && req.method === 'POST') {
           if (admin.peran !== 'pemilik') return err('Hanya pemilik yang boleh menambah admin', 403, env);
-          const b = await req.json();
+          const b = await req.json().catch(() => ({}));
+          const namaAdmin = String(b.nama || '').trim().slice(0, 80);
+          const peranAdmin = ['pemilik', 'cs', 'moderator'].includes(b.peran) ? b.peran : 'cs';
+          if (!namaAdmin) return err('Nama admin wajib diisi', 400, env);
           const kunci = `xya_${crypto.randomUUID().replace(/-/g, '')}`;
           const id = uid('ak_');
-          await env.DB.prepare('INSERT INTO admin_kunci (id,nama,kunci,peran) VALUES (?,?,?,?)')
-            .bind(id, b.nama || 'Admin baru', kunci, b.peran || 'cs').run();
-          ctx.waitUntil(catatAdmin(env, admin, 'tambah admin', `${b.nama} (${b.peran})`));
-          return json({ id, kunci, peran: b.peran || 'cs' }, 201, env);
+          await env.DB.prepare('INSERT INTO admin_kunci (id,nama,kunci,kunci_preview,peran) VALUES (?,?,?,?,?)')
+            .bind(id, namaAdmin, await markerKunciAdmin(env, kunci), previewKunciAdmin(kunci), peranAdmin).run();
+          ctx.waitUntil(catatAdmin(env, admin, 'tambah admin', `${namaAdmin} (${peranAdmin})`));
+          // Nilai mentah hanya dikirim sekali pada respons pembuatan.
+          return json({ id, kunci, peran: peranAdmin }, 201, env);
         }
 
-        
         // ---- putar kunci admin tambahan (bukan secret env ADMIN_KEY) ----
         if (a.startsWith('peran/') && a.endsWith('/rotate') && req.method === 'POST') {
           if (admin.peran !== 'pemilik') return err('Hanya pemilik yang boleh memutar kunci admin', 403, env);
           const idK = a.split('/')[1];
-          const lama = await env.DB.prepare('SELECT * FROM admin_kunci WHERE id = ?').bind(idK).first();
+          const lama = await env.DB.prepare('SELECT id,nama,peran FROM admin_kunci WHERE id = ?').bind(idK).first();
           if (!lama) return err('Kunci tidak ditemukan', 404, env);
           const kunciBaru = `xya_${crypto.randomUUID().replace(/-/g, '')}`;
-          await env.DB.prepare('UPDATE admin_kunci SET kunci = ?, terakhir = ? WHERE id = ?')
-            .bind(kunciBaru, new Date().toISOString(), idK).run();
+          await env.DB.prepare('UPDATE admin_kunci SET kunci=?,kunci_preview=?,terakhir=? WHERE id=?')
+            .bind(await markerKunciAdmin(env, kunciBaru), previewKunciAdmin(kunciBaru), new Date().toISOString(), idK).run();
           ctx.waitUntil(catatAdmin(env, admin, 'rotate kunci admin', idK));
+          // Nilai mentah hanya dikirim sekali pada respons rotasi.
           return json({ ok: true, id: idK, nama: lama.nama, peran: lama.peran, kunci: kunciBaru }, 200, env);
         }
 
-if (a.startsWith('peran/') && req.method === 'DELETE') {
+        if (a.startsWith('peran/') && req.method === 'DELETE') {
           if (admin.peran !== 'pemilik') return err('Hanya pemilik yang boleh menghapus admin', 403, env);
           const idA = a.split('/')[1];
           await env.DB.prepare('DELETE FROM admin_kunci WHERE id = ?').bind(idA).run();
@@ -3001,6 +3428,7 @@ if (a.startsWith('peran/') && req.method === 'DELETE') {
           if (!baris) return err('Cadangan tidak ditemukan', 404, env);
           return new Response(baris.isi, {
             headers: {
+              ...securityHeaders(env),
               'Content-Type': 'application/json',
               'Content-Disposition': `attachment; filename="xycloudstore-${idB}.json"`,
             },
@@ -3086,15 +3514,21 @@ if (a.startsWith('peran/') && req.method === 'DELETE') {
         if (a === 'setelan' && req.method === 'GET') {
           if (admin.peran !== 'pemilik') return err('Hanya pemilik', 403, env);
           const { results } = await env.DB.prepare('SELECT kunci, nilai, diperbarui FROM setelan ORDER BY kunci').all();
-          return json(results, 200, env);
+          return json((results || []).map((r) => kunciSetelanSensitif(r.kunci)
+            ? { ...r, nilai: '[RAHASIA—PINDAHKAN KE WORKER SECRET]', rahasia: true }
+            : { ...r, rahasia: false }), 200, env);
         }
         if (a === 'setelan' && req.method === 'POST') {
           if (admin.peran !== 'pemilik') return err('Hanya pemilik', 403, env);
           const b = await req.json().catch(() => ({}));
           const kunci = String(b.kunci || '').trim();
           if (!/^[a-z0-9_.-]{1,64}$/.test(kunci)) return err('Nama kunci tidak valid', 400, env);
-          await simpanSetelan(env, kunci, b.nilai ?? '');
-          return json({ ok: true, kunci, nilai: b.nilai ?? '' }, 200, env);
+          if (kunciSetelanSensitif(kunci)) {
+            return err('Secret/API key dilarang disimpan di D1. Gunakan wrangler secret put.', 422, env);
+          }
+          const nilai = String(b.nilai ?? '').slice(0, 20_000);
+          await simpanSetelan(env, kunci, nilai);
+          return json({ ok: true, kunci, nilai }, 200, env);
         }
         if (a.startsWith('setelan/') && req.method === 'DELETE') {
           if (admin.peran !== 'pemilik') return err('Hanya pemilik', 403, env);
@@ -3117,8 +3551,11 @@ if (a.startsWith('peran/') && req.method === 'DELETE') {
             if (!izin.has(tabel) || !Array.isArray(baris) || baris.length === 0) { dilewati += 1; continue; }
             try {
               if (tabel === 'setelan') {
-                for (const s of baris) if (s && s.kunci) await simpanSetelan(env, s.kunci, s.nilai ?? '');
-                masuk += baris.length;
+                for (const s of baris) {
+                  if (!s?.kunci || kunciSetelanSensitif(s.kunci)) { dilewati += 1; continue; }
+                  await simpanSetelan(env, String(s.kunci), String(s.nilai ?? '').slice(0, 20_000));
+                  masuk += 1;
+                }
               } else {
                 const { results: col } = await env.DB.prepare(`SELECT name FROM pragma_table_info('${tabel}')`).all();
                 const kolom = col.map((c) => c.name);
@@ -3615,9 +4052,23 @@ if (a.startsWith('peran/') && req.method === 'DELETE') {
           return json({ ok: true, endpoints: ['uji/email','uji/push','sistem/kesehatan'] }, 200, env);
         }
         if (a === 'keuangan' && req.method === 'GET') {
-          const rev = await env.DB.prepare("SELECT COALESCE(SUM(ABS(nominal)),0) c FROM transaksi WHERE nominal < 0").first();
-          const top = await env.DB.prepare("SELECT COALESCE(SUM(nominal),0) c FROM transaksi WHERE tipe='topup'").first();
-          return json({ pendapatan: rev?.c||0, topup: top?.c||0 }, 200, env);
+          const [rev, top, biaya, provider] = await Promise.all([
+            env.DB.prepare("SELECT COALESCE(SUM(ABS(nominal)),0) c FROM transaksi WHERE nominal<0 AND tipe NOT IN ('transfer_keluar','transfer_masuk','penyesuaian','refund')").first(),
+            env.DB.prepare("SELECT COALESCE(SUM(nominal),0) c,COUNT(*) n FROM transaksi WHERE tipe='topup'").first(),
+            env.DB.prepare("SELECT COALESCE(SUM(provider_fee),0) c FROM topup WHERE status='disetujui'").first(),
+            env.DB.prepare(
+              `SELECT provider,COUNT(*) transaksi,COALESCE(SUM(nominal),0) nominal,
+                      COALESCE(SUM(provider_fee),0) biaya
+                 FROM topup WHERE status='disetujui' GROUP BY provider ORDER BY nominal DESC`
+            ).all(),
+          ]);
+          return json({
+            pendapatan: Number(rev?.c || 0),
+            topup: Number(top?.c || 0),
+            jumlah_topup: Number(top?.n || 0),
+            biaya_provider: Number(biaya?.c || 0),
+            provider: provider.results || [],
+          }, 200, env);
         }
         if (a === 'live' && req.method === 'GET') {
           const { results } = await env.DB.prepare('SELECT * FROM agen ORDER BY terakhir DESC LIMIT 20').all();
@@ -5368,16 +5819,18 @@ if (a.startsWith('peran/') && req.method === 'DELETE') {
       // ---- daftar permintaan top up milik sendiri ----
       if (p === 'wallet/topup' && req.method === 'GET') {
         const { results } = await env.DB
-          .prepare('SELECT * FROM topup WHERE user_id = ? ORDER BY dibuat DESC LIMIT 50').bind(me.sub).all();
-        return json(results, 200, env);
+          .prepare('SELECT * FROM topup WHERE user_id=? ORDER BY dibuat DESC LIMIT 50').bind(me.sub).all();
+        return json((results || []).map((t) => topupUntukKlien(env, t)), 200, env);
       }
 
       // ---- unggah bukti transfer ----
       if (p.startsWith('wallet/topup/') && p.endsWith('/bukti') && req.method === 'POST') {
         const id = p.split('/')[2];
         const { file } = await req.json();
-        const t = await env.DB.prepare('SELECT * FROM topup WHERE id = ? AND user_id = ?').bind(id, me.sub).first();
+        const t = await env.DB.prepare('SELECT * FROM topup WHERE id=? AND user_id=?').bind(id, me.sub).first();
         if (!t) return err('Permintaan top up tidak ditemukan', 404, env);
+        if (!['menunggu', 'diperiksa'].includes(String(t.status))) return err('Top up sudah selesai diproses', 409, env);
+        if (topupGateway(env, t)) return err('Top up gateway tidak memerlukan unggah bukti; gunakan cek pembayaran.', 422, env);
 
         const hasil = await unggahGambar(env, { dataUri: file, folder: 'xycloudstore/bukti' });
         if (!hasil.ok) return err(hasil.alasan, 502, env);
@@ -5385,35 +5838,36 @@ if (a.startsWith('peran/') && req.method === 'DELETE') {
         await env.DB.prepare("UPDATE topup SET bukti = ?, status = 'diperiksa' WHERE id = ?")
           .bind(hasil.url, id).run();
         ctx.waitUntil(push(env, 'cs:inbox', 'topup.baru', { id, user_id: me.sub, nominal: t.nominal, bukti: hasil.url }));
-        return json({ ...t, bukti: hasil.url, status: 'diperiksa' }, 200, env);
+        return json(topupUntukKlien(env, { ...t, bukti: hasil.url, status: 'diperiksa' }), 200, env);
       }
 
-      // ---- status top up milik sendiri (dipakai polling otomatis di aplikasi) ----
+      // ---- status top up milik sendiri (polling aplikasi) ----
       if (p.startsWith('wallet/topup/') && req.method === 'GET') {
         const id = p.split('/')[2];
-        const t = await env.DB.prepare('SELECT id,status,nominal,total,metode,diproses,catatan FROM topup WHERE id=? AND user_id=?')
-          .bind(id, me.sub).first();
+        let t = await env.DB.prepare('SELECT * FROM topup WHERE id=? AND user_id=?').bind(id, me.sub).first();
         if (!t) return err('Permintaan top up tidak ditemukan', 404, env);
+        // Webhook Pakasir tidak bertanda tangan. Polling ini bertanya ke API
+        // detail maksimal sekali/10 detik agar tetap otomatis tanpa mempercayai webhook.
+        if (['menunggu', 'diperiksa'].includes(String(t.status)) && topupGateway(env, t)) {
+          const sinkron = await periksaDanSinkronTopup(env, t, 'poll-aplikasi', { intervalDetik: 10, tolakJikaGagal: true });
+          t = sinkron.topup || t;
+        }
         const u = await env.DB.prepare('SELECT saldo FROM users WHERE id=?').bind(me.sub).first();
-        return json({ ...t, saldo: u?.saldo ?? 0 }, 200, env);
+        return json({ ...topupUntukKlien(env, t), saldo: u?.saldo ?? 0 }, 200, env);
       }
 
       // ---- "sudah bayar?" — cek langsung ke penyedia pembayaran ----
       if (p.startsWith('wallet/topup/') && p.endsWith('/cek') && req.method === 'POST') {
         const id = p.split('/')[2];
-        if (!rateMem(`cek-bayar:${me.sub}`, 12, 60)) return err('Tunggu sebentar sebelum memeriksa lagi.', 429, env);
-        const t = await env.DB.prepare('SELECT * FROM topup WHERE id=? AND user_id=?').bind(id, me.sub).first();
+        if (!(await bolehLanjut(env, `cek-bayar:${me.sub}`, 12, 60))) return err('Tunggu sebentar sebelum memeriksa lagi.', 429, env);
+        let t = await env.DB.prepare('SELECT * FROM topup WHERE id=? AND user_id=?').bind(id, me.sub).first();
         if (!t) return err('Permintaan top up tidak ditemukan', 404, env);
-        // kode_unik=0 adalah penanda top up gateway (QRIS/DANA/ShopeePay/VA/Snap)
-        if (t.status === 'menunggu' && Number(t.kode_unik) === 0 && penyediaBayar(env) !== 'manual') {
-          const cek = await cekStatusPenyedia(env, t.id);
-          if (cek.status === 'lunas') {
-            await setujuiTopupOtomatis(env, t.id, `Lunas — pengguna memicu cek via ${penyediaBayar(env)}`);
-          }
+        if (['menunggu', 'diperiksa'].includes(String(t.status)) && topupGateway(env, t)) {
+          const sinkron = await periksaDanSinkronTopup(env, t, 'cek-pengguna', { tolakJikaGagal: true });
+          t = sinkron.topup || t;
         }
-        const terbaru = await env.DB.prepare('SELECT id,status,diproses,catatan FROM topup WHERE id=?').bind(id).first();
         const u = await env.DB.prepare('SELECT saldo FROM users WHERE id=?').bind(me.sub).first();
-        return json({ ...terbaru, saldo: u?.saldo ?? 0 }, 200, env);
+        return json({ ...topupUntukKlien(env, t), saldo: u?.saldo ?? 0 }, 200, env);
       }
 
       // ---- daftar order ----
@@ -5575,80 +6029,104 @@ if (a.startsWith('peran/') && req.method === 'DELETE') {
       }
 
       if (p === 'wallet/topup' && req.method === 'POST') {
-        const { nominal, metode } = await req.json();
-        const jumlah = Number(nominal) || 0;
-        const minimal = Number(env.MIN_TOPUP || 10000);
-        if (jumlah < minimal) return err(`Minimal top up Rp${minimal.toLocaleString('id-ID')}`, 400, env);
+        const b = await req.json().catch(() => ({}));
+        const jumlah = Number(b.nominal);
+        const minimal = Math.max(1, Number(env.MIN_TOPUP || 10000));
+        const maksimal = Math.max(minimal, Number(env.MAX_TOPUP || 10_000_000));
+        if (!Number.isSafeInteger(jumlah) || jumlah < minimal || jumlah > maksimal) {
+          return err(`Nominal top up harus ${minimal.toLocaleString('id-ID')}–${maksimal.toLocaleString('id-ID')}.`, 400, env);
+        }
+        if (!(await bolehLanjut(env, `buat-topup:${me.sub}`, 8, 3600))) {
+          return err('Batas pembuatan top up tercapai. Selesaikan permintaan yang ada atau coba lagi nanti.', 429, env);
+        }
+        const pending = await env.DB.prepare(
+          "SELECT COUNT(*) n FROM topup WHERE user_id=? AND status IN ('menunggu','diperiksa') AND datetime(dibuat)>=datetime('now','-2 days')"
+        ).bind(me.sub).first();
+        if (Number(pending?.n || 0) >= 5) return err('Selesaikan atau tunggu top up yang masih berjalan.', 409, env);
 
         const id = uid('tp_');
-        const otomatis = penyediaBayar(env) !== 'manual';
-        const pemilik = await env.DB.prepare('SELECT nama, email, phone FROM users WHERE id = ?')
-          .bind(me.sub).first();
+        const provider = penyediaBayar(env);
+        const otomatis = provider !== 'manual';
+        const versiPembayaran = Number(req.headers.get('x-xy-payment-version') || 1);
+        // APK sebelum Payment UI v2 hanya memahami checkout URL/QR. Paksa QRIS
+        // hosted agar ia tidak salah menampilkan nomor VA sebagai transfer manual.
+        const metodeDiminta = provider === 'pakasir' && versiPembayaran < 2 ? 'qris' : b.metode;
+        const pemilik = await env.DB.prepare('SELECT nama,email,phone FROM users WHERE id=?').bind(me.sub).first();
 
-        // ---- jalur otomatis lewat penyedia pembayaran ----
         if (otomatis) {
           const tagihan = await buatTagihan(env, {
             id,
             nominal: jumlah,
-            metode,
+            metode: metodeDiminta,
             nama: pemilik?.nama,
             email: pemilik?.email,
             phone: pemilik?.phone,
             keterangan: 'Isi saldo XyCloudStore',
           });
-
-          if (tagihan.ok) {
-            await env.DB.prepare(
-              "INSERT INTO topup (id,user_id,nominal,kode_unik,total,metode,status,catatan) VALUES (?,?,?,0,?,?,'menunggu',?)"
-            ).bind(id, me.sub, jumlah, jumlah, metode || tagihan.penyedia, tagihan.referensi || null).run();
-
-            ctx.waitUntil(push(env, 'cs:inbox', 'topup.baru', { id, user_id: me.sub, nominal: jumlah, otomatis: true }));
-
-            return json({
-              id,
-              nominal: jumlah,
-              total: jumlah,
-              kode_unik: 0,
-              metode: metode || tagihan.penyedia,
-              status: 'menunggu',
-              otomatis: true,
-              bayar: {
-                url: tagihan.url,
-                qr: tagihan.qr,
-                kode: tagihan.kode_bayar,
-                kedaluwarsa: tagihan.kedaluwarsa || null,
-              },
-              catatan: 'Selesaikan pembayaran, saldo masuk otomatis dalam hitungan detik.',
-            }, 201, env);
+          if (!tagihan.ok) {
+            await catatLog(env, 'pembayaran', `${provider} gagal membuat tagihan: ${String(tagihan.alasan || 'tanpa detail').slice(0, 120)}`);
+            // Tidak downgrade diam-diam ke transfer manual: pengguna harus tahu
+            // tagihan gateway gagal agar tidak membayar lewat jalur yang keliru.
+            return err('Penyedia pembayaran sedang tidak dapat membuat tagihan. Coba lagi beberapa saat.', 503, env);
           }
-          // kalau penyedia gagal, lanjut ke jalur manual di bawah
+
+          const totalBayar = Number.isSafeInteger(Number(tagihan.total_bayar)) && Number(tagihan.total_bayar) >= jumlah
+            ? Number(tagihan.total_bayar) : jumlah;
+          const metodeTagihan = String(tagihan.metode || metodeDiminta || provider).slice(0, 64);
+          const row = {
+            id, user_id: me.sub, nominal: jumlah, kode_unik: 0, total: totalBayar,
+            metode: metodeTagihan, status: 'menunggu', dibuat: new Date().toISOString(),
+            catatan: `Menunggu pembayaran via ${provider}`,
+            provider, provider_ref: String(tagihan.referensi || id).slice(0, 160),
+            provider_method: metodeTagihan,
+            provider_amount: totalBayar,
+            provider_fee: Number.isFinite(Number(tagihan.biaya)) ? Math.max(0, Number(tagihan.biaya)) : null,
+            provider_expires_at: tagihan.kedaluwarsa ? String(tagihan.kedaluwarsa).slice(0, 80) : null,
+            checkout_url: tagihan.url ? String(tagihan.url).slice(0, 2000) : null,
+            payment_qr: tagihan.qr ? String(tagihan.qr).slice(0, 2000) : null,
+            payment_code: tagihan.kode_bayar ? String(tagihan.kode_bayar).slice(0, 4096) : null,
+          };
+          try {
+            await env.DB.prepare(
+              `INSERT INTO topup
+               (id,user_id,nominal,kode_unik,total,metode,status,catatan,provider,provider_ref,
+                provider_method,provider_amount,provider_fee,provider_expires_at,checkout_url,payment_qr,payment_code)
+               VALUES (?,?,?,0,?,?,'menunggu',?,?,?,?,?,?,?,?,?,?)`
+            ).bind(
+              row.id, row.user_id, row.nominal, row.total, row.metode, row.catatan,
+              row.provider, row.provider_ref, row.provider_method, row.provider_amount,
+              row.provider_fee, row.provider_expires_at, row.checkout_url, row.payment_qr, row.payment_code,
+            ).run();
+          } catch (e) {
+            // Bila provider sudah membuat VA tetapi D1 gagal menyimpan order,
+            // upayakan pembatalan agar tidak ada tagihan yatim yang dapat dibayar.
+            if (provider === 'pakasir' && row.payment_code) {
+              await batalkanTagihan(env, row).catch(() => ({ ok: false }));
+            }
+            throw e;
+          }
+          ctx.waitUntil(push(env, 'cs:inbox', 'topup.baru', { id, user_id: me.sub, nominal: jumlah, provider, otomatis: true }));
+          return json(topupUntukKlien(env, row), 201, env);
         }
 
-        // ---- jalur manual: transfer + bukti + konfirmasi admin ----
+        // Jalur manual hanya dipakai bila tidak ada provider yang dikonfigurasi.
+        const metodeManual = ['transfer', 'qris'].includes(String(b.metode)) ? String(b.metode) : 'transfer';
         const kodeUnik = 100 + (crypto.getRandomValues(new Uint32Array(1))[0] % 800);
         const total = jumlah + kodeUnik;
-
         await env.DB.prepare(
-          "INSERT INTO topup (id,user_id,nominal,kode_unik,total,metode,status) VALUES (?,?,?,?,?,?,'menunggu')"
-        ).bind(id, me.sub, jumlah, kodeUnik, total, metode || 'transfer').run();
-
+          "INSERT INTO topup (id,user_id,nominal,kode_unik,total,metode,status,provider) VALUES (?,?,?,?,?,?,'menunggu','manual')"
+        ).bind(id, me.sub, jumlah, kodeUnik, total, metodeManual).run();
         ctx.waitUntil(push(env, 'cs:inbox', 'topup.baru', { id, user_id: me.sub, nominal: jumlah, status: 'menunggu' }));
-
         return json({
-          id,
-          nominal: jumlah,
-          kode_unik: kodeUnik,
-          total,
-          metode: metode || 'transfer',
-          status: 'menunggu',
-          otomatis: false,
+          id, nominal: jumlah, kode_unik: kodeUnik, total, metode: metodeManual,
+          status: 'menunggu', dibuat: new Date().toISOString(), otomatis: false, provider: 'manual',
           rekening: {
             bank: env.BANK_NAMA || 'DANA',
             nomor: env.BANK_NOMOR || '-',
             atasNama: env.BANK_ATASNAMA || 'XyCloudStore',
             qris: env.QRIS_URL ? samarkanGambar(env, env.QRIS_URL, 'l') : '',
           },
-          catatan: 'Transfer tepat sampai 3 angka terakhir supaya otomatis kami cocokkan, lalu unggah bukti transfer.',
+          catatan: 'Transfer tepat sampai 3 angka terakhir, lalu unggah bukti transfer.',
         }, 201, env);
       }
 
@@ -5750,7 +6228,12 @@ if (a.startsWith('peran/') && req.method === 'DELETE') {
 
       return err('Endpoint tidak dikenal', 404, env);
     } catch (e) {
-      if(e instanceof SecurityError)return new Response(JSON.stringify({error:e.message,code:e.code}),{status:e.status,headers:{'Content-Type':'application/json','Access-Control-Allow-Origin':env.ALLOW_ORIGIN||'*','Cache-Control':'no-store'}});
+      if (e instanceof SecurityError) {
+        return new Response(JSON.stringify({ error: e.message, code: e.code }), {
+          status: e.status,
+          headers: securityHeaders(env),
+        });
+      }
       return e instanceof KontenError ? err(e.message, e.status, env) : err(`Server error: ${e.message}`, 500, env);
     }
   },

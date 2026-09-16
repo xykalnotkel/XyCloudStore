@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { getAdminKey, loginAdmin } from "@/lib/api";
+import { clearAdminKey, getAdminKey, loginAdmin } from "@/lib/api";
 import { Users, Receipt, Wallet, Cpu, ShieldCheck, Rocket, Activity } from "lucide-react";
 
 type Stats = {
@@ -34,6 +34,7 @@ export default function DashboardPage() {
         });
       })
       .catch(() => {
+        clearAdminKey();
         router.replace("/login");
       })
       .finally(() => setLoading(false));
@@ -115,7 +116,7 @@ export default function DashboardPage() {
         <div className="text-[12px] text-[#1E1B2E]/50 font-medium">Migrasi Next.js tuntas — legacy hanya darurat di <a href="https://api.xycloud.my.id/admin?legacy=1" className="text-[#8B5CF6] underline">/admin?legacy=1</a> • Lucide, Inter</div>
         <button
           onClick={() => {
-            localStorage.removeItem("xy_admin_key");
+            clearAdminKey();
             location.reload();
           }}
           className="text-xs px-3 py-1.5 rounded-full bg-white hover:bg-[#E9E3F5] border border-[#E9E3F5] font-medium text-[#6B5A8A]"

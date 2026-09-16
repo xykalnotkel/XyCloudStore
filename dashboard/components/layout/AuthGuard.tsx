@@ -4,7 +4,7 @@ import { usePathname, useRouter } from "next/navigation";
 
 function getKey(): string {
   if (typeof window === "undefined") return "";
-  return localStorage.getItem("xy_admin_key") || "";
+  return sessionStorage.getItem("xy_admin_key") || "";
 }
 
 export default function AuthGuard({ children }: { children: React.ReactNode }) {
@@ -13,8 +13,8 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
   const [mounted, setMounted] = useState(false);
   const [checked, setChecked] = useState(false);
 
-  // login page never guarded — allow / and /login both
-  const isPublic = pathname === "/login" || pathname === "/" || pathname === "/login/";
+  // Hanya halaman login yang publik; dashboard root tetap dilindungi.
+  const isPublic = pathname === "/login" || pathname === "/login/";
 
   useEffect(() => {
     setMounted(true);

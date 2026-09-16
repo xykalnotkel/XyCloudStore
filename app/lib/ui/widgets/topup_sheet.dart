@@ -13,24 +13,25 @@ import '../../providers/app_state.dart';
 import 'common.dart';
 
 /// ============================================================
-///  Alur isi saldo yang sungguhan:
-///  1. pilih nominal
-///  2. server memberi total unik + rekening tujuan
-///  3. pengguna transfer lalu mengunggah bukti
-///  4. admin menyetujui, saldo bertambah otomatis
+///  Alur isi saldo:
+///  1. pilih nominal dan metode yang diumumkan server
+///  2. gateway: checkout/nomor VA lalu status diverifikasi otomatis
+///  3. manual: transfer, unggah bukti, kemudian admin memverifikasi
+///  4. saldo hanya ditambahkan server secara atomik dan idempoten
 /// ============================================================
-Future<void> bukaTopup(BuildContext context, {int? nominalAwal}) async {
+Future<void> bukaTopup(BuildContext context, {int? nominalAwal, PermintaanTopup? lanjutkan}) async {
   await showModalBottomSheet(
     context: context,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
-    builder: (_) => _SheetTopup(nominalAwal: nominalAwal),
+    builder: (_) => _SheetTopup(nominalAwal: nominalAwal, lanjutkan: lanjutkan),
   );
 }
 
 class _SheetTopup extends StatefulWidget {
-  const _SheetTopup({this.nominalAwal});
+  const _SheetTopup({this.nominalAwal, this.lanjutkan});
   final int? nominalAwal;
+  final PermintaanTopup? lanjutkan;
 
   @override
   State<_SheetTopup> createState() => _SheetTopupState();
@@ -39,7 +40,7 @@ class _SheetTopup extends StatefulWidget {
 class _SheetTopupState extends State<_SheetTopup> {
   static const List<int> pilihan = [25000, 50000, 100000, 250000, 500000, 1000000];
 
-  late int nominal = widget.nominalAwal ?? 50000;
+  late int nominal;
   final _lain = TextEditingController();
   String metode = 'transfer';
 
@@ -47,6 +48,34 @@ class _SheetTopupState extends State<_SheetTopup> {
   bool mengunggah = false;
   Timer? _poll;
   bool _sukses = false;
+  bool _ditolak = false;
+  bool _sedangPoll = false;
+  bool _metodeDiselaraskan = false;
+
+  @override
+  void initState() {
+    super.initState();
+    dibuat = widget.lanjutkan;
+    nominal = widget.lanjutkan?.nominal ?? widget.nominalAwal ?? 50000;
+    if (widget.lanjutkan != null) {
+      metode = widget.lanjutkan!.metode;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _mulaiPoll();
+      });
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_metodeDiselaraskan || dibuat != null) return;
+    final tersedia = context.read<AppState>().konfigurasi.metodeBayar;
+    final kode = tersedia.map((m) => '${m['kode']}').where((x) => x.isNotEmpty).toList();
+    if (kode.isNotEmpty) {
+      _metodeDiselaraskan = true;
+      if (!kode.contains(metode)) metode = kode.first;
+    }
+  }
 
   @override
   void dispose() {
@@ -61,38 +90,58 @@ class _SheetTopupState extends State<_SheetTopup> {
   void _mulaiPoll() {
     _poll?.cancel();
     _poll = Timer.periodic(const Duration(seconds: 4), (_) async {
-      if (!mounted || dibuat == null || _sukses) return;
-      final status =
-          await context.read<AppState>().cekStatusTopup(dibuat!.id);
-      if (!mounted) return;
-      if (status == 'disetujui') {
-        _poll?.cancel();
-        HapticFeedback.mediumImpact();
-        setState(() => _sukses = true);
+      if (!mounted || dibuat == null || _sukses || _ditolak || _sedangPoll) return;
+      _sedangPoll = true;
+      try {
+        final status =
+            await context.read<AppState>().cekStatusTopup(dibuat!.id);
+        if (!mounted) return;
+        if (status == 'disetujui') {
+          _poll?.cancel();
+          HapticFeedback.mediumImpact();
+          setState(() => _sukses = true);
+        } else if (status == 'ditolak') {
+          _poll?.cancel();
+          HapticFeedback.mediumImpact();
+          setState(() => _ditolak = true);
+        }
+      } finally {
+        _sedangPoll = false;
       }
     });
   }
 
   Future<void> _cekSekarang() async {
-    if (dibuat == null) return;
+    if (dibuat == null || _sedangPoll) return;
     HapticFeedback.selectionClick();
-    final status =
-        await context.read<AppState>().cekStatusTopup(dibuat!.id, paksa: true);
-    if (!mounted) return;
-    if (status == 'disetujui') {
-      _poll?.cancel();
-      HapticFeedback.mediumImpact();
-      setState(() => _sukses = true);
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text(
-              'Pembayaran belum terdeteksi. Selesaikan pembayaran dulu, status diperbarui otomatis.')));
+    _sedangPoll = true;
+    try {
+      final status =
+          await context.read<AppState>().cekStatusTopup(dibuat!.id, paksa: true);
+      if (!mounted) return;
+      if (status == 'disetujui') {
+        _poll?.cancel();
+        HapticFeedback.mediumImpact();
+        setState(() => _sukses = true);
+      } else if (status == 'ditolak') {
+        _poll?.cancel();
+        HapticFeedback.mediumImpact();
+        setState(() => _ditolak = true);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text(
+                'Pembayaran belum terdeteksi. Selesaikan pembayaran dulu, status diperbarui otomatis.')));
+      }
+    } finally {
+      _sedangPoll = false;
     }
   }
 
   Future<void> _buat() async {
     final s = context.read<AppState>();
-    final t = await s.buatTopup(nominal, metode);
+    final kode = s.konfigurasi.metodeBayar.map((m) => '${m['kode']}').where((x) => x.isNotEmpty).toList();
+    final metodeKirim = kode.isNotEmpty && !kode.contains(metode) ? kode.first : metode;
+    final t = await s.buatTopup(nominal, metodeKirim);
     if (!mounted) return;
     if (t == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -155,9 +204,11 @@ class _SheetTopupState extends State<_SheetTopup> {
               padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
               children: _sukses
                   ? _langkahSukses()
-                  : dibuat == null
-                      ? _langkahPilih(s)
-                      : _langkahBayar(rek),
+                  : _ditolak
+                      ? _langkahDitolak()
+                      : dibuat == null
+                          ? _langkahPilih(s)
+                          : _langkahBayar(rek),
             ),
           ),
         ]),
@@ -257,9 +308,13 @@ class _SheetTopupState extends State<_SheetTopup> {
           onPressed: nominal < s.konfigurasi.minTopup ? null : _buat,
         ),
         const SizedBox(height: 10),
-         Center(
-          child: Text('Saldo masuk setelah admin memverifikasi bukti transfer.',
-              style: TextStyle(color: XyTheme.of(context).muted, fontSize: 11.5)),
+        Center(
+          child: Text(
+              s.konfigurasi.bayarOtomatis
+                  ? 'Saldo masuk otomatis sesudah status pembayaran diverifikasi.'
+                  : 'Saldo masuk setelah admin memverifikasi bukti transfer.',
+              style: TextStyle(color: XyTheme.of(context).muted, fontSize: 11.5),
+              textAlign: TextAlign.center),
         ),
       ];
 
@@ -307,6 +362,45 @@ class _SheetTopupState extends State<_SheetTopup> {
     ];
   }
 
+  List<Widget> _langkahDitolak() => [
+        const SizedBox(height: 30),
+        Center(
+          child: Container(
+            width: 84,
+            height: 84,
+            decoration: BoxDecoration(
+              color: XyTheme.danger.withOpacity(.1),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.cancel_rounded,
+                color: XyTheme.danger, size: 44),
+          ),
+        ),
+        const SizedBox(height: 18),
+        const Center(
+          child: Text('Pembayaran Tidak Dapat Dilanjutkan',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                  fontSize: 19, fontWeight: FontWeight.w800, letterSpacing: -.4)),
+        ),
+        const SizedBox(height: 8),
+        Center(
+          child: Text(
+            'Tagihan sudah kedaluwarsa, dibatalkan, atau ditolak setelah pemeriksaan. Jangan membayar kode maupun tautan lama.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+                color: XyTheme.of(context).muted, fontSize: 12.5, height: 1.55),
+          ),
+        ),
+        const SizedBox(height: 22),
+        GradientButton(
+          label: 'Tutup',
+          icon: Icons.close_rounded,
+          onPressed: () => Navigator.pop(context),
+        ),
+        const SizedBox(height: 16),
+      ];
+
   IconData _ikonMetode(String kode) {
     final k = kode.toUpperCase();
     if (k.contains('QRIS')) return Icons.qr_code_2_rounded;
@@ -344,9 +438,10 @@ class _SheetTopupState extends State<_SheetTopup> {
   // ---------------- langkah 2: bayar dan unggah bukti ----------------
   List<Widget> _langkahBayar(Map<String, dynamic> rek) {
     final t = dibuat!;
+    final kedaluwarsa = DateTime.tryParse('${t.bayar['kedaluwarsa'] ?? ''}');
 
     // jalur otomatis: cukup buka tautan pembayaran
-    if (t.otomatis && (t.bayar['url'] != null || t.bayar['qr'] != null)) {
+    if (t.otomatis && (t.bayar['url'] != null || t.bayar['qr'] != null || t.bayar['kode'] != null)) {
       return [
         Row(children: [
           Container(
@@ -371,13 +466,32 @@ class _SheetTopupState extends State<_SheetTopup> {
             boxShadow: XyTheme.glow(XyTheme.primary, .22),
           ),
           child: Column(children: [
-            const Text('Total pembayaran', style: TextStyle(color: Colors.white70, fontSize: 12)),
+            Text(t.bayar['total_final'] == false ? 'Nominal saldo (biaya tampil di Pakasir)' : 'Total pembayaran',
+                style: const TextStyle(color: Colors.white70, fontSize: 12)),
             const SizedBox(height: 6),
             Text(rupiah(t.total),
                 style: const TextStyle(
                     color: Colors.white, fontSize: 30, fontWeight: FontWeight.w700, letterSpacing: -1)),
           ]),
         ),
+        if (t.bayar['biaya'] is num && (t.bayar['biaya'] as num) > 0) ...[
+          const SizedBox(height: 10),
+          Center(
+            child: Text(
+              'Termasuk biaya layanan ${rupiah((t.bayar['biaya'] as num).toInt())}.',
+              style: TextStyle(color: XyTheme.of(context).muted, fontSize: 11.5),
+            ),
+          ),
+        ] else if (t.provider == 'pakasir' && t.bayar['url'] != null) ...[
+          const SizedBox(height: 10),
+          Center(
+            child: Text(
+              'Biaya layanan final ditampilkan transparan di halaman Pakasir sebelum dibayar.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: XyTheme.of(context).muted, fontSize: 11.5),
+            ),
+          ),
+        ],
         if (t.bayar['qr'] != null) ...[
           const SizedBox(height: 16),
           XyCard(
@@ -395,6 +509,10 @@ class _SheetTopupState extends State<_SheetTopup> {
         if (t.bayar['kode'] != null) ...[
           const SizedBox(height: 14),
           XyCard(child: _barisRek('Kode pembayaran', '${t.bayar['kode']}', salin: true)),
+        ],
+        if (kedaluwarsa != null) ...[
+          const SizedBox(height: 10),
+          XyCard(child: _barisRek('Berlaku sampai', tanggal(kedaluwarsa))),
         ],
         const SizedBox(height: 18),
         if (t.bayar['url'] != null)
@@ -418,6 +536,55 @@ class _SheetTopupState extends State<_SheetTopup> {
         const SizedBox(height: 8),
         Center(
           child: TextButton(onPressed: () => Navigator.pop(context), child: const Text('Tutup')),
+        ),
+      ];
+    }
+
+    // Order gateway lama/rusak yang tidak memiliki instruksi actionable tidak
+    // boleh ditampilkan sebagai transfer manual: endpoint unggah memang akan
+    // menolaknya dan pengguna berisiko membayar ke tujuan yang salah.
+    if (t.otomatis) {
+      return [
+        const SizedBox(height: 18),
+        Center(
+          child: Container(
+            width: 72,
+            height: 72,
+            decoration: BoxDecoration(
+              color: XyTheme.warning.withOpacity(.1),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.receipt_long_rounded,
+                color: XyTheme.warning, size: 34),
+          ),
+        ),
+        const SizedBox(height: 18),
+        const Center(
+          child: Text('Instruksi Pembayaran Tidak Tersedia',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+        ),
+        const SizedBox(height: 10),
+        Center(
+          child: Text(
+            'Jangan transfer manual untuk order gateway ini. Cek statusnya atau hubungi dukungan dengan ID ${t.id}.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+                color: XyTheme.of(context).muted, fontSize: 12.5, height: 1.55),
+          ),
+        ),
+        const SizedBox(height: 20),
+        OutlinedButton.icon(
+          onPressed: _cekSekarang,
+          icon: const Icon(Icons.radar_rounded, size: 17),
+          label: const Text('Cek Status Pembayaran'),
+        ),
+        const SizedBox(height: 8),
+        Center(
+          child: TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Tutup'),
+          ),
         ),
       ];
     }
@@ -597,30 +764,47 @@ class KartuTopup extends StatelessWidget {
       _ => (XyTheme.of(context).muted, 'Menunggu pembayaran', Icons.schedule_rounded),
     };
 
+    final bisaDilanjutkan = !t.selesai;
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
-      child: XyCard(
-        padding: const EdgeInsets.all(14),
-        child: Row(children: [
-          Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(color: warna.withOpacity(.10), shape: BoxShape.circle),
-            child: Icon(ikon, color: warna, size: 20),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('Top up ${rupiah(t.nominal)}',
-                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.8)),
-              const SizedBox(height: 3),
-              Text(t.catatan ?? label,
-                  style: TextStyle(color: warna, fontSize: 11.8, fontWeight: FontWeight.w600)),
+      child: Pressable(
+        onTap: bisaDilanjutkan ? () => bukaTopup(context, lanjutkan: t) : null,
+        child: XyCard(
+          padding: const EdgeInsets.all(14),
+          child: Row(children: [
+            Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(color: warna.withOpacity(.10), shape: BoxShape.circle),
+              child: Icon(ikon, color: warna, size: 20),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Top up ${rupiah(t.nominal)}',
+                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.8)),
+                const SizedBox(height: 3),
+                Text(t.catatan ?? label,
+                    style: TextStyle(color: warna, fontSize: 11.8, fontWeight: FontWeight.w600)),
+                if (bisaDilanjutkan) ...[
+                  const SizedBox(height: 3),
+                  Text(t.otomatis && t.bayar.isEmpty
+                          ? 'Ketuk untuk cek status dan bantuan'
+                          : 'Ketuk untuk melanjutkan pembayaran',
+                      style: TextStyle(color: XyTheme.primary, fontSize: 10.8, fontWeight: FontWeight.w600)),
+                ],
+              ]),
+            ),
+            Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+              Text(tanggal(t.dibuat),
+                  style: TextStyle(color: XyTheme.of(context).muted, fontSize: 11)),
+              if (bisaDilanjutkan) ...[
+                const SizedBox(height: 6),
+                const Icon(Icons.arrow_forward_ios_rounded, size: 12, color: XyTheme.primary),
+              ],
             ]),
-          ),
-          Text(tanggal(t.dibuat),
-              style:  TextStyle(color: XyTheme.of(context).muted, fontSize: 11)),
-        ]),
+          ]),
+        ),
       ),
     );
   }

@@ -1232,13 +1232,22 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
           ? await _repo.cekTopupPenyedia(idTopup)
           : await _repo.statusTopup(idTopup);
       final status = '${r['status'] ?? ''}';
+      var berubah = false;
+      if (status == 'disetujui' || status == 'ditolak') {
+        final i = topupSaya.indexWhere((t) => t.id == idTopup);
+        if (i >= 0) {
+          topupSaya[i] = PermintaanTopup.fromJson(r);
+          berubah = true;
+        }
+      }
       if (status == 'disetujui' && user != null) {
         final saldoBaru = r['saldo'];
         if (saldoBaru is num && user!.saldo != saldoBaru.toInt()) {
           user = user!.copyWith(saldo: saldoBaru.toInt());
-          notifyListeners();
+          berubah = true;
         }
       }
+      if (berubah) notifyListeners();
       return status.isEmpty ? null : status;
     } catch (_) {
       return null;

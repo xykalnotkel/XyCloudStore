@@ -50,6 +50,7 @@ export default function KeuanganPage() {
       ["Metrik", "Nilai"],
       ["Pendapatan (kredit transaksi)", keu?.pendapatan ?? 0],
       ["Top up disetujui", keu?.topup ?? 0],
+      ["Biaya provider pembayaran", keu?.biaya_provider ?? 0],
       ["Top up tertunda (jumlah)", jumlahPending],
       ["Pengguna terdaftar", stats?.users ?? 0],
       ["Pesanan total", stats?.orders ?? 0],
@@ -71,6 +72,7 @@ export default function KeuanganPage() {
   const cards = [
     { l: "Pendapatan Total", v: rupiah(keu?.pendapatan), Icon: TrendingUp, t: "text-emerald-600" },
     { l: "Top up Masuk", v: rupiah(keu?.topup), Icon: Landmark, t: "text-[#7C3AED]" },
+    { l: "Biaya Provider", v: rupiah(keu?.biaya_provider), Icon: Banknote, t: "text-rose-600" },
     { l: "Top up Tertunda", v: `${pending.length} (${rupiah(jumlahPending)})`, Icon: Hourglass, t: "text-amber-600" },
     { l: "Pengguna Terdaftar", v: String(stats?.users ?? 0), Icon: Users, t: "text-sky-600" },
   ];
@@ -96,7 +98,7 @@ export default function KeuanganPage() {
         <div className="xy-card rounded-xl p-4 text-red-600 font-medium">{err}</div>
       ) : (
         <>
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
             {cards.map((c) => (
               <div key={c.l} className="xy-card rounded-[14px] p-4 flex items-center gap-3">
                 <div className="w-9 h-9 rounded-xl bg-[#F3F0FF] border border-[#E9E3F5] grid place-items-center"><c.Icon size={16} className={c.t} /></div>
@@ -107,6 +109,16 @@ export default function KeuanganPage() {
               </div>
             ))}
           </div>
+
+          {Array.isArray(keu?.provider) && keu.provider.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {keu.provider.map((p: any) => (
+                <div key={p.provider || "legacy"} className="px-3 py-2 rounded-xl bg-white border border-[#E9E3F5] text-[11px] text-[#6B5A8A]">
+                  <b className="uppercase text-[#1E1B2E]">{p.provider || "legacy"}</b> • {p.transaksi} transaksi • {rupiah(p.nominal)} • fee {rupiah(p.biaya)}
+                </div>
+              ))}
+            </div>
+          )}
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div className="xy-card rounded-[16px] p-5">

@@ -109,10 +109,16 @@ function showErr(t){ errEl.textContent=t; errEl.style.display='block'; okEl.styl
 function showOk(t){ okEl.textContent=t; okEl.style.display='block'; errEl.style.display='none'; }
 function hideMsg(){ errEl.style.display='none'; okEl.style.display='none'; }
 
-function simpanKey(k){ localStorage.setItem('xy_admin_key', k); }
+function simpanKey(k){
+  sessionStorage.setItem('xy_admin_key', k);
+  localStorage.removeItem('xy_admin_key');
+  localStorage.removeItem('xy_admin_ok');
+}
 
 function keluar(){
+  sessionStorage.removeItem('xy_admin_key');
   localStorage.removeItem('xy_admin_key');
+  localStorage.removeItem('xy_admin_ok');
   loginView.classList.remove('hidden');
   okView.classList.add('hidden');
   keyInput.value='';
@@ -133,7 +139,7 @@ async function masuk(){
     simpanKey(k);
     loginView.classList.add('hidden');
     okView.classList.remove('hidden');
-    showOk('Key valid — disimpan lokal');
+    showOk('Key valid — hanya tersimpan selama tab ini terbuka');
   }catch(e){
     showErr(e.message || 'Gagal masuk — periksa koneksi');
   }finally{
@@ -144,23 +150,13 @@ async function masuk(){
 keyInput.addEventListener('keydown', e=>{ if(e.key==='Enter') masuk(); });
 
 (function(){
-  const saved = localStorage.getItem('xy_admin_key')||'';
+  const saved = sessionStorage.getItem('xy_admin_key')||'';
   if(saved){
-    keyInput.value = saved;
-    const lastOk = localStorage.getItem('xy_admin_ok');
-    if(lastOk==='1'){
-      loginView.classList.add('hidden');
-      okView.classList.remove('hidden');
-    }
+    loginView.classList.add('hidden');
+    okView.classList.remove('hidden');
+    showOk('Sesi admin aktif di tab ini');
   }
 })();
-
-const origMasuk = masuk;
-masuk = async function(){
-  await origMasuk();
-  if(!loginView.classList.contains('hidden')) return;
-  localStorage.setItem('xy_admin_ok','1');
-};
 
 if(location.search.includes('login')) keyInput.focus();
 </script>

@@ -1,8 +1,8 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { ShieldCheck, Eye, EyeOff, LogIn, ExternalLink } from "lucide-react";
-import { loginAdmin, setAdminKey, getAdminKey } from "@/lib/api";
+import { loginAdmin, setAdminKey } from "@/lib/api";
 
 export default function LoginPage() {
   const [key, setKey] = useState("");
@@ -10,11 +10,6 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const router = useRouter();
-
-  useEffect(() => {
-    const saved = getAdminKey();
-    if (saved) setKey(saved);
-  }, []);
 
   async function handleLogin() {
     const k = key.trim();
@@ -47,7 +42,7 @@ export default function LoginPage() {
           </div>
 
           <h1 className="text-[20px] font-semibold text-[#1E1B2E] tracking-tight">Masuk Dashboard</h1>
-          <p className="text-[13px] text-[#7C738F] font-medium leading-[1.5] mt-1.5">Masukkan Admin Key. Key disimpan lokal di browser, tidak dikirim ke pihak ketiga.</p>
+          <p className="text-[13px] text-[#7C738F] font-medium leading-[1.5] mt-1.5">Masukkan Admin Key. Key hanya disimpan selama tab browser ini terbuka dan tidak dimasukkan ke URL.</p>
 
           <div className="mt-5 space-y-4">
             <div>

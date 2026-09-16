@@ -35,13 +35,15 @@ new_sqlite_classes = ["RealtimeHub"]
 [[rules]]
 type = "Text"
 globs = ["**/*.html"]
+fallthrough = true
 
 [[rules]]
 type = "Data"
 globs = ["**/*.png"]
+fallthrough = true
 
 [vars]
-ALLOW_ORIGIN = "*"
+ALLOWED_ORIGINS = "https://xycloud.my.id,https://www.xycloud.my.id,https://admin.xycloud.my.id,https://api.xycloud.my.id,https://xycloud-dashboard.pages.dev,https://dashboard-iota-ten-70.vercel.app"
 PUBLIC_URL = "https://api.xycloud.my.id"
 WEB_URL = "https://xycloud.my.id"
 REPO_RILIS = "xykalnotkel/XyCloudOrder"
@@ -54,6 +56,8 @@ BANK_NOMOR = "083116632566"
 BANK_ATASNAMA = "XyCloudStore"
 QRIS_URL = ""
 MIN_TOPUP = "10000"
+MAX_TOPUP = "10000000"
+PAYMENT_PROVIDER = "pakasir"
 EMAIL_ADMIN = "xycdigital@gmail.com"
 BONUS_REFERRAL = "10000"
 BONUS_DIUNDANG = "5000"
@@ -64,7 +68,8 @@ FACEBOOK_GRAPH_VERSION = "v26.0"
 GOOGLE_CLIENT_ID_ANDROID = "495336144977-1b3k66ngo4nhjf6kuetcl5j1vosfgbg4.apps.googleusercontent.com"
 # Secret: JWT_SECRET, ADMIN_KEY, RESEND_API_KEY, ONESIGNAL_API_KEY,
 #         CLOUDINARY_KEY, CLOUDINARY_SECRET, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET,
-#         FACEBOOK_APP_ID, FACEBOOK_APP_SECRET
+#         FACEBOOK_APP_ID, FACEBOOK_APP_SECRET,
+#         PAKASIR_PROJECT, PAKASIR_API_KEY
 
 # --- Pemeliharaan otomatis tiap jam ---
 [triggers]

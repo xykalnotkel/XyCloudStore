@@ -192,14 +192,24 @@ redirect URI, mode Live, serta callback penghapusan data. Lihat [panduan setup M
 **Login Google native pada versi terbaru:** membutuhkan OAuth client Android dengan package name dan SHA-1 sertifikat APK rilis. Web client tetap digunakan sebagai `serverClientId`; jangan diganti dengan Android client. Lihat [panduan konfigurasi beserta fingerprint APK](docs/login-google.md).
 
 ### Dompet dengan pembayaran nyata
-1. Pengguna memilih nominal, server membuat permintaan dengan **kode unik 3 digit** supaya mudah dicocokkan.
-2. Aplikasi menampilkan rekening tujuan dan total yang harus ditransfer.
-3. Pengguna mengunggah bukti transfer (tersimpan di Cloudinary).
-4. Admin membuka menu **Top Up** di dashboard, melihat bukti, lalu menyetujui.
-5. Saldo bertambah otomatis, disertai push, email struk, dan pembaruan realtime.
+Provider utama adalah **Pakasir** (QRIS + Virtual Account), dengan adaptor Tripay dan Midtrans tetap
+tersedia. Pengguna menerima checkout/nomor bayar, aplikasi memantau status, dan saldo masuk setelah
+server mengambil Transaction Detail dari provider serta mencocokkan project, order ID, dan nominal.
+Webhook tidak pernah cukup untuk mengkredit saldo—khusus Pakasir, ini wajib karena provider tidak
+mendokumentasikan signature webhook.
 
-Rekening dan minimal top up diatur lewat variabel `BANK_NAMA`, `BANK_NOMOR`, `BANK_ATASNAMA`,
-`QRIS_URL`, dan `MIN_TOPUP` di `wrangler.toml`.
+Kredit saldo, buku besar, dan perubahan status dijalankan dalam satu batch D1 dengan klaim unik
+`topup_credit`, sehingga webhook, polling, cron, atau klik admin yang bersamaan tidak dapat menambah
+saldo dua kali. Dashboard **Top Up** menampilkan kesehatan integrasi, webhook ditolak, rekonsiliasi,
+provider/status transaksi, dan biaya. Tagihan gateway tidak boleh disetujui manual kecuali override
+pemilik dengan frasa konfirmasi serta alasan audit.
+
+Aktifkan Pakasir memakai Worker Secret `PAKASIR_PROJECT` dan `PAKASIR_API_KEY`, lalu pasang webhook
+`https://api.xycloud.my.id/bayar/webhook/pakasir` pada proyek Pakasir. Jangan simpan API key di tabel
+`setelan`. Klien Payment UI v2 menerima seluruh metode Pakasir; APK lama otomatis dibatasi ke
+hosted QRIS agar tetap kompatibel. Jika tidak ada provider valid, sistem memakai jalur manual: kode
+unik 3 digit, rekening, unggah bukti, dan persetujuan admin. Variabel non-rahasia: `PAYMENT_PROVIDER`, `BANK_NAMA`,
+`BANK_NOMOR`, `BANK_ATASNAMA`, `QRIS_URL`, `MIN_TOPUP`, dan `MAX_TOPUP`.
 
 ### Produk akun lengkap
 Kolom baru: `gambar`, `deskripsi`, `detail` (peta spesifikasi), `jumlah_ulasan`. Dashboard bisa
@@ -550,8 +560,8 @@ curl -X POST https://api.xycloud.my.id/api/cs/reply \
 
 ## Sebelum produksi
 
-- Ganti password plaintext di D1 dengan hash (SHA-256 + salt atau bcrypt via Worker).
-- Sambungkan payment gateway sungguhan (Midtrans, Xendit, atau Tripay).
-- Hubungkan fungsi `provision()` di Worker ke API hypervisor atau panel VPS.
-- Tambahkan push notification agar notifikasi order tetap masuk saat aplikasi tertutup.
+- Pastikan webhook Pakasir telah diisi di dashboard provider dan jalankan rekonsiliasi dari dashboard admin.
+- Simpan semua kredensial hanya sebagai Cloudflare Worker Secret; tabel `setelan` hanya untuk nilai non-rahasia.
+- Hubungkan fungsi provisioning ke agen/hypervisor PC rental yang telah diotorisasi dan dipantau.
+- Verifikasi push, email, login sosial, pembayaran sandbox, dan jalur pemulihan sebelum menerima transaksi nyata.
 - Simpan berkas keystore rilis di tempat aman; kalau hilang, aplikasi tidak bisa diperbarui di Play Store.

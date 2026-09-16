@@ -8,7 +8,7 @@ export type AdminFetchOpts = {
 const BASE = process.env.NEXT_PUBLIC_API_BASE || "https://api.xycloud.my.id";
 
 export async function adminFetch(path: string, opts: AdminFetchOpts = {}) {
-  const key = opts.adminKey || (typeof window !== "undefined" ? localStorage.getItem("xy_admin_key") || "" : "");
+  const key = opts.adminKey || (typeof window !== "undefined" ? sessionStorage.getItem("xy_admin_key") || "" : "");
   const headers: Record<string,string> = {
     "Content-Type": "application/json",
     ...(opts.headers || {}),
@@ -25,6 +25,8 @@ export async function adminFetch(path: string, opts: AdminFetchOpts = {}) {
       headers,
       body: opts.body ? JSON.stringify(opts.body) : undefined,
       cache: "no-store",
+      credentials: "omit",
+      referrerPolicy: "no-referrer",
     });
   } catch (e:any) {
     // NetworkError handling — give clear message
@@ -44,16 +46,19 @@ export async function adminFetch(path: string, opts: AdminFetchOpts = {}) {
 // client side helpers
 export function getAdminKey(): string {
   if (typeof window === "undefined") return "";
-  return localStorage.getItem("xy_admin_key") || "";
+  return sessionStorage.getItem("xy_admin_key") || "";
 }
 export function setAdminKey(k: string) {
   if (typeof window !== "undefined") {
-    localStorage.setItem("xy_admin_key", k);
-    localStorage.setItem("xy_admin_ok", "1");
+    // Secret hidup hanya selama tab/sesi browser ini, bukan tersimpan permanen.
+    sessionStorage.setItem("xy_admin_key", k);
+    localStorage.removeItem("xy_admin_key");
+    localStorage.removeItem("xy_admin_ok");
   }
 }
 export function clearAdminKey() {
   if (typeof window !== "undefined") {
+    sessionStorage.removeItem("xy_admin_key");
     localStorage.removeItem("xy_admin_key");
     localStorage.removeItem("xy_admin_ok");
   }

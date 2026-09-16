@@ -258,7 +258,7 @@ const ic=(n,s=18,c='currentColor',w=1.9)=>`<svg width="${s}" height="${s}" viewB
 document.querySelector('aside button[onclick="keluar()"]').innerHTML=ic('logout')+'Keluar';
 
 /* ---------- state ---------- */
-let KEY=localStorage.getItem('xy_admin_key')||'';
+let KEY=sessionStorage.getItem('xy_admin_key')||'';
 let TAB='dash', ROOM=null, WS=null, DATA={};
 let RENDER_ID=0;
 const rp=n=>'Rp'+(n||0).toLocaleString('id-ID');
@@ -282,21 +282,24 @@ async function masuk(){
   try{
     const r=await fetch('/api/admin/stats',{headers:{'x-admin-key':k}});
     if(!r.ok)throw 0;
-    KEY=k;localStorage.setItem('xy_admin_key',k);
+    KEY=k;sessionStorage.setItem('xy_admin_key',k);localStorage.removeItem('xy_admin_key');
+    document.getElementById('gk').value='';
     document.getElementById('gate').style.display='none';
     document.getElementById('wrap').classList.add('on');
     TAB=tabDariHash();   // buka menu sesuai alamat (#/...), bukan selalu Dashboard
     konek();render();
   }catch(e){
+    KEY='';sessionStorage.removeItem('xy_admin_key');document.getElementById('gk').value='';
     const el=document.getElementById('gerr');el.textContent='Admin key salah. Coba lagi.';el.style.display='block';
   }
 }
-function keluar(){localStorage.removeItem('xy_admin_key');location.reload()}
+function keluar(){sessionStorage.removeItem('xy_admin_key');localStorage.removeItem('xy_admin_key');location.reload()}
 
 /* ---------- realtime inbox ---------- */
-function konek(){
+async function konek(){
   try{
-    WS=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws/cs:inbox?key='+encodeURIComponent(KEY));
+    const auth=await api('/ws-ticket',{method:'POST',body:JSON.stringify({room:'cs:inbox'})});
+    WS=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws/cs:inbox?ticket='+encodeURIComponent(auth.ticket));
     WS.onmessage=e=>{
       let m;try{m=JSON.parse(e.data)}catch{return}
       if(m.type==='chat.message'){
@@ -305,7 +308,7 @@ function konek(){
       }
     };
     WS.onclose=()=>setTimeout(konek,4000);
-  }catch(e){}
+  }catch(e){setTimeout(konek,4000)}
 }
 
 /* ---------- menu ---------- */
@@ -1033,9 +1036,8 @@ async function vPeran(){
           <div style="flex:1;min-width:0"><b style="font-size:13.5px">${esc(a.nama)}</b>
             <div style="font-size:11px;color:var(--muted)">
               ${a.terakhir?'aktif '+String(a.terakhir).replace('T',' ').slice(0,16):'belum pernah dipakai'}</div>
-            <div class="mono" style="font-size:10.5px;color:var(--muted);word-break:break-all">${esc(a.kunci)}</div></div>
+            <div class="mono" style="font-size:10.5px;color:var(--muted);word-break:break-all">${esc(a.kunci_preview||'••••••••')}</div></div>
           <span class="tag" style="background:${warnaPeran[a.peran]}22;color:${warnaPeran[a.peran]}">${esc(a.peran)}</span>
-          <button class="btn sm ghost" onclick="salinKode('${esc(a.kunci)}')">Salin</button>
           <button class="btn sm danger" onclick="hapusPeran('${a.id}')">Hapus</button>
         </div>`).join(''):'<div style="color:var(--muted);font-size:12.5px;padding:12px 0">Belum ada admin tambahan</div>'}
         <div style="font-size:11.5px;color:var(--muted);margin-top:12px;line-height:1.6">
@@ -1055,8 +1057,7 @@ async function vPeran(){
           <div style="flex:1"><b class="mono" style="font-size:12.5px">${esc(c.id)}</b>
             <div style="font-size:11px;color:var(--muted)">${c.jumlah_baris} baris &middot;
               ${Math.round(c.ukuran/1024)} KB &middot; ${String(c.dibuat).replace('T',' ').slice(0,16)}</div></div>
-          <a class="btn sm ghost" href="/api/admin/cadangan/${esc(c.id)}?key=${encodeURIComponent(KEY)}"
-            target="_blank" style="text-decoration:none">Unduh</a>
+          <button class="btn sm ghost" onclick="unduhCadangan('${esc(c.id)}')">Unduh</button>
         </div>`).join(''):'<div style="color:var(--muted);font-size:12.5px">Belum ada cadangan</div>'}
       </div>
     </div>
@@ -1091,7 +1092,7 @@ function formPeran(){
       xberitahu('Admin ditambahkan',
         `Kunci untuk <b>${esc(document.getElementById('f_pnama')?.value||'admin baru')}</b>:<br>` +
         `<span class="mono" style="word-break:break-all">${esc(d.kunci)}</span><br><br>` +
-        'Salin sekarang, kunci ini juga tetap terlihat di daftar.');
+        'Salin sekarang. Demi keamanan, nilai lengkap tidak dapat dilihat lagi setelah dialog ini ditutup.');
       vPeran();
     });
 }
@@ -1108,6 +1109,12 @@ async function buatCadanganSekarang(){
   const d=await api('/cadangan',{method:'POST'});
   toast(`Cadangan ${d.id} dibuat, ${d.baris} baris`);
   vPeran();
+}
+async function unduhCadangan(id){
+  const r=await fetch('/api/admin/cadangan/'+encodeURIComponent(id),{headers:{'x-admin-key':KEY}});
+  if(!r.ok)throw new Error('Cadangan gagal diunduh');
+  const blob=await r.blob(),url=URL.createObjectURL(blob),a=document.createElement('a');
+  a.href=url;a.download='xycloudstore-'+id+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
 
 /* ---------- moderasi konten ---------- */

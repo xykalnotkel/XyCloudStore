@@ -691,6 +691,7 @@ class PermintaanTopup {
   final int total;
   final String metode;
   final String status; // menunggu | diperiksa | disetujui | ditolak
+  final String provider;
   final String? bukti;
   final String? catatan;
   final DateTime dibuat;
@@ -708,6 +709,7 @@ class PermintaanTopup {
     required this.metode,
     required this.status,
     required this.dibuat,
+    this.provider = 'manual',
     this.bukti,
     this.catatan,
     this.rekening = const {},
@@ -722,6 +724,7 @@ class PermintaanTopup {
         total: j['total'] ?? (j['nominal'] ?? 0),
         metode: j['metode'] ?? 'transfer',
         status: j['status'] ?? 'menunggu',
+        provider: '${j['provider'] ?? (j['otomatis'] == true ? 'gateway' : 'manual')}',
         bukti: (j['bukti'] as String?)?.isNotEmpty == true ? j['bukti'] : null,
         catatan: (j['catatan'] as String?)?.isNotEmpty == true ? j['catatan'] : null,
         dibuat: tanggalServer(j['dibuat']),

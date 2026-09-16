@@ -142,6 +142,13 @@ export async function buatCadangan(env) {
       isi[t] = results.map((r) => {
         const salin = { ...r };
         delete salin.password;
+        // Kode VA/QR dan checkout yang masih aktif tidak diperlukan untuk
+        // pemulihan buku besar, jadi tidak ikut ke salinan cadangan.
+        if (t === 'topup') {
+          delete salin.payment_code;
+          delete salin.payment_qr;
+          delete salin.checkout_url;
+        }
         return salin;
       });
       baris += results.length;

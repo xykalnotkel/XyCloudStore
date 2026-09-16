@@ -114,11 +114,11 @@ export default function Sidebar() {
   const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [keyPreview, setKeyPreview] = useState("");
+  const [sesiAktif, setSesiAktif] = useState(false);
 
   useEffect(() => {
-    const k = typeof window !== "undefined" ? localStorage.getItem("xy_admin_key") || "" : "";
-    if (k) setKeyPreview(k.slice(0, 16) + "...");
+    const k = typeof window !== "undefined" ? sessionStorage.getItem("xy_admin_key") || "" : "";
+    setSesiAktif(Boolean(k));
   }, [pathname]);
 
   useEffect(() => {
@@ -154,7 +154,7 @@ export default function Sidebar() {
       {!compact && (
         <div className="bg-white border border-[#E9E3F5] rounded-[12px] p-3">
           <div className="text-[11px] text-[#7C738F] font-semibold tracking-wide uppercase">Admin</div>
-          <div className="text-[12px] text-[#1E1B2E] font-medium mt-1 truncate font-mono">{keyPreview || "—"}</div>
+          <div className="text-[12px] text-[#1E1B2E] font-medium mt-1">{sesiAktif ? "Sesi aktif di tab ini" : "—"}</div>
           <button
             type="button"
             onClick={keluar}

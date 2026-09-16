@@ -34,8 +34,8 @@ export default function PeranPage() {
     finally { setSaving(false); }
   }
 
-  async function hapus(id: string, kunci: string) {
-    if (!await konfirm({ pesan: `Hapus admin key ${kunci.slice(0, 10)}…?`, bahaya: true })) return;
+  async function hapus(id: string, preview: string) {
+    if (!await konfirm({ pesan: `Hapus admin key ${preview}?`, bahaya: true })) return;
     try {
       await adminFetch("/api/admin/peran/" + id, { method: "DELETE" });
       await muat();
@@ -110,10 +110,10 @@ export default function PeranPage() {
                   </div>
                   <div className="mt-3 flex items-center gap-2 p-2 rounded-xl bg-[#F5F3FF] border border-[#E9E3F5]">
                     <KeyRound size={13} className="text-[#7C3AED] shrink-0" />
-                    <code className="flex-1 text-[11px] font-mono text-[#1E1B2E] truncate">{a.kunci}</code>
-                    <button onClick={() => salin(a.kunci)} className="p-1.5 rounded-lg bg-white border border-[#E9E3F5] hover:border-[#C4B5FD]" title="Salin"><Copy size={12} className="text-[#7C3AED]" /></button>
+                    <code className="flex-1 text-[11px] font-mono text-[#1E1B2E] truncate">{a.kunci_preview || "••••••••"}</code>
+                    {a.legacy_unhashed && <Chip tone="warn">migrasi saat login</Chip>}
                     <button onClick={() => putar(a.id, a.nama)} className="p-1.5 rounded-lg bg-white border border-[#E9E3F5] hover:border-[#C4B5FD]" title="Putar kunci"><RefreshCw size={12} className="text-[#7C3AED]" /></button>
-                    <button onClick={() => hapus(a.id, a.kunci)} className="p-1.5 rounded-lg bg-white border border-[#E9E3F5] hover:border-rose-300" title="Hapus"><Trash2 size={12} className="text-rose-500" /></button>
+                    <button onClick={() => hapus(a.id, a.kunci_preview || "••••") } className="p-1.5 rounded-lg bg-white border border-[#E9E3F5] hover:border-rose-300" title="Hapus"><Trash2 size={12} className="text-rose-500" /></button>
                   </div>
                 </div>
               ))}

@@ -175,7 +175,7 @@ CREATE TABLE otp (id TEXT PRIMARY KEY, email TEXT NOT NULL, kode TEXT NOT NULL, 
 --  admin_kunci
 -- ------------------------------------------------------------
 DROP TABLE IF EXISTS admin_kunci;
-CREATE TABLE admin_kunci (id TEXT PRIMARY KEY, nama TEXT NOT NULL, kunci TEXT NOT NULL UNIQUE, peran TEXT NOT NULL DEFAULT 'cs', aktif INTEGER NOT NULL DEFAULT 1, terakhir TEXT, dibuat TEXT NOT NULL DEFAULT (datetime('now')));
+CREATE TABLE admin_kunci (id TEXT PRIMARY KEY, nama TEXT NOT NULL, kunci TEXT NOT NULL UNIQUE, kunci_preview TEXT, peran TEXT NOT NULL DEFAULT 'cs', aktif INTEGER NOT NULL DEFAULT 1, terakhir TEXT, dibuat TEXT NOT NULL DEFAULT (datetime('now')));
 
 -- ------------------------------------------------------------
 --  agen
@@ -368,7 +368,59 @@ INSERT INTO setelan(kunci,nilai) VALUES ('referral_install_aktif','0');
 --  topup
 -- ------------------------------------------------------------
 DROP TABLE IF EXISTS topup;
-CREATE TABLE topup (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, nominal INTEGER NOT NULL, kode_unik INTEGER NOT NULL DEFAULT 0, total INTEGER NOT NULL, metode TEXT NOT NULL, bukti TEXT, status TEXT NOT NULL DEFAULT 'menunggu', catatan TEXT, dibuat TEXT NOT NULL DEFAULT (datetime('now')), diproses TEXT);
+CREATE TABLE topup (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  nominal INTEGER NOT NULL,
+  kode_unik INTEGER NOT NULL DEFAULT 0,
+  total INTEGER NOT NULL,
+  metode TEXT NOT NULL,
+  bukti TEXT,
+  status TEXT NOT NULL DEFAULT 'menunggu',
+  catatan TEXT,
+  dibuat TEXT NOT NULL DEFAULT (datetime('now')),
+  diproses TEXT,
+  provider TEXT NOT NULL DEFAULT 'manual',
+  provider_ref TEXT,
+  provider_status TEXT,
+  provider_method TEXT,
+  provider_amount INTEGER,
+  provider_fee INTEGER,
+  provider_checked_at TEXT,
+  provider_expires_at TEXT,
+  checkout_url TEXT,
+  payment_qr TEXT,
+  payment_code TEXT,
+  webhook_count INTEGER NOT NULL DEFAULT 0
+);
+
+DROP TABLE IF EXISTS topup_credit;
+CREATE TABLE topup_credit (
+  topup_id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  nominal INTEGER NOT NULL CHECK (nominal > 0),
+  sumber TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  credited_at TEXT
+);
+CREATE INDEX idx_topup_credit_user ON topup_credit(user_id, credited_at);
+
+DROP TABLE IF EXISTS payment_webhook_event;
+CREATE TABLE payment_webhook_event (
+  id TEXT PRIMARY KEY,
+  provider TEXT NOT NULL,
+  topup_id TEXT,
+  event_status TEXT,
+  amount INTEGER,
+  verified INTEGER NOT NULL DEFAULT 0,
+  outcome TEXT NOT NULL,
+  source_hash TEXT,
+  received_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX idx_payment_webhook_recent ON payment_webhook_event(provider, received_at);
+CREATE INDEX idx_payment_webhook_topup ON payment_webhook_event(topup_id, received_at);
+CREATE INDEX idx_topup_provider_status ON topup(provider, status, dibuat);
+CREATE INDEX idx_topup_provider_ref ON topup(provider, provider_ref);
 
 -- ------------------------------------------------------------
 --  ulasan
