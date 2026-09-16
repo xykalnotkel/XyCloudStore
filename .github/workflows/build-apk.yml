@@ -39,6 +39,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Validasi sintaks tool build
+        run: python3 -m py_compile tools/*.py
+
       - name: Setup Node untuk uji backend
         uses: actions/setup-node@v4
         with:

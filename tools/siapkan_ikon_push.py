@@ -88,14 +88,13 @@ def utama() -> int:
         ikon.save(dst_drawable, format="PNG")
         print(f"Tulis {dst_drawable}")
 
-  # 3) cadangan nama alias (untuk payload small_icon lain) — nama konsisten
-  #    dengan logo aplikasi XyCloudStore, BUKAN logo studio XyVerse.
-  if args.android_dir:
-      drawable = os.path.join(args.android_dir, "app", "src", "main", "res", "drawable")
-      dst_alias = os.path.join(drawable, "ic_stat_xycloudstore.png")
-      ikon.save(dst_alias, format="PNG")
-      print(f"Tulis {dst_alias}")
-  return 0
+        # 3) cadangan nama alias (untuk payload small_icon lain) — nama
+        #    konsisten dengan logo aplikasi, BUKAN logo studio XyVerse.
+        dst_alias = os.path.join(drawable, "ic_stat_xycloudstore.png")
+        ikon.save(dst_alias, format="PNG")
+        print(f"Tulis {dst_alias}")
+
+    return 0
 
 
 if __name__ == "__main__":
