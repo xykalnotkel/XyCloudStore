@@ -752,6 +752,12 @@ class KonfigurasiApp {
   final int statistikPengguna;
   final int statistikUnitOnline;
 
+  /// Batch M: server sedang mode pemeliharaan (dari /config, sehingga juga
+  /// terbaca untuk perangkat yang belum login — selama pemeliharaan auth/*
+  /// tetap terbuka dan 503 tidak pernah sampai ke klien tanpa token).
+  final bool pemeliharaanAktif;
+  final String pemeliharaanPesan;
+
   const KonfigurasiApp({
     this.bayarOtomatis = false,
     this.metodeBayar = const [],
@@ -764,6 +770,8 @@ class KonfigurasiApp {
     this.negaraNama = '',
     this.statistikPengguna = 0,
     this.statistikUnitOnline = 0,
+    this.pemeliharaanAktif = false,
+    this.pemeliharaanPesan = '',
   });
 
   factory KonfigurasiApp.fromJson(Map<String, dynamic> j) {
@@ -784,6 +792,8 @@ class KonfigurasiApp {
       statistikPengguna: (_petaAman(j['statistik'])['pengguna'] as num?)?.toInt() ?? 0,
       statistikUnitOnline: (_petaAman(j['statistik'])['unitOnline'] as num?)?.toInt() ?? 0,
       minTopup: j['minTopup'] ?? 10000,
+      pemeliharaanAktif: _petaAman(j['pemeliharaan'])['aktif'] == true,
+      pemeliharaanPesan: '${_petaAman(j['pemeliharaan'])['pesan'] ?? ''}',
     );
   }
 }

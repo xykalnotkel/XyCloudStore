@@ -929,7 +929,17 @@ fn main() {
             std::process::exit(2);
         }
         let stop = Arc::new(AtomicBool::new(false));
-        let log: Logger = Arc::new(|t| println!("[XYAGENT] {t}"));
+        // Log headless TIDAK boleh cuma ke stdout — proses autostart registry
+        // tak punya terminal, pesan akan hilang. Tulis juga ke
+        // %APPDATA%\XyCloudStore\Agent\agent.log (rotasi 1MB, stempel waktu).
+        let log: Logger = Arc::new(|t| {
+            println!("[XYAGENT] {t}");
+            agent::tulis_log_headless(t);
+        });
+        agent::tulis_log_headless(&format!(
+            "Mulai headless — agen v{VERSI}, kode unit terpasang={}",
+            !cfg.kode.is_empty()
+        ));
         agent::jalankan_loop(cfg, log, stop);
         return;
     }

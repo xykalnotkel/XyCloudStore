@@ -517,37 +517,32 @@ class _MenuCepat extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    Widget kartu(String ikon, String label, IconData iconData, Widget layar) {
-      final t = XyTheme.of(context);
+    Widget item(String ikon, String label, IconData iconData, Widget layar) {
       return Pressable(
         onTap: () => Navigator.push(context, xyRoute(layar)),
         scale: .94,
-        // Batch J: wadah kartu halus (tidak mencolok) supaya grid enak dilihat.
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
-          decoration: BoxDecoration(
-            color: t.dark ? Colors.white.withOpacity(.045) : XyTheme.violet.withOpacity(.05),
-            border: Border.all(color: t.line.withOpacity(.55)),
-            borderRadius: BorderRadius.circular(18),
-          ),
+        // Satu kartu besar bersama — item di dalamnya polos tanpa wadah
+        // sendiri (permintaan pemilik: bukan 8 kartu terpisah).
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 2),
           child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
           // Ikon 3D glossy-clay: aset AI transparan (lihat assets/ikon/3d_*.png).
           // Item tanpa aset memakai fallback pil gradien + ikon material.
           Image.asset(
             'assets/ikon/3d_$ikon.png',
-            width: 50,
-            height: 50,
+            width: 46,
+            height: 46,
             fit: BoxFit.contain,
             filterQuality: FilterQuality.medium,
             errorBuilder: (_, __, ___) => Container(
-              width: 50,
-              height: 50,
+              width: 46,
+              height: 46,
               decoration: BoxDecoration(
                 gradient: XyTheme.gradPrimary,
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: BorderRadius.circular(15),
                 boxShadow: XyTheme.glow(XyTheme.primary, .22),
               ),
-              child: Icon(iconData, color: Colors.white, size: 26),
+              child: Icon(iconData, color: Colors.white, size: 24),
             ),
           ),
           const SizedBox(height: 6),
@@ -556,7 +551,7 @@ class _MenuCepat extends StatelessWidget {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              fontSize: 11,
+              fontSize: 10.5,
               fontWeight: FontWeight.w700,
               letterSpacing: -.1,
               color: XyTheme.of(context).ink,
@@ -567,22 +562,32 @@ class _MenuCepat extends StatelessWidget {
       );
     }
 
-    // grid 4 kolom tanpa wadah kartu — ikon + label kecil langsung di halaman
-    return GridView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      padding: EdgeInsets.zero,
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 4,
-        mainAxisSpacing: 12,
-        crossAxisSpacing: 8,
-        childAspectRatio: 0.80,
+    final t = XyTheme.of(context);
+    // Kartu besar satu wadah berisi seluruh kategori cepat.
+    return Container(
+      padding: const EdgeInsets.fromLTRB(10, 14, 10, 10),
+      decoration: BoxDecoration(
+        color: t.dark ? Colors.white.withOpacity(.04) : Colors.white,
+        border: Border.all(color: t.line.withOpacity(.55)),
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: XyTheme.shadowSm,
       ),
-      itemCount: _menu.length,
-      itemBuilder: (_, i) {
-        final (ikon, label, iconData, layar) = _menu[i];
-        return kartu(ikon, label, iconData, layar);
-      },
+      child: GridView.builder(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        padding: EdgeInsets.zero,
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 4,
+          mainAxisSpacing: 6,
+          crossAxisSpacing: 4,
+          childAspectRatio: 0.78,
+        ),
+        itemCount: _menu.length,
+        itemBuilder: (_, i) {
+          final (ikon, label, iconData, layar) = _menu[i];
+          return item(ikon, label, iconData, layar);
+        },
+      ),
     );
   }
 }

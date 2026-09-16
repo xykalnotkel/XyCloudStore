@@ -434,6 +434,28 @@ async function akunSosial(env, ctx, prof, provider, deviceId, req) {
 
 const emailValid = (v) => /^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(String(v || '').trim());
 
+// Domain email sekali pakai (disposable) yang umum dipakai untuk mendaftar
+// massal/mabuk-mabukan. Pendaftaran dengan domain ini ditolak di server;
+// login akun yang sudah ada tidak terpengaruh.
+const DOMAIN_TEMP = new Set([
+  'mailinator.com','tempmail.com','temp-mail.org','tempmail.org','tempmail.eu',
+  'temp-mail.io','10minutemail.com','10minutemail.net','10minutemail.org',
+  'guerrillamail.com','guerrillamail.net','guerrillamail.info','guerrillamail.biz',
+  'sharklasers.com','grr.la','spamgourmet.com','yopmail.com','yopmail.net',
+  'yopmail.fr','trashmail.com','trashmail.net','trashmail.at','throwawaymail.com',
+  'getnada.com','maildrop.cc','fakeinbox.com','mailnesia.com','dispostable.com',
+  'mailcatch.com','mintemail.com','moakt.com','mytemp.email','spam4.me',
+  'tempr.email','33mail.com','discard.email','getairmail.com','sinkmail.org',
+  'sneakemail.com','t1.net','tdmail2.org','tmpbox.net','wegobox.net','wego.ro',
+  'wh4t.org','mail-temp.com','tmpmail.net','tmpmail.org','tempmailer.com',
+  'templemail.com','moakt.co','tempinbox.com','fakeinbox.in','spamgourmet.net',
+]);
+
+const emailDisposable = (v) => {
+  const domain = String(v || '').trim().toLowerCase().split('@').pop() || '';
+  return DOMAIN_TEMP.has(domain);
+};
+
 // ---------- token sederhana (HMAC-SHA256) ----------
 const b64u = (buf) =>
   btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -1350,7 +1372,19 @@ ${halaman.map(([u, p2, f]) => `  <url>
         // Negara pengunjung dari jaringan (Cloudflare) — dipakai layar login
         // untuk baris persetujuan "akun kamu berasal dari ...".
         const ccNegara = String(req.cf?.country || '').toUpperCase();
+        // Batch M: status pemeliharaan ikut dibocorkan di /config (endpoint
+        // ini selalu boleh lewat). Selama pemeliharaan auth/* tetap terbuka,
+        // jadi perangkat BELUM login tidak pernah menerima 503 — tanpa field
+        // ini app membuka onboarding/login padahal server sedang tutup.
+        // Pengguna yang dikecualikan admin otomatis dapat aktif=false.
+        const kena503 = await tertutupPemeliharaan(env, req);
         return json({
+          pemeliharaan: {
+            aktif: kena503,
+            pesan: kena503
+              ? await setelan(env, 'pesan_pemeliharaan', 'Kami sedang melakukan perawatan singkat. Silakan coba lagi beberapa menit lagi.')
+              : '',
+          },
           negara: { kode: ccNegara || 'ID', nama: NAMA_NEGARA[ccNegara] || (ccNegara || 'Indonesia') },
           providers: providerSiap(env),
           whatsapp: env.WA_ADMIN || '',
@@ -1500,6 +1534,10 @@ async function statistikPublik(env) {
         const kasarDaftar = kataTerlarangDalam(nama);
         if (kasarDaftar) return err(`Nama mengandung kata terlarang (${kasarDaftar.jenis}). Ganti dengan nama lain.`, 422, env);
         if (!emailValid(email)) return err('Format email tidak valid', 400, env);
+        if (emailDisposable(email)) {
+          ctx.waitUntil(catatLog(env, 'keamanan', `Pendaftaran ditolak: email disposable ${email} (IP ${ip})`));
+          return err('Email sementara/disposable tidak bisa dipakai untuk mendaftar. Gunakan email utama kamu.', 403, env);
+        }
         if (password.length < 6) return err('Password minimal 6 karakter', 400, env);
 
         const ada = await env.DB.prepare('SELECT id, email_verified FROM users WHERE lower(email) = ?')
@@ -3897,6 +3935,14 @@ if (a.startsWith('peran/') && req.method === 'DELETE') {
           return err('Hanya berkas GIF atau MP4 yang boleh jadi banner kustom.', 422, env);
         }
         if (!hasil.ok) return err(hasil.alasan, 502, env);
+        // Verifikasi setelah unggah: pastikan aset benar-benar bisa diakses
+        // (terdapat kasus aset terhapus dari akun cloud sesaat setelah unggah).
+        try {
+          const cek = await fetch(hasil.url, { method: 'HEAD' });
+          if (!cek.ok) return err('Banner gagal tersimpan di cloud (verifikasi gagal). Coba sekali lagi.', 502, env);
+        } catch (_) {
+          return err('Banner gagal tersimpan di cloud. Coba sekali lagi.', 502, env);
+        }
         const media = JSON.stringify({ tipe, url: hasil.url, gif: hasil.gif || hasil.url });
         await env.DB.prepare('UPDATE users SET banner_media=? WHERE id=?').bind(media, me.sub).run();
         return json({ ok: true, banner_media: media }, 200, env);

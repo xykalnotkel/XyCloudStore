@@ -49,6 +49,11 @@ public final class NativeStreaming {
         Map<String,Object> map = new HashMap<>(); map.put("type",type); map.put("message",message);
         main.post(() -> { if(events != null) events.event(map); });
     }
+    /** Baris log untuk panel log aplikasi (ditampilkan di layar sesi). */
+    public static void emitLog(String message) {
+        Map<String,Object> map = new HashMap<>(); map.put("type","log"); map.put("message",message);
+        main.post(() -> { if(events != null) events.event(map); });
+    }
     private void emitPin(String pin, int request) {
         main.postDelayed(() -> {
             if(request != generation) return;
@@ -66,6 +71,16 @@ public final class NativeStreaming {
             case "cancel":
                 generation++; if(task!=null)task.cancel(true); computer=null; apps=null; reply.ok(null); return;
             case "resetPairing": activity.deleteFile("uniqueid");activity.deleteFile("client.crt");activity.deleteFile("client.key");saved.edit().clear().apply(); computer=null;apps=null;reply.ok(null);return;
+            case "setKontrol": {
+                // Mode kontrol untuk sesi berikutnya: true = bawaan Moonlight,
+                // false = HUD XyCloudStore (QWERTY/F/Windows/numpad).
+                boolean bawaan=args.get("bawaan")instanceof Boolean?
+                    (Boolean)args.get("bawaan"):false;
+                activity.getSharedPreferences("xy_hud_v1",0).edit()
+                    .putBoolean("bawaan",bawaan).apply();
+                XyLog.tulis(bawaan?"Mode kontrol disimpan: bawaan (Moonlight).":"Mode kontrol disimpan: XyCloudStore.");
+                reply.ok(null);return;
+            }
             default:reply.fail("UNKNOWN","Perintah streaming tidak dikenal.");
         }
     }

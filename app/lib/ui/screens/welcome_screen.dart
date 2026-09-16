@@ -100,15 +100,10 @@ class _WelcomeScreenState extends State<WelcomeScreen> with SingleTickerProvider
 
               const SizedBox(height: 30),
 
+              // Angka nyata dari server — tidak ada lagi statistik fiksi.
               FadeInUp(
                 delay: const Duration(milliseconds: 380),
-                child: Row(children: const [
-                  _Stat('4.9', 'Rating'),
-                  _Divider(),
-                  _Stat('19K+', 'Pengguna'),
-                  _Divider(),
-                  _Stat('24/7', 'Support'),
-                ]),
+                child: const _StatistikReal(),
               ),
 
               const Spacer(flex: 2),
@@ -184,6 +179,32 @@ class _Divider extends StatelessWidget {
         margin: const EdgeInsets.symmetric(horizontal: 20),
         color: Colors.white.withOpacity(.12),
       );
+}
+
+/// Statistik asli dari server (/api/config) — menggantikan angka statis
+/// yang tidak nyata ("19K+ pengguna" dlm. versi lama).
+class _StatistikReal extends StatelessWidget {
+  const _StatistikReal();
+
+  static String _ringkas(int n) {
+    if (n >= 1000000) return '${(n / 1000000).toStringAsFixed(1).replaceAll('.', ',')} jt';
+    if (n >= 1000) return '${(n / 1000).toStringAsFixed(n >= 10000 ? 0 : 1).replaceAll('.', ',')} rb';
+    return n.toString();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final k = context.watch<AppState>().konfigurasi;
+    return Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+      _Stat(_ringkas(k.statistikPengguna), 'Pengguna'),
+      const _Divider(),
+      if (k.statistikUnitOnline > 0) ...[
+        _Stat('${k.statistikUnitOnline}', 'Unit Online'),
+        const _Divider(),
+      ],
+      const _Stat('24/7', 'Support'),
+    ]);
+  }
 }
 
 class _ConstellationPainter extends CustomPainter {

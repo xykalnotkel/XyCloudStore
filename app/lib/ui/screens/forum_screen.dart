@@ -302,13 +302,50 @@ Widget teksForum(String isi, TextStyle gaya, {int? maxLines}) {
 }
 
 /// Lencana keanggotaan yang tampil di samping nama penulis.
-class LencanaTier extends StatelessWidget {
+/// Lencana tier dengan animasi kilau (shimmer) untuk PRO/VIP/ADMIN
+/// (Batch M: "tier animasi"). BASIC tetap statis — lencana ini muncul
+/// berulang di daftar forum, jadi animasi hanya untuk tier premium agar
+/// tetap hemat GPU di ponsel kelas menengah.
+class LencanaTier extends StatefulWidget {
   const LencanaTier(this.tier, {super.key});
   final String tier;
 
   @override
+  State<LencanaTier> createState() => _LencanaTierState();
+}
+
+class _LencanaTierState extends State<LencanaTier>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _kilau = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 2400),
+  );
+
+  bool get _premium =>
+      const {'pro', 'vip', 'admin'}.contains(widget.tier.toLowerCase());
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Widget test memakai TickerMode nonaktif → animasi tidak jalan dan
+    // pumpAndSettle tetap settle. Di device asli animasi menyala.
+    if (_premium && TickerMode.of(context)) {
+      if (!_kilau.isAnimating) _kilau.repeat();
+    } else if (_kilau.isAnimating) {
+      _kilau.stop();
+    }
+  }
+
+  @override
+  void dispose() {
+    _kilau.stop();
+    _kilau.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final t = tier.toLowerCase();
+    final t = widget.tier.toLowerCase();
     if (t.isEmpty) return const SizedBox.shrink();
 
     final (warna, label, ikon) = switch (t) {
@@ -322,8 +359,7 @@ class LencanaTier extends StatelessWidget {
       _ => (XyTheme.of(context).muted, 'BASIC', Icons.person_rounded),
     };
 
-    return Container(
-      margin: const EdgeInsets.only(left: 6),
+    final inti = Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
         color: warna.withOpacity(.12),
@@ -341,9 +377,44 @@ class LencanaTier extends StatelessWidget {
                 letterSpacing: .5)),
       ]),
     );
+
+    if (!_premium) {
+      return Padding(padding: const EdgeInsets.only(left: 6), child: inti);
+    }
+
+    // Gelombang cahaya diagonal menyapu lencana (55% dari durasi), lalu jeda.
+    final sapu = CurvedAnimation(
+        parent: _kilau, curve: const Interval(0, .55, curve: Curves.easeInOut));
+    return Padding(
+      padding: const EdgeInsets.only(left: 6),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: Stack(clipBehavior: Clip.hardEdge, children: [
+          inti,
+          AnimatedBuilder(
+            animation: sapu,
+            builder: (context, _) {
+              final x = -1.6 + sapu.value * 3.2;
+              return Positioned.fill(
+                child: Opacity(
+                  opacity: .35,
+                  child: FractionalTranslation(
+                    translation: Offset(x, -0.25),
+                    child: Container(
+                      width: 46,
+                      color: Colors.white,
+                      transform: Matrix4.rotationZ(-0.5),
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ]),
+      ),
+    );
   }
 }
-
 /// Lencana khusus pemberian admin, contohnya XySpace atau Staff.
 class LencanaKhusus extends StatelessWidget {
   const LencanaKhusus(this.teks, {super.key});
@@ -392,7 +463,13 @@ class _KartuPost extends StatelessWidget {
                   ? null
                   : () => Navigator.push(context,
                       xyRoute(ProfilPublikScreen(userId: post.userId))),
-              child: _Avatar(nama: post.nama, foto: post.foto),
+              // Batch M: bingkai penulis ikut tampil di daftar diskusi
+              // (sebelumnya hanya di detail & komentar — "bingkai belum
+              // terlihat di komunitas").
+              child: AvatarBingkai(
+                  bingkai: post.bingkai,
+                  size: 38,
+                  child: _Avatar(nama: post.nama, foto: post.foto)),
             ),
             const SizedBox(width: 11),
             Expanded(

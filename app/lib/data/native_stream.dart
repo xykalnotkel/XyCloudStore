@@ -41,6 +41,14 @@ class NativeStream {
   }
 
   static Future<void> resetPairing() => _channel.invokeMethod('resetPairing');
+
+  /// Mode kontrol untuk sesi streaming berikutnya:
+  /// true = kontrol bawaan (Moonlight), false = HUD XyCloudStore.
+  static Future<void> setKontrolBawaan(bool bawaan) async {
+    try {
+      await _channel.invokeMethod('setKontrol', {'bawaan': bawaan});
+    } catch (_) {}
+  }
 }
 
 class NativeSettings {

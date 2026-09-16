@@ -20,16 +20,67 @@ if '--offline' not in sys.argv:
 # Minimal reproducible integration patches. Original copyright notices are retained.
 game=vendor/'app/src/main/java/com/limelight/Game.java'
 s=game.read_text()
-if 'xyTapKey' not in s:
+if 'xySendKey' not in s:
  pos=s.rfind('}')
- s=s[:pos]+'''\n    // XyCloudStore integration: on-screen function-key row, same native input path.
-    public void xyTapKey(int keyCode) {
-        long t = android.os.SystemClock.uptimeMillis();
-        onKeyDown(keyCode, new android.view.KeyEvent(t,t,android.view.KeyEvent.ACTION_DOWN,keyCode,0));
-        onKeyUp(keyCode, new android.view.KeyEvent(t,t+20,android.view.KeyEvent.ACTION_UP,keyCode,0));
+ s=s[:pos]+'''
+    // XyCloudStore integration: direct key send for the custom on-screen HUD.
+    // Bypasses the keyboard-grab gate so HUD taps always reach the host,
+    // and honors the modifier state (Win/Ctrl/Alt/Shift) from the HUD.
+    public void xySendKey(int keyCode, boolean isUp, int metaState) {
+        try {
+            if (conn == null) return;
+            long now = android.os.SystemClock.uptimeMillis();
+            android.view.KeyEvent ev = new android.view.KeyEvent(now, now,
+                    isUp ? android.view.KeyEvent.ACTION_UP : android.view.KeyEvent.ACTION_DOWN,
+                    keyCode, 0, metaState, 0, 0, android.view.InputDevice.SOURCE_KEYBOARD, false);
+            short translated = keyboardTranslator.translate(keyCode, -1);
+            if (translated != 0) {
+                conn.sendKeyboardInput(translated,
+                        isUp ? com.limelight.nvstream.input.KeyboardPacket.KEY_UP
+                             : com.limelight.nvstream.input.KeyboardPacket.KEY_DOWN,
+                        getModifierState(ev),
+                        keyboardTranslator.hasNormalizedMapping(keyCode, -1)
+                                ? (byte) 0 : (byte) MoonBridge.SS_KBE_FLAG_NON_NORMALIZED);
+            } else if (!isUp) {
+                int ch = ev.getUnicodeChar(metaState);
+                if (ch > 0) conn.sendUtf8Text(String.valueOf((char) ch));
+            }
+        } catch (Throwable ignored) { }
+    }
+
+    public void xySendText(String text) {
+        try {
+            if (conn != null && text != null && !text.isEmpty()) conn.sendUtf8Text(text);
+        } catch (Throwable ignored) { }
     }
 '''+s[pos:]
  game.write_text(s)
+# XyCloudStore (Batch M): kunci rasio stream landscape 16:9 — "lock di rasio
+# landscape walaupun headless, lebarnya sesuaikan". Sisi host sudah dikunci
+# 1920x1080@60 oleh Agent (opsi dd_* Sunshine); di sini permukaan video
+# dipaksa 16:9 landscape juga sehingga walau host mengirim rasio lain
+# (mis. display virtual portrait), lebar video tetap auto-fit ke layar dan
+# rasio tidak pernah ikut-ikutan. optimizeGameSettings dinyalakan agar
+# Sunshine menerapkan resolusi manual-nya saat stream mulai.
+if 'xy_lanskap' not in s:
+    s=s.replace('''        if (prefConfig.stretchVideo || aspectRatioMatch) {
+            // Set the surface to the size of the video
+            streamView.getHolder().setFixedSize(prefConfig.width, prefConfig.height);
+        }
+        else {
+            // Set the surface to scale based on the aspect ratio of the stream
+            streamView.setDesiredAspectRatio((double)prefConfig.width / (double)prefConfig.height);
+        }''','''        // XyCloudStore (xy_lanskap): permukaan video selalu landscape 16:9.
+        if (prefConfig.stretchVideo) {
+            // Set the surface to the size of the video
+            streamView.getHolder().setFixedSize(prefConfig.width, prefConfig.height);
+        }
+        else {
+            // Lebar auto-fit ke layar; video di-letterbox di dalam permukaan 16:9.
+            streamView.setDesiredAspectRatio(16.0 / 9.0);
+        }''')
+    s=s.replace('        StreamConfiguration config = new StreamConfiguration.Builder()','        // XyCloudStore (xy_lanskap): biarkan Sunshine menerapkan resolusi\n        // 1920x1080@60 yang dikunci Agent (dd_manual_resolution).\n        prefConfig.optimizeGameSettings = true;\n        StreamConfiguration config = new StreamConfiguration.Builder()')
+    game.write_text(s)
 # Bounded pairing wait (the UI can cancel rather than waiting forever).
 http=vendor/'app/src/main/java/com/limelight/nvstream/http/NvHTTP.java'
 s=http.read_text().replace('.readTimeout(0, TimeUnit.MILLISECONDS)', '.readTimeout(90_000, TimeUnit.MILLISECONDS)').replace('.readTimeout(0, TimeUnit.SECONDS)', '.readTimeout(90, TimeUnit.SECONDS)')

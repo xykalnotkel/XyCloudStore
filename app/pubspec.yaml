@@ -1,7 +1,7 @@
 name: xycloud_order
 description: "XyCloudStore - Sewa PC Cloud, Beli Akun Digital, dan Customer Service realtime."
 publish_to: "none"
-version: 3.7.0+25
+version: 3.8.0+26
 
 environment:
   sdk: ">=3.3.0 <4.0.0"

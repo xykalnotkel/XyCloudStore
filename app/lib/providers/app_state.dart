@@ -442,6 +442,16 @@ class AppState extends ChangeNotifier {
   Future<void> muatKonfigurasi() async {
     try {
       konfigurasi = await _repo.konfigurasi();
+      // Batch M: perangkat yang belum login tidak pernah menerima 503
+      // (auth/* sengaja tetap terbuka saat pemeliharaan) — statusnya kini
+      // terbaca lewat /config, jadi halaman perawatan tampil juga untuk
+      // mereka, bukan onboarding/login.
+      if (konfigurasi.pemeliharaanAktif && !perawatan) {
+        perawatan = true;
+        if (konfigurasi.pemeliharaanPesan.isNotEmpty) {
+          pesanPerawatan = konfigurasi.pemeliharaanPesan;
+        }
+      }
       notifyListeners();
     } catch (_) {
       // biarkan memakai nilai bawaan kalau server belum bisa dihubungi

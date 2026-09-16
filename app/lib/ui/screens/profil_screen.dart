@@ -82,28 +82,21 @@ class _ProfilScreenState extends State<ProfilScreen> {
               Column(children: [
               Row(children: [
                 Stack(children: [
+                  // Foto polos tanpa latar bulat — hanya inisial yang
+                  // memakai wadah gradien ketika belum ada foto.
                   AvatarBingkai(
                     bingkai: u.bingkai,
                     size: 72,
-                    child: Container(
-                      width: 72,
-                      height: 72,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: Colors.white.withOpacity(.16),
-                        image: (u.foto ?? '').isNotEmpty
-                            ? DecorationImage(image: NetworkImage(u.foto!), fit: BoxFit.cover)
-                            : null,
-                      ),
-                      child: (u.foto ?? '').isEmpty
-                          ? Center(
-                              child: Text(
-                                u.nama.isEmpty ? 'X' : u.nama[0].toUpperCase(),
-                                style: const TextStyle(
-                                    color: Colors.white, fontWeight: FontWeight.w700, fontSize: 26),
-                              ),
+                    child: ClipOval(
+                      child: (u.foto ?? '').isNotEmpty
+                          ? Image.network(
+                              u.foto!,
+                              width: 72,
+                              height: 72,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) => _WadahInisial(u.nama),
                             )
-                          : null,
+                          : _WadahInisial(u.nama),
                     ),
                   ),
                   Positioned(
@@ -127,10 +120,21 @@ class _ProfilScreenState extends State<ProfilScreen> {
                 const SizedBox(width: 16),
                 Expanded(
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    // Urutan rapi: nama → display name (@username) → slogan
+                    // → email → bio. Dulu display name nyelip di bawah email.
                     GayaNama(u.nama,
                         gaya: u.gayaNama,
                         style: const TextStyle(
                             color: Colors.white, fontWeight: FontWeight.w700, fontSize: 19, letterSpacing: -.5)),
+                    if ((u.username ?? '').isNotEmpty)
+                      Text('@${u.username}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              color: Color(0xFFC4B5FD),
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: .2)),
                     // Batch L: slogan tampil persis di bawah nama.
                     if ((u.slogan ?? '').isNotEmpty)
                       Padding(
@@ -149,16 +153,6 @@ class _ProfilScreenState extends State<ProfilScreen> {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(color: Colors.white.withOpacity(.62), fontSize: 12.5)),
-                    if ((u.username ?? '').isNotEmpty) ...[
-                      const SizedBox(height: 2),
-                      Text('@${u.username}',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                              color: Colors.white.withOpacity(.78),
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700)),
-                    ],
                     if ((u.bio ?? '').isNotEmpty) ...[
                       const SizedBox(height: 6),
                       Text(u.bio!,
@@ -393,6 +387,29 @@ class _ProfilScreenState extends State<ProfilScreen> {
 }
 
 // ---------------- potongan kecil ----------------
+/// Wadah inisial: gradien ungu lembut, dipakai hanya ketika belum ada foto.
+class _WadahInisial extends StatelessWidget {
+  const _WadahInisial(this.nama);
+  final String nama;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        width: 72,
+        height: 72,
+        decoration: const BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: XyTheme.gradPrimary,
+        ),
+        child: Center(
+          child: Text(
+            nama.isEmpty ? 'X' : nama[0].toUpperCase(),
+            style: const TextStyle(
+                color: Colors.white, fontWeight: FontWeight.w700, fontSize: 26),
+          ),
+        ),
+      );
+}
+
 class _Statistik extends StatelessWidget {
   const _Statistik(this.label, this.nilai);
   final String label, nilai;

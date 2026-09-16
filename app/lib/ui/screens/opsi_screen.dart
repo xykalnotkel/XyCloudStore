@@ -82,6 +82,15 @@ class _OpsiStreamingScreenState extends State<OpsiStreamingScreen> {
               'Latensi Ultra Rendah = HEVC + 120 FPS + bitrate tinggi; butuh HP yang mampu dan Wi-Fi/jaringan stabil. Suara game & Discord di PC ikut terdengar di HP; untuk onmic pakai Discord di HP atau mic PC.',
               style: TextStyle(fontSize: 11.5, color: XyTheme.of(context).muted, height: 1.4)),
           const SizedBox(height: 18),
+          SwitchListTile(
+              value: p['kontrolBawaan'] == true,
+              title: const Text('Kontrol bawaan (Moonlight)'),
+              subtitle: const Text(
+                  'Matikan untuk memakai HUD XyCloudStore: QWERTY, F1–F12, Windows, numpad. Bisa juga diganti langsung saat streaming lewat tombol ☰.'),
+              onChanged: (v) async {
+                await _set('kontrolBawaan', v);
+                await NativeStream.setKontrolBawaan(v);
+              }),
           _pilih('Resolusi', 'resolution', {
             '854x480': '480p · ringan',
             '1280x720': '720p',

@@ -31,6 +31,7 @@ class _SesiScreenState extends State<SesiScreen> {
   String _stage = 'Menyiapkan sesi melalui agen…';
   List<Map<String, dynamic>> _apps = [];
   int? _appId;
+  final List<String> _log = [];
   @override
   void initState() {
     super.initState();
@@ -99,6 +100,14 @@ class _SesiScreenState extends State<SesiScreen> {
         break;
       case 'error':
         setState(() => _error = '${event['message']}');
+        break;
+      case 'log':
+        final baris = '${event['message']}';
+        if (baris.isNotEmpty) {
+          _log.add(baris);
+          if (_log.length > 30) _log.removeRange(0, _log.length - 30);
+          if (mounted) setState(() {});
+        }
         break;
       case 'closed':
       case 'disconnected':
@@ -374,6 +383,38 @@ class _SesiScreenState extends State<SesiScreen> {
                   ],
                 ])),
           ],
+          if (_log.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            XyCard(
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                  Row(children: [
+                    const Icon(Icons.terminal_rounded, size: 16),
+                    const SizedBox(width: 8),
+                    const Text('Log Streaming',
+                        style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+                    const Spacer(),
+                    Text('terakhir ${_log.length} baris',
+                        style: TextStyle(color: p.muted, fontSize: 11)),
+                  ]),
+                  const SizedBox(height: 10),
+                  for (final baris in _log.reversed.take(8).toList())
+                    Padding(
+                        padding: const EdgeInsets.only(bottom: 3),
+                        child: Text(baris,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                                fontSize: 11.5,
+                                color: p.inkSoft,
+                                fontFamily: 'monospace'))),
+                  const SizedBox(height: 6),
+                  Text(
+                      'Log lengkap: tombol ☰ di layar streaming → bagian Log Streaming (bisa disalin).',
+                      style: TextStyle(color: p.muted, fontSize: 11, height: 1.4))
+                ])),
+          ],
           if (s?.catatan != null)
             Padding(
                 padding: const EdgeInsets.symmetric(vertical: 16),
@@ -390,7 +431,7 @@ class _SesiScreenState extends State<SesiScreen> {
                 child: const Text('Kembali ke pesanan')),
           const SizedBox(height: 22),
           Text(
-              'Kontrol: tombol ☰ di layar PC membuka keyboard dan F1–F12. Gamepad sentuh, trackpad, resolusi, FPS, dan bitrate dapat diatur dari ikon pengaturan. API Sunshine yang siap belum menjamin GPU, layar virtual, atau port internet sudah benar.',
+              'Kontrol XyCloudStore: bilah di atas video berisi QWERTY, F1–F12, Windows/Ctrl/Alt, dan numpad — geser pegangan \u201C\u2800\u2800\u201D untuk memindahkan posisi, A\u2212/A+ untuk ukuran. Tombol ☰ membuka panel kontrol (pilih kontrol bawaan bila diinginkan) dan log streaming. Gamepad sentuh, trackpad, resolusi, FPS, dan bitrate dapat diatur dari ikon pengaturan. API Sunshine yang siap belum menjamin GPU, layar virtual, atau port internet sudah benar.',
               style: TextStyle(fontSize: 12, color: p.muted, height: 1.6)),
         ]));
   }

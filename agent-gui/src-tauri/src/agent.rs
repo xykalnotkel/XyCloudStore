@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-pub const VERSI: &str = "1.5.3-rust";
+pub const VERSI: &str = "1.5.4-rust";
 
 /// Batch L: semua proses anak (powershell/cmd/reg/where/sunshine) dibuat
 /// dengan CREATE_NO_WINDOW supaya tidak ada jendela konsol hitam yang
@@ -55,6 +55,56 @@ fn dir_data() -> PathBuf {
 
 fn jalur_config() -> PathBuf {
     dir_data().join("config.json")
+}
+
+/// Berkas log mode headless: %APPDATA%\XyCloudStore\Agent\agent.log
+/// (dulu log headless cuma ke stdout yang tak ada di proses autostart).
+pub fn jalur_log_headless() -> PathBuf {
+    dir_data().join("agent.log")
+}
+
+/// Stempel waktu ISO-8601 UTC (tanpa dependensi chrono).
+pub fn stempel_iso() -> String {
+    let d = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|x| x.as_secs())
+        .unwrap_or(0);
+    // Algoritma civil_from_days (Howard Hinnant) — konversi epoch→tgl.
+    let days = (d / 86400) as i64;
+    let rem = (d % 86400) as u32;
+    let (hh, mm, ss) = (rem / 3600, (rem % 3600) / 60, rem % 60);
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
+    let mut y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let tgl = doy - (153 * mp + 2) / 5 + 1;
+    let bulan = if mp < 10 { mp + 3 } else { mp - 9 };
+    if bulan <= 2 {
+        y += 1;
+    }
+    format!("{y:04}-{bulan:02}-{tgl:02}T{hh:02}:{mm:02}:{ss:02}Z")
+}
+
+/// Tambah satu baris ke log headless (dengan stempel waktu).
+/// Rotasi sederhana: saat lewat 1MB, file lama dipindah ke agent.log.old.
+/// Kegagalan menulis log TIDAK BOLEH merusak loop utama → semua error ditelan.
+pub fn tulis_log_headless(teks: &str) {
+    use std::io::Write;
+    let p = jalur_log_headless();
+    if let Some(par) = p.parent() {
+        let _ = std::fs::create_dir_all(par);
+    }
+    if let Ok(meta) = std::fs::metadata(&p) {
+        if meta.len() > 1_000_000 {
+            let _ = std::fs::rename(&p, p.with_file_name("agent.log.old"));
+        }
+    }
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&p) {
+        let _ = writeln!(f, "[{}] [XYAGENT] {teks}", stempel_iso());
+    }
 }
 
 pub fn muat_konfig() -> Konfig {
@@ -154,6 +204,39 @@ pub fn periksa_sunshine(k: &Konfig) -> Value {
 }
 
 /// Cari exe Sunshine di lokasi umum Windows.
+/// Kunci rasio streaming landscape di sisi host (Sunshine).
+///
+/// Melepas opsi `dd_*` Sunshine: display (termasuk display virtual pada
+/// PC headless) dijaga aktif + dikunci 1920x1080@60. Didampingi kunci sisi
+/// client (permukaan video dipaksa 16:9 di Game.java) sehingga rasio
+/// stream selalu landscape 16:9 — lebar video otomatis menyesuaikan layar.
+pub fn kunci_lanskap_sunshine(k: &Konfig, log: &Logger) -> Value {
+    let alamat = format!("{SUNSHINE_BAWAAN}/api/config");
+    let muatan = json!({
+        "dd_configuration_option": "ensure_primary",
+        "dd_resolution_option": "manual",
+        "dd_manual_resolution": "1920x1080",
+        "dd_refresh_rate_option": "manual",
+        "dd_manual_refresh_rate": 60,
+    });
+    match minta(&alamat, Some(muatan), "POST", Some(header_basic(k))) {
+        Ok((status, _)) if (200..300).contains(&status) => {
+            log("Display terkunci landscape 1920x1080@60 (termasuk headless).");
+            json!({ "ok": true, "status": "OK" })
+        }
+        Ok((status, _)) => {
+            log(&format!(
+                "Sunshine menolak kunci rasio (HTTP {status}). Stream memakai rasio bawaan host."
+            ));
+            json!({ "ok": false, "status": format!("HTTP_{status}") })
+        }
+        Err(e) => {
+            log(&format!("Gagal mengunci rasio display: {e}"));
+            json!({ "ok": false, "status": "GAGAL", "pesan": e })
+        }
+    }
+}
+
 fn cari_sunshine_exe() -> Option<PathBuf> {
     let kandidat = [
         r"C:\Program Files\Sunshine\sunshine.exe",
@@ -770,7 +853,7 @@ fn pastikan_service_sunshine(log: &Logger) {
 pub fn setup_otomatis(k: &Konfig, log: Logger) -> (Konfig, Value) {
     let mut k = k.clone();
     log(&format!("=== Auto-setup Sunshine · Agen {VERSI} ==="));
-    log("Langkah 1/4: deteksi engine…");
+    log("Langkah 1/5: deteksi engine…");
 
     // 1) Pastikan engine terpasang
     let sudah_exe = cari_sunshine_exe().is_some();
@@ -811,7 +894,7 @@ pub fn setup_otomatis(k: &Konfig, log: Logger) -> (Konfig, Value) {
     };
 
     // 2) Kredensial
-    log("Langkah 2/4: kredensial API lokal…");
+    log("Langkah 2/5: kredensial API lokal…");
     let perlu_set_creds = k.user.is_empty() || k.sandi.is_empty();
     if perlu_set_creds {
         if k.user.is_empty() {
@@ -833,14 +916,18 @@ pub fn setup_otomatis(k: &Konfig, log: Logger) -> (Konfig, Value) {
     }
 
     // 3) Service
-    log("Langkah 3/4: layanan…");
+    log("Langkah 3/5: layanan…");
     pastikan_service_sunshine(&log);
 
     // 4) Tunggu API
-    log("Langkah 4/4: tunggu API 47990 (maks 45 dtk)…");
+    log("Langkah 4/5: tunggu API 47990 (maks 45 dtk)…");
     let cek = tunggu_api_siap(&k, &log, 45);
     if cek.get("siap").and_then(|x| x.as_bool()).unwrap_or(false) {
         log("SETUP OK — Sunshine siap. Tidak perlu login web UI manual.");
+        // 5) Kunci rasio landscape — display host (termasuk headless/virtual
+        //    display) dipaksa 1920x1080@60 lewat opsi dd_* Sunshine.
+        log("Langkah 5/5: kunci rasio landscape (termasuk headless)…");
+        let _ = kunci_lanskap_sunshine(&k, &log);
     } else {
         let pesan = cek
             .get("pesan")
