@@ -211,6 +211,15 @@ hosted QRIS agar tetap kompatibel. Jika tidak ada provider valid, sistem memakai
 unik 3 digit, rekening, unggah bukti, dan persetujuan admin. Variabel non-rahasia: `PAYMENT_PROVIDER`, `BANK_NAMA`,
 `BANK_NOMOR`, `BANK_ATASNAMA`, `QRIS_URL`, `MIN_TOPUP`, dan `MAX_TOPUP`.
 
+### Moderasi AI yang dapat diaudit
+Filter deterministik tetap menjadi lapisan pertama untuk forum, komentar, ulasan, profil publik, dan
+preset HUD. Pemilik dapat menambahkan Grok melalui OpenRouter memakai Worker Secret
+`OPENROUTER_API_KEY`, lalu memilih mode `shadow` sebelum `enforce` pada menu **Moderasi → AI Safety**.
+Permintaan AI memaksa `data_collection=deny` dan zero-data-retention; pesan privat/Chat Admin tidak
+pernah dikirim. D1 hanya menyimpan HMAC konten, verdict, kategori, latency, dan token—bukan teks,
+prompt, atau respons mentah. Gangguan provider bersifat fail-open setelah filter lokal dan AI tidak
+pernah menjatuhkan sanksi akun otomatis. Lihat [runbook moderasi AI](docs/ai-moderation-openrouter-2026-09-16.md).
+
 ### Produk akun lengkap
 Kolom baru: `gambar`, `deskripsi`, `detail` (peta spesifikasi), `jumlah_ulasan`. Dashboard bisa
 mengunggah gambar langsung dari komputer (otomatis ke Cloudinary) dan mengisi detail baris per baris.
@@ -561,6 +570,7 @@ curl -X POST https://api.xycloud.my.id/api/cs/reply \
 ## Sebelum produksi
 
 - Pastikan webhook Pakasir telah diisi di dashboard provider dan jalankan rekonsiliasi dari dashboard admin.
+- Untuk moderasi AI, pasang key OpenRouter yang valid, verifikasi tanpa konten, lalu jalankan mode `shadow` sebelum `enforce`.
 - Simpan semua kredensial hanya sebagai Cloudflare Worker Secret; tabel `setelan` hanya untuk nilai non-rahasia.
 - Hubungkan fungsi provisioning ke agen/hypervisor PC rental yang telah diotorisasi dan dipantau.
 - Verifikasi push, email, login sosial, pembayaran sandbox, dan jalur pemulihan sebelum menerima transaksi nyata.

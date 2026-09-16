@@ -20,7 +20,7 @@ const SYARAT = [
    'Satu orang cukup memakai satu akun. Kamu bertanggung jawab menjaga kerahasiaan password dan seluruh aktivitas ' +
    'yang terjadi pada akunmu. Beri tahu kami segera lewat menu chat admin kalau ada aktivitas mencurigakan.'],
   ['Saldo dan Pembayaran',
-   'Saldo diisi lewat transfer bank atau QRIS, lalu diverifikasi oleh admin setelah bukti transfer diunggah. ' +
+   'Saldo dapat diisi melalui QRIS/virtual account Pakasir atau kanal manual yang tampil di aplikasi. Pembayaran otomatis diverifikasi ulang ke penyedia sebelum saldo dikreditkan; pembayaran manual memerlukan pemeriksaan bukti. ' +
    'Saldo hanya bisa dipakai untuk membeli layanan di dalam aplikasi, tidak dapat dicairkan kembali menjadi uang tunai, ' +
    'dan tidak memiliki masa kedaluwarsa selama akun aktif.'],
   ['Pengembalian Dana',
@@ -50,9 +50,11 @@ const PRIVASI = [
   ['Cara Kami Memakainya',
    'Data dipakai untuk memproses pesanan, memverifikasi pembayaran, mengirim kredensial akun, menjawab pertanyaanmu, ' +
    'serta mengirim pemberitahuan penting mengenai pesanan. Kami tidak menjual data pribadi kepada siapa pun.'],
+  ['Moderasi Konten Berbantuan AI',
+   'Teks yang sengaja kamu publikasikan, seperti diskusi, komentar, ulasan, profil, atau preset HUD publik, dapat diperiksa oleh filter lokal dan layanan AI Grok melalui OpenRouter bila fitur diaktifkan. Pesan privat dan Chat Admin tidak dikirim untuk klasifikasi AI. Permintaan upstream mewajibkan zero-data-retention dan menolak penyedia yang mengumpulkan data. Basis data kami hanya menyimpan HMAC konten dan metadata verdict maksimal 90 hari, bukan prompt, teks, atau respons mentah. AI tidak menjatuhkan sanksi akun; keputusan dapat dilaporkan atau ditinjau moderator.'],
   ['Layanan Pihak Ketiga',
    'Kami memakai Cloudflare (server dan basis data), Resend (pengiriman email), OneSignal (notifikasi), ' +
-   'Cloudinary (penyimpanan gambar), Google Sign-In, dan Facebook Login (login opsional). ' +
+   'Cloudinary (penyimpanan gambar), Pakasir (pembayaran), Google Sign-In, Facebook Login (login opsional), dan OpenRouter/xAI (moderasi teks publik bila diaktifkan). ' +
    'Masing-masing hanya menerima data seperlunya untuk menjalankan fungsinya. Token akses sosial tidak disimpan oleh kami.'],
   ['Keamanan',
    'Password disimpan dalam bentuk hash SHA-256 dengan garam acak, tidak pernah dalam bentuk teks biasa. ' +
@@ -127,6 +129,8 @@ export const LISENSI = [
   ['Cloudflare Workers, D1, Durable Objects', 'Cloudflare', 'layanan berlangganan'],
   ['Resend', 'Resend Inc.', 'layanan berlangganan'],
   ['Cloudinary', 'Cloudinary Ltd.', 'layanan berlangganan'],
+  ['Pakasir', 'Pakasir', 'layanan pembayaran'],
+  ['OpenRouter dan Grok', 'OpenRouter / xAI', 'layanan AI opsional'],
   ['Material Symbols', 'Google', 'Apache-2.0'],
 ];
 

@@ -3,7 +3,10 @@ import { SecurityError, securityConfig, securityHash, securitySlot, auditSecurit
 import { estimasiSewa, buatSewa, mulaiSewa, bacaSewa, antreAkhir, konfirmasiAgen, tutupSewa, rawatSewa, normalisasiHostStream, probePortTcp} from './sewa.js';
 import { infoHapusAkun, bersihkanAkun } from './akun.js';
 import { KontenError, daftarPromosi, simpanPromosi, ambilKunciGiphy, simpanKunciGiphy, cariGiphy, terimaStiker, bacaStiker } from './engagement.js';
-import { periksaTeks, periksaGabungan } from './moderasi.js';
+import { periksaTeks } from './moderasi.js';
+import {
+  periksaKontenPublik, statusModerasiAi, verifikasiOpenRouter, bersihkanModerasiAi,
+} from './ai-moderasi.js';
 import { kataTerlarangDalam, KATA_TERLARANG } from './kata.js';
 /**
  * ============================================================
@@ -1297,6 +1300,9 @@ export default {
     // jaring pengaman pembayaran: tanya penyedia soal top up QRIS/e-wallet
     // yang masih 'menunggu' (webhook bisa telat/hilang)
     ctx.waitUntil(pollPembayaran(env));
+    // Cache verdict AI kedaluwarsa 30 hari; metadata audit tanpa konten mentah
+    // disimpan maksimal 90 hari.
+    ctx.waitUntil(bersihkanModerasiAi(env).catch(() => {}));
     // Retry permintaan penghapusan Meta yang sebelumnya terhalang sesi/saldo
     // atau sempat gagal sementara. Maksimum 20 tiap jam agar kerja terukur.
     ctx.waitUntil((async () => {
@@ -2579,6 +2585,54 @@ async function statistikPublik(env) {
             exp: Date.now() + 60_000,
           }, env.JWT_SECRET);
           return json({ ticket: token, room: roomTiket, expires_in: 60 }, 201, env);
+        }
+
+        if (a === 'moderasi/ai' && req.method === 'GET') {
+          const info = await statusModerasiAi(env);
+          const statistik = await env.DB.prepare(
+            `SELECT COUNT(*) total_30d,
+                    SUM(CASE WHEN datetime(waktu)>=datetime('now','-24 hours') THEN 1 ELSE 0 END) total_24h,
+                    SUM(CASE WHEN verdict='block' THEN 1 ELSE 0 END) diblokir,
+                    SUM(CASE WHEN verdict='review' THEN 1 ELSE 0 END) ditinjau,
+                    SUM(CASE WHEN verdict='error' THEN 1 ELSE 0 END) galat,
+                    SUM(CASE WHEN cached=1 THEN 1 ELSE 0 END) cache_hit,
+                    ROUND(AVG(CASE WHEN latency_ms IS NOT NULL THEN latency_ms END)) rata_latency_ms,
+                    COALESCE(SUM(prompt_tokens),0) prompt_tokens,
+                    COALESCE(SUM(completion_tokens),0) completion_tokens
+             FROM ai_moderation_event WHERE datetime(waktu)>=datetime('now','-30 days')`,
+          ).first();
+          const { results } = await env.DB.prepare(
+            `SELECT e.id,e.user_id,e.konteks,e.mode,e.sumber,e.verdict,e.kategori,e.severity,
+                    e.confidence,e.latency_ms,e.cached,e.prompt_tokens,e.completion_tokens,
+                    e.error_code,e.model,e.waktu,u.nama user_nama
+             FROM ai_moderation_event e LEFT JOIN users u ON u.id=e.user_id
+             ORDER BY e.waktu DESC LIMIT 100`,
+          ).all();
+          return json({
+            ...info,
+            boleh_mengubah: admin.peran === 'pemilik',
+            statistik: statistik || {},
+            event: results || [],
+          }, 200, env);
+        }
+        if (a === 'moderasi/ai/mode' && req.method === 'POST') {
+          if (admin.peran !== 'pemilik') return err('Hanya pemilik yang boleh mengubah mode AI.', 403, env);
+          const b = await req.json().catch(() => ({}));
+          const mode = String(b.mode || '').toLowerCase();
+          if (!['off', 'shadow', 'enforce'].includes(mode)) return err('Mode AI tidak valid.', 400, env);
+          if (mode !== 'off' && !env.OPENROUTER_API_KEY) {
+            return err('OPENROUTER_API_KEY belum dipasang sebagai Worker Secret.', 409, env);
+          }
+          await simpanSetelan(env, 'ai_moderation_mode', mode);
+          return json({ ok: true, mode }, 200, env);
+        }
+        if (a === 'moderasi/ai/verifikasi' && req.method === 'POST') {
+          if (admin.peran !== 'pemilik') return err('Hanya pemilik yang boleh memverifikasi AI.', 403, env);
+          if (!(await bolehLanjut(env, `ai-verify:${admin.id || 'owner'}`, 5, 3600))) {
+            return err('Terlalu banyak verifikasi AI. Coba lagi nanti.', 429, env);
+          }
+          const hasil = await verifikasiOpenRouter(env);
+          return json(hasil, hasil.ok ? 200 : 503, env);
         }
 
         if(a==='security'||a.startsWith('security/')||a==='devices'||a.startsWith('devices/')||a==='audit'||/^users\/[^/]+\/(trash|restore|permanent)$/.test(a)){
@@ -4453,19 +4507,24 @@ async function statistikPublik(env) {
         const deskripsi = String(b.deskripsi || '').trim().slice(0, 160);
         const game = String(b.game || '').trim().slice(0, 50);
         if (nama.length < 3) return err('Nama preset minimal 3 karakter.', 422, env);
-        const teks = periksaGabungan(nama, deskripsi, game);
-        if (!teks.ok) return err(teks.alasan, 422, env);
         const cek = validasiDataHud(b.data);
         if (!cek.ok) return err(cek.alasan, 422, env);
-        const teksTombol = periksaTeks(cek.data.tombol.map((x) => x.label).join(' '), { maksUrl: 0 });
-        if (!teksTombol.ok) return err(teksTombol.alasan, 422, env);
+        const publik = b.publik === false ? 0 : 1;
+        const teks = await periksaKontenPublik(env, {
+          userId: me.sub,
+          konteks: 'hud_preset',
+          teks: [nama, deskripsi, game, ...cek.data.tombol.map((x) => x.label)].filter(Boolean).join('\n'),
+          opt: { maksUrl: 3 },
+          gunakanAi: publik === 1,
+        });
+        if (!teks.ok) return err(teks.alasan, 422, env);
         const jumlah = await env.DB.prepare('SELECT COUNT(*) c FROM hud_preset WHERE user_id=?').bind(me.sub).first();
         if ((jumlah?.c || 0) >= 40) return err('Maksimal 40 preset tersimpan di akun. Hapus yang tidak dipakai.', 409, env);
         const id = uid('hud_');
         const sekarang = new Date().toISOString();
         await env.DB.prepare(
           'INSERT INTO hud_preset(id,user_id,nama,deskripsi,game,data,publik,dibuat,diubah) VALUES(?,?,?,?,?,?,?,?,?)',
-        ).bind(id, me.sub, nama, deskripsi, game, JSON.stringify(cek.data), b.publik === false ? 0 : 1, sekarang, sekarang).run();
+        ).bind(id, me.sub, nama, deskripsi, game, JSON.stringify(cek.data), publik, sekarang, sekarang).run();
         const baris = await env.DB.prepare(
           `SELECT h.*,u.nama pembuat_nama,u.username pembuat_username,u.foto pembuat_foto,u.tier pembuat_tier,0 saya_suka
            FROM hud_preset h JOIN users u ON u.id=h.user_id WHERE h.id=?`,
@@ -4516,13 +4575,17 @@ async function statistikPublik(env) {
         const deskripsi = String(b.deskripsi ?? lama.deskripsi).trim().slice(0, 160);
         const game = String(b.game ?? lama.game).trim().slice(0, 50);
         if (nama.length < 3) return err('Nama preset minimal 3 karakter.', 422, env);
-        const teks = periksaGabungan(nama, deskripsi, game);
-        if (!teks.ok) return err(teks.alasan, 422, env);
         const cek = validasiDataHud(b.data ?? lama.data);
         if (!cek.ok) return err(cek.alasan, 422, env);
-        const teksTombol = periksaTeks(cek.data.tombol.map((x) => x.label).join(' '), { maksUrl: 0 });
-        if (!teksTombol.ok) return err(teksTombol.alasan, 422, env);
-        const publik = b.publik === undefined ? lama.publik : (b.publik === false ? 0 : 1);
+        const publik = b.publik === undefined ? Number(lama.publik || 0) : (b.publik === false ? 0 : 1);
+        const teks = await periksaKontenPublik(env, {
+          userId: me.sub,
+          konteks: 'hud_preset',
+          teks: [nama, deskripsi, game, ...cek.data.tombol.map((x) => x.label)].filter(Boolean).join('\n'),
+          opt: { maksUrl: 3 },
+          gunakanAi: publik === 1,
+        });
+        if (!teks.ok) return err(teks.alasan, 422, env);
         await env.DB.prepare('UPDATE hud_preset SET nama=?,deskripsi=?,game=?,data=?,publik=?,diubah=? WHERE id=?')
           .bind(nama, deskripsi, game, JSON.stringify(cek.data), publik, new Date().toISOString(), id).run();
         const baris = await env.DB.prepare(
@@ -4871,6 +4934,14 @@ async function statistikPublik(env) {
         const b = await req.json().catch(() => ({}));
         const nilai = Math.max(1, Math.min(5, Number(b.rating) || 5));
         const planId = String(b.plan_id || '');
+        const komentar = String(b.komentar || '').trim();
+        if (komentar.length > 500) return err('Ulasan maksimal 500 karakter.', 400, env);
+        if (komentar) {
+          const cek = await periksaKontenPublik(env, {
+            userId: me.sub, konteks: 'review_pc', teks: komentar, opt: { maksUrl: 1 },
+          });
+          if (!cek.ok) return err(cek.alasan, 422, env);
+        }
 
         const pernah = await env.DB.prepare(
           "SELECT 1 FROM orders WHERE user_id = ? AND plan_id = ? AND status IN ('aktif','selesai') LIMIT 1"
@@ -4884,7 +4955,7 @@ async function statistikPublik(env) {
         const u = await env.DB.prepare('SELECT nama FROM users WHERE id = ?').bind(me.sub).first();
         const baris = {
           id: uid('rp_'), plan_id: planId, order_id: b.order_id || null, user_id: me.sub,
-          nama: u?.nama || 'Pengguna', rating: nilai, komentar: String(b.komentar || '').slice(0, 500),
+          nama: u?.nama || 'Pengguna', rating: nilai, komentar,
           waktu: new Date().toISOString(),
         };
         await env.DB.prepare(
@@ -4924,6 +4995,9 @@ async function statistikPublik(env) {
           diskusi: await ambil('SELECT * FROM forum_post WHERE user_id = ?'),
           balasan: await ambil('SELECT * FROM forum_balasan WHERE user_id = ?'),
           ulasan: await ambil('SELECT * FROM ulasan WHERE user_id = ?'),
+          moderasi_ai: await ambil(`SELECT konteks,mode,sumber,verdict,kategori,severity,confidence,
+                                           cached,error_code,model,waktu
+                                    FROM ai_moderation_event WHERE user_id = ? ORDER BY waktu DESC`),
           pemberitahuan: await ambil('SELECT * FROM notifikasi WHERE user_id = ?'),
         };
         return json(data, 200, env);
@@ -5123,6 +5197,19 @@ async function statistikPublik(env) {
           }
         }
 
+        // Teks profil tampil publik. Filter lokal dan, bila diaktifkan pemilik,
+        // klasifikasi AI dijalankan sebelum ada unggahan media agar tidak membuat aset yatim.
+        const slogan = b.slogan === undefined ? null : String(b.slogan || '').slice(0, 60);
+        const bio = b.bio === undefined ? null : String(b.bio || '').slice(0, 240);
+        const teksProfil = [nama, usernameBaru === undefined ? '' : usernameBaru, slogan, bio]
+          .filter(Boolean).join('\n');
+        if (teksProfil) {
+          const cek = await periksaKontenPublik(env, {
+            userId: me.sub, konteks: 'profile', teks: teksProfil, opt: { maksUrl: 1 },
+          });
+          if (!cek.ok) return err(cek.alasan, 422, env);
+        }
+
         // Bingkai avatar (Batch I): whitelist + gate langganan untuk frame premium.
         let bingkai = '~'; // '~' = tidak diubah (pola COALESCE/NULLIF di bawah)
         if (b.bingkai !== undefined) {
@@ -5153,11 +5240,6 @@ async function statistikPublik(env) {
         const notifDm = b.notif_dm == null ? null : (b.notif_dm ? 1 : 0);
 
         // Batch L: slogan (tagline pendek), bio link, gaya nama kustom.
-        const slogan = b.slogan === undefined ? null : String(b.slogan || '').slice(0, 60);
-        if (slogan) {
-          const k = kataTerlarangDalam(slogan);
-          if (k) return err(`Slogan mengandung kata terlarang (${k.jenis}).`, 422, env);
-        }
         let bioLink = null; // null = tidak diubah; '' = hapus
         if (b.bio_link !== undefined) {
           const tautan = String(b.bio_link || '').trim().slice(0, 200);
@@ -5185,11 +5267,6 @@ async function statistikPublik(env) {
         }
 
         // Kustomisasi profil luas (Batch D): bio bebas + tema banner gradasi.
-        const bio = b.bio === undefined ? null : String(b.bio || '').slice(0, 240);
-        if (bio) {
-          const k = kataTerlarangDalam(bio);
-          if (k) return err(`Bio mengandung kata terlarang (${k.jenis}).`, 422, env);
-        }
         const banner = b.banner === undefined ? null
           : (b.banner === '' ? '' : (BANNER_PROFIL.includes(String(b.banner)) ? String(b.banner) : null));
         if (b.banner !== undefined && banner === null && b.banner !== '') {
@@ -5534,12 +5611,16 @@ async function statistikPublik(env) {
         const judul = String(b.judul || '').trim();
         const isi = String(b.isi || '').trim();
         if (judul.length < 5) return err('Judul minimal 5 karakter', 400, env);
+        if (judul.length > 160) return err('Judul maksimal 160 karakter', 400, env);
         if (isi.length < 10) return err('Isi diskusi minimal 10 karakter', 400, env);
-        if ((isi.match(/https?:\/\//g) || []).length > 3) return err('Terlalu banyak link, maks 3.', 400, env);
-        {
-          const cek = periksaGabungan(judul, isi);
-          if (!cek.ok) return err(cek.alasan, 400, env);
-        }
+        if (isi.length > 10_000) return err('Isi diskusi maksimal 10.000 karakter', 400, env);
+        const cekKonten = await periksaKontenPublik(env, {
+          userId: me.sub,
+          konteks: 'forum_post',
+          teks: `${judul}\n${isi}`,
+          opt: { maksUrl: 3 },
+        });
+        if (!cekKonten.ok) return err(cekKonten.alasan, 422, env);
 
         let gambar = null;
         if (b.gambar) {
@@ -5576,8 +5657,13 @@ async function statistikPublik(env) {
         if (!isi && !b.stiker) return err('Tulis pesan atau pilih stiker terlebih dahulu.', 400, env);
         if (isi.length > 4000) return err('Komentar maksimal 4.000 karakter.', 400, env);
         if (isi) {
-          const cek = periksaTeks(isi, { maksUrl: 2 });
-          if (!cek.ok) return err(cek.alasan, 400, env);
+          const cek = await periksaKontenPublik(env, {
+            userId: me.sub,
+            konteks: 'forum_reply',
+            teks: isi,
+            opt: { maksUrl: 2 },
+          });
+          if (!cek.ok) return err(cek.alasan, 422, env);
         }
         const post = await env.DB.prepare('SELECT id FROM forum_post WHERE id = ?').bind(id).first();
         if (!post) return err('Diskusi tidak ditemukan', 404, env);
@@ -5735,7 +5821,16 @@ async function statistikPublik(env) {
         const judul = String(b.judul || '').trim();
         const isi = String(b.isi || '').trim();
         if (judul.length < 5) return err('Judul minimal 5 karakter', 400, env);
+        if (judul.length > 160) return err('Judul maksimal 160 karakter', 400, env);
         if (isi.length < 10) return err('Isi diskusi minimal 10 karakter', 400, env);
+        if (isi.length > 10_000) return err('Isi diskusi maksimal 10.000 karakter', 400, env);
+        const cekKonten = await periksaKontenPublik(env, {
+          userId: me.sub,
+          konteks: 'forum_edit',
+          teks: `${judul}\n${isi}`,
+          opt: { maksUrl: 3 },
+        });
+        if (!cekKonten.ok) return err(cekKonten.alasan, 422, env);
 
         await env.DB.prepare('UPDATE forum_post SET judul=?, isi=?, kategori=COALESCE(?,kategori), diubah=? WHERE id=?')
           .bind(judul, isi, b.kategori || null, new Date().toISOString(), id).run();
@@ -5786,8 +5881,18 @@ async function statistikPublik(env) {
 
       // ---- tulis ulasan produk ----
       if (p === 'ulasan' && req.method === 'POST') {
-        const { produk_id, rating, komentar, gambar } = await req.json();
-        const nilai = Math.max(1, Math.min(5, Number(rating) || 5));
+        const b = await req.json().catch(() => ({}));
+        const produk_id = String(b.produk_id || '');
+        const nilai = Math.max(1, Math.min(5, Number(b.rating) || 5));
+        const komentar = String(b.komentar || '').trim();
+        const gambar = b.gambar || null;
+        if (komentar.length > 1000) return err('Ulasan maksimal 1.000 karakter.', 400, env);
+        if (komentar) {
+          const cek = await periksaKontenPublik(env, {
+            userId: me.sub, konteks: 'review_product', teks: komentar, opt: { maksUrl: 1 },
+          });
+          if (!cek.ok) return err(cek.alasan, 422, env);
+        }
         const prod = await env.DB.prepare('SELECT id FROM akun_produk WHERE id = ?').bind(produk_id).first();
         if (!prod) return err('Produk tidak ditemukan', 404, env);
 

@@ -1,3 +1,5 @@
+import { kataTerlarangDalam } from './kata.js';
+
 /**
  * Moderasi teks ringan — filter kata kasar & pola spam link.
  * Dipakai di forum (post/balasan) dan bisa dipanggil dari jalur lain.
@@ -85,6 +87,15 @@ export function periksaTeks(teks, opt = {}) {
     return { ok: false, alasan: 'Pesan kosong.', kode: 'KOSONG' };
   }
   if (!t) return { ok: true };
+
+  const terlarang = kataTerlarangDalam(t);
+  if (terlarang) {
+    return {
+      ok: false,
+      alasan: 'Pesan mengandung kata yang tidak diperbolehkan. Mohon jaga bahasa di komunitas.',
+      kode: 'KATA_KASAR',
+    };
+  }
 
   const kasar = temukanKasar(t);
   if (kasar.length) {
