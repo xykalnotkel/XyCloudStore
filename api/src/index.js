@@ -3617,6 +3617,34 @@ if (a.startsWith('peran/') && req.method === 'DELETE') {
         const b=await req.json();return json(await mulaiSewa(env,me.sub,String(b.order_id||'')),201,env);
       }
       if(p.startsWith('sesi/') && p.split('/').length===2 && req.method==='GET') return json(await bacaSewa(env,me.sub,p.split('/')[1]),200,env);
+      if(p.startsWith('sesi/') && p.endsWith('/diagnostik') && req.method==='GET') {
+        const idSesi=p.split('/')[1];
+        await requireRate(env,'stream-diagnostic',`${me.sub}:${idSesi}`,6,300);
+        const session=await env.DB.prepare(`SELECT s.id,s.status,s.host,s.agen_id,a.terakhir,a.versi
+          FROM sesi s LEFT JOIN agen a ON a.id=s.agen_id WHERE s.id=? AND s.user_id=?`)
+          .bind(idSesi,me.sub).first();
+        if(!session)return err('Sesi tidak ditemukan',404,env);
+        const raw=String(session.host||'').trim();
+        let host='';let customPort=null;
+        try{
+          let alamat=raw;
+          if((raw.match(/:/g)||[]).length>1&&!raw.startsWith('['))alamat=`[${raw}]`;
+          const parsed=new URL(`http://${alamat}`);host=parsed.hostname.replace(/^\[|\]$/g,'');
+          customPort=parsed.port?Number(parsed.port):null;
+        }catch{}
+        if(!host)return err('Host streaming unit belum valid',422,env);
+        const ports=[...new Set([47984,47989,48010,customPort].filter(Boolean))];
+        const hasil=await Promise.all(ports.map(async port=>({port,protokol:'TCP',terbuka:await probePortTcp(host,port,6000)})));
+        const terbuka=hasil.filter(x=>x.terbuka).length;
+        const age=session.terakhir?Math.max(0,Math.round((Date.now()-Date.parse(session.terakhir))/1000)):null;
+        const keadaan=terbuka===hasil.length?'sehat':terbuka>0?'sebagian':'tertutup';
+        const saran=keadaan==='sehat'
+          ?'Sampel port TCP dapat dijangkau. UDP tidak bisa diuji dari probe ini; jika video gagal, periksa UDP 47984–47990, encoder GPU, display virtual, dan aplikasi Desktop di Sunshine.'
+          :keadaan==='sebagian'
+            ?'Sebagian port tertutup. Buka/forward seluruh 47984–47990 TCP+UDP serta 48010 pada router/firewall atau NSG VM.'
+            :'Host tidak dapat dijangkau dari Cloudflare. Periksa IP publik, NAT/port-forward, Windows Firewall, dan inbound rule VM.';
+        return json({ok:true,host,keadaan,hasil,saran,agen:{online:age!=null&&age<90,umurDetik:age,versi:session.versi||null}},200,env);
+      }
       if(p.startsWith('sesi/') && p.endsWith('/pin') && req.method==='POST') {
         const {pin,client_id:clientId}=await req.json();if(!/^[0-9]{4}$/.test(String(pin||'')))return err('PIN harus 4 angka',400,env);
         const session=await bacaSewa(env,me.sub,p.split('/')[1]);
@@ -3633,6 +3661,31 @@ if (a.startsWith('peran/') && req.method === 'DELETE') {
         if(!['siap','pairing','berjalan'].includes(session.status))return err('Sesi sudah berakhir',409,env);
         await env.DB.prepare("UPDATE sesi SET status='berjalan',catatan='Klien melaporkan koneksi video aktif' WHERE id=?").bind(session.id).run();
         return json({ok:true},200,env);
+      }
+      // Metadata operasi klien untuk diagnosis/reconnect. Endpoint tidak pernah
+      // menerima input kontrol, audio, tangkapan layar, atau isi gameplay.
+      if(p.startsWith('sesi/') && p.endsWith('/telemetri') && req.method==='POST') {
+        const idSesi=p.split('/')[1];
+        await requireRate(env,'stream-telemetry',`${me.sub}:${idSesi}`,180,300);
+        const session=await env.DB.prepare('SELECT id,status FROM sesi WHERE id=? AND user_id=?')
+          .bind(idSesi,me.sub).first();
+        if(!session)return err('Sesi tidak ditemukan',404,env);
+        const b=await req.json().catch(()=>({}));
+        const allowed=new Set(['ready','connecting','connected','closed','disconnected','reconnecting','reconnect_start','reconnect_exhausted','prepare_failed','start_failed','ending']);
+        const state=String(b.status||'').trim();
+        if(!allowed.has(state))return err('Status telemetri tidak valid',400,env);
+        const pendek=(v,n)=>String(v||'').replace(/[\r\n\0]/g,' ').trim().slice(0,n)||null;
+        const angka=(v,min,max,fallback=0)=>Number.isInteger(Number(v))?Math.max(min,Math.min(max,Number(v))):fallback;
+        const latency=b.latency_ms==null?null:angka(b.latency_ms,0,60000,null);
+        const disconnects=angka(b.disconnects,0,10000,0);
+        const attempt=angka(b.reconnect_attempt,0,3,0);
+        await env.DB.prepare(`UPDATE sesi SET client_state=?,client_last=?,
+          client_route=COALESCE(?,client_route),client_latency_ms=COALESCE(?,client_latency_ms),
+          client_quality=COALESCE(?,client_quality),client_disconnects=MAX(client_disconnects,?),
+          client_reconnect_attempt=?,client_reason=COALESCE(?,client_reason)
+          WHERE id=? AND user_id=?`).bind(state,new Date().toISOString(),pendek(b.route,180),latency,
+            pendek(b.quality,180),disconnects,attempt,pendek(b.reason,400),idSesi,me.sub).run();
+        return json({ok:true,state},200,env);
       }
       if(p.startsWith('sesi/') && p.endsWith('/akhiri') && req.method==='POST') {
         const session=await bacaSewa(env,me.sub,p.split('/')[1]);return json(await antreAkhir(env,session),200,env);

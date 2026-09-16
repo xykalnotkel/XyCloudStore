@@ -155,6 +155,18 @@ class AppState extends ChangeNotifier {
   Future<void> setPengaturan(String key,dynamic value) async {await PengaturanLokal.set(key,value);notifyListeners();}
   Future<String?> tesNotifikasi() async {try{await _api.post('/me/notifikasi/tes');return null;}catch(e){return _pesan(e);}}
   Future<void> tandaiVideo(String id) async {try{await _api.post('/sesi/$id/stream');}catch(_){}}
+  /// Telemetri operasional minimal (tanpa tombol/teks/gameplay) untuk membantu
+  /// admin melihat koneksi putus, jalur, dan kualitas aktual sesi.
+  Future<void> telemetriSesi(String id, Map<String, dynamic> data) async {
+    try { await _api.post('/sesi/$id/telemetri', data); } catch (_) {}
+  }
+  Future<Map<String, dynamic>?> diagnostikSesi(String id) async {
+    try {
+      return Map<String, dynamic>.from(await _api.get('/sesi/$id/diagnostik'));
+    } catch (_) {
+      return null;
+    }
+  }
   Future<String?> batalOrder(String id) async {try{await _api.post('/orders/$id/batal');await muatSemua(paksa:true);await muatProfilRingkas();return null;}catch(e){return _pesan(e);}}
 
   /// Info rilis terbaru untuk pengecek pembaruan.

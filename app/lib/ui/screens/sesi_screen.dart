@@ -21,14 +21,26 @@ class SesiScreen extends StatefulWidget {
 
 class _SesiScreenState extends State<SesiScreen> {
   SesiMain? sesi;
-  Timer? _timer;
+  Timer? _timer, _elapsedTimer, _reconnectTimer, _stableTimer;
   bool _loading = true,
       _connecting = false,
       _native = false,
       _video = false,
-      _polling = false;
+      _polling = false,
+      _reconnectPending = false,
+      _diagnosing = false;
   String? _error;
+  Map<String, dynamic>? _networkDiagnostic;
   String _stage = 'Menyiapkan sesi melalui agen…';
+  String _route = 'Belum dipilih';
+  String _quality = 'Menunggu pengukuran';
+  String? _lastDisconnect;
+  int _progress = 4;
+  int _elapsedSeconds = 0;
+  int _reconnectAttempt = 0;
+  int _reconnectIn = 0;
+  int _disconnects = 0;
+  int? _latencyMs;
   List<Map<String, dynamic>> _apps = [];
   int? _appId;
   final List<String> _log = [];
@@ -40,32 +52,101 @@ class _SesiScreenState extends State<SesiScreen> {
     _mulai();
   }
 
+  void _mulaiJamProgres() {
+    _elapsedTimer?.cancel();
+    _elapsedSeconds = 0;
+    _elapsedTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      setState(() {
+        _elapsedSeconds++;
+        if (!_connecting && sesi?.status == 'menyiapkan') {
+          _progress = (_progress + 2).clamp(4, 88).toInt();
+          _stage = _elapsedSeconds < 15
+              ? 'Agen memeriksa Sunshine dan menyiapkan desktop…'
+              : 'Masih menunggu agen — aplikasi boleh ditutup, sewa belum dianggap siap.';
+        }
+      });
+    });
+  }
+
+  void _hentikanJamProgres() {
+    _elapsedTimer?.cancel();
+    _elapsedTimer = null;
+  }
+
+  String get _waktuProgres {
+    final m = _elapsedSeconds ~/ 60;
+    final d = _elapsedSeconds % 60;
+    return m == 0 ? '$d dtk' : '$m:${d.toString().padLeft(2, '0')}';
+  }
+
+  Future<void> _laporKlien(String status, {String? alasan}) async {
+    final id = sesi?.id;
+    if (id == null || !mounted) return;
+    final state = context.read<AppState>();
+    unawaited(state.telemetriSesi(id, {
+      'status': status,
+      'route': _route == 'Belum dipilih' ? null : _route,
+      'latency_ms': _latencyMs,
+      'quality': _quality == 'Menunggu pengukuran' ? null : _quality,
+      'disconnects': _disconnects,
+      'reconnect_attempt': _reconnectAttempt,
+      if (alasan != null) 'reason': alasan,
+    }));
+  }
+
   @override
   void dispose() {
     _timer?.cancel();
+    _elapsedTimer?.cancel();
+    _reconnectTimer?.cancel();
+    _stableTimer?.cancel();
     NativeStream.onEvent = null;
     unawaited(NativeStream.batal());
     super.dispose();
   }
 
   Future<void> _mulai() async {
+    _mulaiJamProgres();
     setState(() {
       _loading = true;
       _error = null;
+      _progress = 5;
+      _stage = 'Memeriksa engine streaming di perangkat…';
     });
     _native = await NativeStream.tersedia();
     if (!mounted) return;
+    setState(() {
+      _progress = 14;
+      _stage = 'Meminta unit PC dan agen menyiapkan Sunshine…';
+    });
     final state = context.read<AppState>();
     final s = await state.mulaiSesi(widget.order.id);
     if (!mounted) return;
     setState(() {
       sesi = s;
       _loading = false;
+      _progress = s == null ? 0 : (s.status == 'menyiapkan' ? 24 : 100);
+      _stage = s == null
+          ? 'Persiapan tidak dapat dilanjutkan.'
+          : s.status == 'menyiapkan'
+              ? 'Agen memeriksa Sunshine dan menyiapkan desktop…'
+              : 'Unit siap menerima koneksi dari HP.';
       _error = s == null ? state.error : null;
+      if (s != null) {
+        _disconnects = s.clientDisconnects;
+        _reconnectAttempt = s.clientReconnectAttempt;
+        _latencyMs = s.clientLatencyMs;
+        if ((s.clientRoute ?? '').isNotEmpty) _route = s.clientRoute!;
+        if ((s.clientQuality ?? '').isNotEmpty) _quality = s.clientQuality!;
+        _lastDisconnect = s.clientReason;
+      }
     });
+    if (s == null || s.status != 'menyiapkan') _hentikanJamProgres();
     _timer?.cancel();
-    if (s != null)
+    if (s != null) {
       _timer = Timer.periodic(const Duration(seconds: 4), (_) => _refresh());
+    }
   }
 
   Future<void> _refresh() async {
@@ -74,8 +155,29 @@ class _SesiScreenState extends State<SesiScreen> {
     final s = await context.read<AppState>().statusSesi(sesi!.id);
     _polling = false;
     if (!mounted || s == null) return;
-    setState(() => sesi = s);
-    if (['selesai', 'gagal'].contains(s.status)) _timer?.cancel();
+    setState(() {
+      sesi = s;
+      if (s.clientDisconnects > _disconnects) _disconnects = s.clientDisconnects;
+      _latencyMs ??= s.clientLatencyMs;
+      if (_route == 'Belum dipilih' && (s.clientRoute ?? '').isNotEmpty) {
+        _route = s.clientRoute!;
+      }
+      if (_quality == 'Menunggu pengukuran' &&
+          (s.clientQuality ?? '').isNotEmpty) _quality = s.clientQuality!;
+      _lastDisconnect ??= s.clientReason;
+      if (s.status == 'menyiapkan') {
+        _progress = _progress.clamp(24, 88).toInt();
+      } else if (['siap', 'pairing', 'berjalan'].contains(s.status) &&
+          !_connecting) {
+        _progress = 100;
+        _stage = 'Unit siap menerima koneksi dari HP.';
+      }
+    });
+    if (s.status != 'menyiapkan') _hentikanJamProgres();
+    if (['selesai', 'gagal'].contains(s.status)) {
+      _timer?.cancel();
+      _batalReconnect();
+    }
   }
 
   Future<void> _event(Map<String, dynamic> event) async {
@@ -92,14 +194,52 @@ class _SesiScreenState extends State<SesiScreen> {
         }
         break;
       case 'stage':
-        setState(() => _stage = '${event['message']}');
+        setState(() {
+          _stage = '${event['message']}';
+          _progress = ((event['progress'] as num?)?.toInt() ?? _progress)
+              .clamp(0, 100)
+              .toInt();
+        });
+        break;
+      case 'diagnostic':
+        final host = '${event['host'] ?? ''}';
+        setState(() {
+          _latencyMs = (event['latencyMs'] as num?)?.toInt();
+          if (host.isNotEmpty && !_route.endsWith(host)) _route = 'Host · $host';
+        });
+        break;
+      case 'quality':
+        final resolusi = '${event['resolution'] ?? ''}';
+        final fps = (event['fps'] as num?)?.toInt();
+        final bitrate = (event['bitrate'] as num?)?.toInt();
+        setState(() {
+          _quality = resolusi.isEmpty
+              ? '${event['message']}'
+              : '$resolusi · ${fps ?? '-'} FPS · ${((bitrate ?? 0) / 1000).toStringAsFixed(0)} Mbps';
+          _stage = '${event['message']}';
+        });
         break;
       case 'connected':
-        setState(() => _video = true);
+        _reconnectTimer?.cancel();
+        setState(() {
+          _video = true;
+          _reconnectPending = false;
+          _reconnectIn = 0;
+          _error = null;
+          _stage = 'Video terhubung — input, audio, dan kontrol aktif.';
+        });
+        _stableTimer?.cancel();
+        _stableTimer = Timer(const Duration(seconds: 30), () {
+          if (mounted && _video) setState(() => _reconnectAttempt = 0);
+        });
         if (sesi != null) await context.read<AppState>().tandaiVideo(sesi!.id);
+        await _laporKlien('connected');
         break;
       case 'error':
-        setState(() => _error = '${event['message']}');
+        setState(() {
+          _error = '${event['message']}';
+          _lastDisconnect = 'Kode ${event['code'] ?? '-'} · ${event['stage'] ?? 'stream'}';
+        });
         break;
       case 'log':
         final baris = '${event['message']}';
@@ -109,35 +249,169 @@ class _SesiScreenState extends State<SesiScreen> {
           if (mounted) setState(() {});
         }
         break;
-      case 'closed':
       case 'disconnected':
+        _stableTimer?.cancel();
+        _disconnects++;
+        final alasan = '${event['message']}';
+        setState(() {
+          _video = false;
+          _lastDisconnect = alasan;
+        });
+        await _laporKlien('disconnected', alasan: alasan);
+        _jadwalkanReconnect(alasan);
+        await _refresh();
+        break;
+      case 'closed':
         setState(() => _video = false);
+        if (event['manual'] == true) {
+          _batalReconnect();
+          await _laporKlien('closed');
+        }
         await _refresh();
         break;
     }
   }
 
-  Future<void> _hubungkan() async {
+  void _batalReconnect() {
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    if (!mounted) return;
+    setState(() {
+      _reconnectPending = false;
+      _reconnectIn = 0;
+    });
+  }
+
+  void _jadwalkanReconnect(String alasan) {
+    if (!mounted ||
+        _reconnectPending ||
+        PengaturanLokal.nilai['autoReconnect'] == false ||
+        _appId == null ||
+        sesi == null ||
+        !['siap', 'pairing', 'berjalan'].contains(sesi!.status)) return;
+    if (_reconnectAttempt >= 3) {
+      setState(() {
+        _error = 'Sambung ulang otomatis berhenti setelah 3 kali. '
+            'Periksa jaringan/host lalu tekan Buka Layar PC.';
+        _reconnectPending = false;
+      });
+      unawaited(_laporKlien('reconnect_exhausted', alasan: alasan));
+      return;
+    }
+    _reconnectAttempt++;
+    _reconnectIn = [2, 4, 8][_reconnectAttempt - 1];
+    setState(() {
+      _reconnectPending = true;
+      _stage = 'Koneksi putus — sambung ulang $_reconnectAttempt/3 dalam $_reconnectIn detik…';
+    });
+    unawaited(_laporKlien('reconnecting', alasan: alasan));
+    _reconnectTimer?.cancel();
+    _reconnectTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      if (_reconnectIn > 1) {
+        setState(() {
+          _reconnectIn--;
+          _stage = 'Koneksi putus — sambung ulang $_reconnectAttempt/3 dalam $_reconnectIn detik…';
+        });
+        return;
+      }
+      timer.cancel();
+      setState(() {
+        _reconnectIn = 0;
+        _reconnectPending = false;
+        _stage = 'Mencoba menyambungkan video kembali ($_reconnectAttempt/3)…';
+      });
+      unawaited(_tonton(otomatis: true));
+    });
+  }
+
+  bool _masalahJalur(Object e) {
+    // Watchdog sudah membatalkan task native; jangan langsung mulai task kedua
+    // sebelum thread lama benar-benar keluar (bisa menghasilkan BUSY palsu).
+    if (e is TimeoutException) return false;
+    final m = e.toString().toLowerCase();
+    return m.contains('failed to connect') ||
+        m.contains('timeout') ||
+        m.contains('timed out') ||
+        m.contains('econnrefused') ||
+        m.contains('unable to resolve') ||
+        m.contains('no address associated') ||
+        m.contains('network is unreachable');
+  }
+
+  Future<void> _hubungkan({bool bukaSesudahSiap = false}) async {
     if (_connecting || sesi == null) return;
+    _mulaiJamProgres();
     setState(() {
       _connecting = true;
       _error = null;
-      _stage = 'Memeriksa host…';
+      _progress = 6;
+      _stage = 'Memilih jalur terbaik ke host…';
     });
-    final hostPublik = sesi!.host ?? '';
+    final hostPublik = (sesi!.host ?? '').trim();
     final hostLan = (sesi!.hostLan ?? '').trim();
+    final dahulukanLan = PengaturanLokal.nilai['preferLan'] == true &&
+        hostLan.isNotEmpty;
+    final hostPertama = dahulukanLan ? hostLan : hostPublik;
+    final labelPertama = dahulukanLan ? 'LAN' : 'Publik';
+    final hostKedua = dahulukanLan ? hostPublik : hostLan;
+    final labelKedua = dahulukanLan ? 'Publik' : 'LAN';
 
-    Future<dynamic> jajak(String host) => NativeStream.hubungkan(
-        host: host, session: sesi!.id, hostKey: sesi!.agenId ?? sesi!.host ?? '');
+    Future<dynamic> jajak(String host, String label) async {
+      if (host.isEmpty) {
+        throw StateError('Alamat host $label belum tersedia.');
+      }
+      if (mounted) {
+        setState(() {
+          _route = '$label · $host';
+          _stage = 'Menguji jalur $label ke $host…';
+          _progress = 10;
+        });
+      }
+      try {
+        return await NativeStream.hubungkan(
+          host: host,
+          session: sesi!.id,
+          hostKey: sesi!.agenId ?? sesi!.host ?? '',
+        ).timeout(const Duration(seconds: 35));
+      } on TimeoutException {
+        await NativeStream.batal();
+        throw TimeoutException(
+            'Host tidak memberi jawaban dalam 35 detik; proses dihentikan agar aplikasi tidak diam.');
+      }
+    }
 
-    void pakaiApps(dynamic apps) {
+    Future<dynamic> jajakDenganCadangan() async {
+      try {
+        return await jajak(hostPertama, labelPertama);
+      } catch (e) {
+        if (!_masalahJalur(e) ||
+            hostKedua.isEmpty ||
+            hostKedua == hostPertama) rethrow;
+        if (!mounted) rethrow;
+        setState(() {
+          _stage = 'Jalur $labelPertama gagal — mencoba $labelKedua…';
+          _progress = 8;
+        });
+        return jajak(hostKedua, labelKedua);
+      }
+    }
+
+    void pakaiApps(dynamic raw) {
+      final apps = List<Map<String, dynamic>>.from(
+          (raw as List).map((x) => Map<String, dynamic>.from(x as Map)));
       setState(() {
         _apps = apps;
         _appId = (apps
-                .where((x) => '${x['name']}'.toLowerCase() == 'desktop')
-                .firstOrNull ??
-            apps.first)['id'] as int;
+                    .where((x) => '${x['name']}'.toLowerCase() == 'desktop')
+                    .firstOrNull ??
+                apps.first)['id']
+            as int;
         _stage = 'Host terhubung. Pilih aplikasi untuk ditampilkan.';
+        _progress = 100;
         _error = null;
       });
     }
@@ -145,87 +419,101 @@ class _SesiScreenState extends State<SesiScreen> {
     try {
       dynamic apps;
       try {
-        apps = await jajak(hostPublik);
+        apps = await jajakDenganCadangan();
       } catch (e) {
         final msg = e.toString();
-        final tertutup = msg.contains('failed to connect') ||
-            msg.contains('ETIMEDOUT') ||
-            msg.contains('ECONNREFUSED') ||
-            msg.contains('connect timed out');
-        // Host publik tak terjangkau & unit melaporkan IP LAN → coba jalur lokal
-        // (berguna saat penyewa satu Wi-Fi/jaringan dengan PC unit).
-        if (tertutup && hostLan.isNotEmpty && hostLan != hostPublik) {
-          if (!mounted) return;
-          setState(() => _stage =
-              'Host publik $hostPublik tertutup — mencoba IP jaringan lokal $hostLan…');
-          apps = await jajak(hostLan);
-        } else {
-          rethrow;
-        }
+        // Identitas/sediaan crypto lokal rusak: reset hanya data pairing HP,
+        // lalu ulang satu kali. Kredensial Sunshine host tidak disentuh.
+        if (!(msg.contains('NoSuchAlgorithm') ||
+            msg.contains('provider BC') ||
+            msg.contains('RSA for provider'))) rethrow;
+        await NativeStream.resetPairing();
+        if (!mounted) return;
+        setState(() {
+          _stage = 'Memperbarui kunci pairing lokal lalu mencoba kembali…';
+          _progress = 18;
+        });
+        apps = await jajakDenganCadangan();
       }
       if (!mounted) return;
       pakaiApps(apps);
+      _hentikanJamProgres();
+      await _laporKlien('ready');
+      if (bukaSesudahSiap) await _tonton(otomatis: true);
     } catch (e) {
-      final msg = e.toString();
-      // Cert klien / BC rusak — bersihkan pairing lokal lalu coba sekali lagi
-      if (msg.contains('NoSuchAlgorithm') ||
-          msg.contains('provider BC') ||
-          msg.contains('RSA for provider')) {
-        try {
-          await NativeStream.resetPairing();
-          setState(() => _stage = 'Memperbarui kunci pairing… coba lagi');
-          dynamic apps;
-          try {
-            apps = await jajak(hostPublik);
-          } catch (_) {
-            if (hostLan.isNotEmpty && hostLan != hostPublik) {
-              apps = await jajak(hostLan);
-            } else {
-              rethrow;
-            }
-          }
-          if (!mounted) return;
-          pakaiApps(apps);
-          return;
-        } catch (e2) {
-          if (mounted)
-            setState(() => _error =
-                e2.toString().replaceFirst('PlatformException(', ''));
-          return;
-        }
-      }
-      var clean = msg.replaceFirst('PlatformException(', '');
-      if (clean.contains('Unable to resolve host') ||
-          clean.contains('EAI_NODATA') ||
-          clean.contains('No address associated')) {
-        clean =
-            'Alamat host PC tidak bisa dijangkau dari HP (bukan IP/DNS publik). '
-            'Minta admin isi IP publik unit di Dashboard → Unit PC, atau perbarui agen ke 1.3.3+. '
+      var clean = e.toString().replaceFirst('PlatformException(', '');
+      final lower = clean.toLowerCase();
+      if (e is TimeoutException) {
+        clean = 'Host tidak menjawab dalam 35 detik. Proses native sudah dihentikan '
+            'agar layar tidak diam; tunggu sebentar lalu coba lagi atau jalankan Diagnostik jaringan.';
+      } else if (lower.contains('unable to resolve host') ||
+          lower.contains('eai_nodata') ||
+          lower.contains('no address associated')) {
+        clean = 'Alamat host PC tidak bisa dijangkau dari HP. '
+            'Minta admin memastikan IP publik/domain unit dan IP LAN agen benar. Detail: $clean';
+      } else if (_masalahJalur(e)) {
+        clean = 'Host PC tidak merespons${hostLan.isNotEmpty && hostLan != hostPublik ? ' melalui jalur publik maupun LAN' : ''}. '
+            'Buka/forward 47984–47990 TCP+UDP dan 48010 pada router/firewall; '
+            'untuk VM cloud periksa NSG/Security Group, lalu jalankan Cek port dari internet pada Agen. '
             'Detail: $clean';
       }
-      if (clean.contains('failed to connect') ||
-          clean.contains('connect timed out') ||
-          clean.contains('ECONNREFUSED')) {
-        clean = 'Host PC tidak merespons${hostLan.isNotEmpty && hostLan != hostPublik ? ' (IP publik $hostPublik & IP lokal $hostLan sama-sama gagal)' : ''}. '
-            'Port streaming di sisi PC kemungkinan belum terbuka dari internet. '
-            'Admin PC: buka/forward port 47984–47990 (TCP+UDP) dan 48010 di router/firewall — '
-            'untuk VM cloud (Azure/AWS/GCP) tambahkan inbound rule di NSG/Security Group — '
-            'lalu tekan "Cek port dari internet" di aplikasi agen untuk memastikan. '
-            'Detail: $clean';
+      if (mounted) {
+        setState(() {
+          _error = clean;
+          _progress = 0;
+          _stage = 'Koneksi ke host gagal.';
+        });
       }
-      if (mounted) setState(() => _error = clean);
+      await _laporKlien('prepare_failed', alasan: clean);
     } finally {
+      _hentikanJamProgres();
       if (mounted) setState(() => _connecting = false);
     }
   }
 
-  Future<void> _tonton() async {
+  Future<void> _tonton({bool otomatis = false}) async {
     if (_appId == null) return;
-    try {
-      await NativeStream.mulai(_appId!, PengaturanLokal.nilai);
-    } catch (e) {
-      if (mounted) setState(() => _error = '$e');
+    if (!otomatis) {
+      _batalReconnect();
+      _reconnectAttempt = 0;
     }
+    setState(() {
+      _error = null;
+      _stage = otomatis
+          ? 'Membuka kembali renderer native…'
+          : 'Membuka renderer native, audio, dan kontrol…';
+    });
+    await _laporKlien(otomatis ? 'reconnect_start' : 'connecting');
+    try {
+      final options = <String, dynamic>{...PengaturanLokal.nilai};
+      if (otomatis && options['adaptiveStreaming'] != false) {
+        options['adaptiveRecovery'] = _reconnectAttempt;
+      }
+      await NativeStream.mulai(_appId!, options);
+    } catch (e) {
+      if (!mounted) return;
+      final pesan = '$e';
+      setState(() => _error = pesan);
+      await _laporKlien('start_failed', alasan: pesan);
+      if (otomatis) _jadwalkanReconnect(pesan);
+    }
+  }
+
+  Future<void> _diagnostik() async {
+    if (_diagnosing || sesi == null) return;
+    setState(() {
+      _diagnosing = true;
+      _networkDiagnostic = null;
+    });
+    final hasil = await context.read<AppState>().diagnostikSesi(sesi!.id);
+    if (!mounted) return;
+    setState(() {
+      _diagnosing = false;
+      _networkDiagnostic = hasil;
+      if (hasil == null) {
+        _error = 'Diagnostik jaringan belum dapat dijalankan. Coba lagi sesaat lagi.';
+      }
+    });
   }
 
   Future<void> _akhiri() async {
@@ -237,6 +525,9 @@ class _SesiScreenState extends State<SesiScreen> {
             tombolYa: 'Akhiri',
             bahaya: true) ||
         !mounted) return;
+    _batalReconnect();
+    await NativeStream.batal();
+    await _laporKlien('ending');
     final err = await context.read<AppState>().akhiriSesi(sesi!.id);
     if (mounted) {
       if (err != null)
@@ -245,6 +536,20 @@ class _SesiScreenState extends State<SesiScreen> {
         await _refresh();
     }
   }
+
+  Widget _barisDiagnosis(String label, String nilai, XyPalette p) => Padding(
+        padding: const EdgeInsets.only(bottom: 7),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          SizedBox(
+              width: 104,
+              child: Text(label,
+                  style: TextStyle(color: p.muted, fontSize: 11.5))),
+          Expanded(
+              child: Text(nilai,
+                  style: const TextStyle(
+                      fontSize: 11.5, fontWeight: FontWeight.w700))),
+        ]),
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -301,13 +606,67 @@ class _SesiScreenState extends State<SesiScreen> {
           const SizedBox(height: 18),
           if (_loading || s?.status == 'menyiapkan')
             XyCard(
-                child: Column(children: [
-              const LinearProgressIndicator(),
-              const SizedBox(height: 14),
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+              Row(children: [
+                const Icon(Icons.settings_input_antenna_rounded,
+                    size: 18, color: XyTheme.primary),
+                const SizedBox(width: 8),
+                const Expanded(
+                    child: Text('Persiapan unit',
+                        style: TextStyle(fontWeight: FontWeight.w700))),
+                Text('$_progress% · $_waktuProgres',
+                    style: const TextStyle(
+                        color: XyTheme.primary,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700)),
+              ]),
+              const SizedBox(height: 10),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(XyRadius.pill),
+                child: LinearProgressIndicator(
+                  value: (_progress / 100).clamp(0.0, 1.0).toDouble(),
+                  minHeight: 8,
+                  backgroundColor: p.lineSoft,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(_stage, style: TextStyle(color: p.inkSoft, height: 1.5)),
+              const SizedBox(height: 5),
               Text(
-                  'Menunggu agen memeriksa Sunshine dan menyiapkan sesi. Simpan pekerjaan di VM: aplikasi penyewa dapat ditutup saat persiapan.',
-                  style: TextStyle(color: p.inkSoft, height: 1.5))
+                  'Aplikasi boleh ditutup saat agen menyiapkan Sunshine. Progres di atas tetap menunjukkan tahap terakhir, bukan terminal yang diam.',
+                  style: TextStyle(color: p.muted, fontSize: 11.5, height: 1.45))
             ])),
+          if (_reconnectPending)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 14),
+              child: XyCard(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
+                    const Icon(Icons.sync_rounded,
+                        size: 19, color: XyTheme.warning),
+                    const SizedBox(width: 9),
+                    Expanded(
+                      child: Text('Pemulihan koneksi $_reconnectAttempt/3',
+                          style: const TextStyle(fontWeight: FontWeight.w700)),
+                    ),
+                    Text('$_reconnectIn dtk',
+                        style: const TextStyle(
+                            color: XyTheme.warning,
+                            fontWeight: FontWeight.w800)),
+                  ]),
+                  const SizedBox(height: 8),
+                  Text(_stage,
+                      style: TextStyle(color: p.inkSoft, height: 1.45)),
+                  TextButton.icon(
+                    onPressed: _batalReconnect,
+                    icon: const Icon(Icons.close_rounded, size: 16),
+                    label: const Text('Batalkan sambung ulang'),
+                  ),
+                ]),
+              ),
+            ),
           if (_error != null)
             Padding(
                 padding: const EdgeInsets.only(bottom: 16),
@@ -326,7 +685,9 @@ class _SesiScreenState extends State<SesiScreen> {
                           onPressed: _connecting
                               ? null
                               : ready
-                                  ? _hubungkan
+                                  ? (_apps.isNotEmpty
+                                      ? () => _tonton()
+                                      : () => _hubungkan())
                                   : _mulai,
                           child: const Text('Coba lagi'))
                     ]))),
@@ -345,6 +706,63 @@ class _SesiScreenState extends State<SesiScreen> {
                   const SizedBox(height: 12),
                   SelectableText(s.host ?? 'Host belum tersedia',
                       style: TextStyle(color: p.inkSoft)),
+                  const SizedBox(height: 10),
+                  OutlinedButton.icon(
+                    onPressed: _diagnosing ? null : _diagnostik,
+                    icon: const Icon(Icons.network_check_rounded, size: 18),
+                    label: Text(_diagnosing
+                        ? 'Menguji port dari internet…'
+                        : 'Diagnostik jaringan'),
+                  ),
+                  if (_networkDiagnostic != null) ...[
+                    const SizedBox(height: 10),
+                    Builder(builder: (context) {
+                      final d = _networkDiagnostic!;
+                      final kondisi = '${d['keadaan'] ?? 'belum diketahui'}';
+                      final ports = (d['hasil'] as List? ?? const [])
+                          .map((x) => Map<String, dynamic>.from(x as Map))
+                          .toList();
+                      final sehat = kondisi == 'sehat';
+                      return Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: (sehat ? XyTheme.success : XyTheme.warning)
+                              .withOpacity(.08),
+                          borderRadius: BorderRadius.circular(XyRadius.md),
+                          border: Border.all(
+                            color: (sehat ? XyTheme.success : XyTheme.warning)
+                                .withOpacity(.25),
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Jalur internet: ${kondisi.toUpperCase()}',
+                                style: TextStyle(
+                                    color: sehat
+                                        ? XyTheme.success
+                                        : XyTheme.warning,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w800)),
+                            const SizedBox(height: 5),
+                            Text(
+                              ports.map((x) =>
+                                '${x['port']}/${x['protokol'] ?? 'TCP'}: ${x['terbuka'] == true ? 'terbuka' : 'tertutup'}').join(' · '),
+                              style: const TextStyle(
+                                  fontSize: 11.5, fontWeight: FontWeight.w600),
+                            ),
+                            const SizedBox(height: 5),
+                            Text('${d['saran'] ?? ''}',
+                                style: TextStyle(
+                                    color: p.inkSoft,
+                                    fontSize: 11.5,
+                                    height: 1.4)),
+                          ],
+                        ),
+                      );
+                    }),
+                  ],
                   const SizedBox(height: 18),
                   if (!_native)
                     const Text(
@@ -358,9 +776,28 @@ class _SesiScreenState extends State<SesiScreen> {
                         icon: Icons.link_rounded),
                     if (_connecting)
                       Padding(
-                          padding: const EdgeInsets.only(top: 12),
-                          child:
-                              Text(_stage, style: TextStyle(color: p.muted))),
+                        padding: const EdgeInsets.only(top: 14),
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(XyRadius.pill),
+                            child: LinearProgressIndicator(
+                              value: (_progress / 100).clamp(0.0, 1.0).toDouble(),
+                              minHeight: 8,
+                              backgroundColor: p.lineSoft,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Row(children: [
+                            Expanded(child: Text(_stage,
+                                style: TextStyle(color: p.muted, height: 1.4))),
+                            Text('$_progress% · $_waktuProgres',
+                                style: const TextStyle(
+                                    color: XyTheme.primary,
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w700)),
+                          ]),
+                        ]),
+                      ),
                   ] else ...[
                     DropdownButtonFormField<int>(
                         value: _appId,
@@ -379,9 +816,52 @@ class _SesiScreenState extends State<SesiScreen> {
                         label:
                             _video ? 'Kembali ke tampilan PC' : 'Buka Layar PC',
                         icon: Icons.fullscreen_rounded,
-                        onPressed: _tonton),
+                        onPressed: () => _tonton()),
                   ],
                 ])),
+          ],
+          if (ready && (_apps.isNotEmpty || _latencyMs != null || _lastDisconnect != null)) ...[
+            const SizedBox(height: 14),
+            XyCard(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(children: [
+                  const Icon(Icons.monitor_heart_outlined,
+                      size: 18, color: XyTheme.primary),
+                  const SizedBox(width: 8),
+                  const Text('Diagnostik koneksi',
+                      style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+                  const Spacer(),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: (_video ? XyTheme.success : XyTheme.warning).withOpacity(.10),
+                      borderRadius: BorderRadius.circular(XyRadius.pill),
+                    ),
+                    child: Text(_video ? 'TERHUBUNG' : 'SIAGA',
+                        style: TextStyle(
+                            color: _video ? XyTheme.success : XyTheme.warning,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 9.5)),
+                  ),
+                ]),
+                const SizedBox(height: 12),
+                _barisDiagnosis('Jalur aktif', _route, p),
+                _barisDiagnosis('Respons host',
+                    _latencyMs == null ? 'belum diukur' : '$_latencyMs ms', p),
+                _barisDiagnosis('Kualitas aktual', _quality, p),
+                _barisDiagnosis('Anti-putus',
+                    PengaturanLokal.nilai['autoReconnect'] == false
+                        ? 'nonaktif'
+                        : 'aktif · $_disconnects kali putus', p),
+                if (_lastDisconnect != null)
+                  _barisDiagnosis('Kejadian terakhir', _lastDisconnect!, p),
+                const SizedBox(height: 5),
+                Text(
+                  'Adaptive anti-lag hanya menurunkan batas kualitas saat respons awal berat; pilihan pengguna tetap dipakai bila jaringan sehat.',
+                  style: TextStyle(color: p.muted, fontSize: 11, height: 1.4),
+                ),
+              ]),
+            ),
           ],
           if (_log.isNotEmpty) ...[
             const SizedBox(height: 14),

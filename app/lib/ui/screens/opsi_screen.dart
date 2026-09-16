@@ -83,6 +83,33 @@ class _OpsiStreamingScreenState extends State<OpsiStreamingScreen> {
               'Latensi Ultra Rendah = HEVC + 120 FPS + bitrate tinggi; butuh HP yang mampu dan Wi-Fi/jaringan stabil. Suara game & Discord di PC ikut terdengar di HP; untuk onmic pakai Discord di HP atau mic PC.',
               style: TextStyle(fontSize: 11.5, color: XyTheme.of(context).muted, height: 1.4)),
           const SizedBox(height: 18),
+          const Text('Koneksi pintar',
+              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+          SwitchListTile(
+              value: p['adaptiveStreaming'] != false,
+              secondary: const Icon(Icons.auto_graph_rounded,
+                  color: XyTheme.primary),
+              title: const Text('Adaptive anti-lag'),
+              subtitle: const Text(
+                  'Ukur waktu respons host lalu turunkan resolusi, FPS, dan bitrate hanya bila jaringan sedang berat.'),
+              onChanged: (v) => _set('adaptiveStreaming', v)),
+          SwitchListTile(
+              value: p['autoReconnect'] != false,
+              secondary: const Icon(Icons.sync_rounded,
+                  color: XyTheme.primary),
+              title: const Text('Sambung ulang otomatis'),
+              subtitle: const Text(
+                  'Jika video putus, coba kembali maksimal 3 kali dengan jeda bertahap. Bisa dibatalkan dari layar sesi.'),
+              onChanged: (v) => _set('autoReconnect', v)),
+          SwitchListTile(
+              value: p['preferLan'] == true,
+              secondary: const Icon(Icons.router_outlined,
+                  color: XyTheme.primary),
+              title: const Text('Dahulukan jaringan lokal'),
+              subtitle: const Text(
+                  'Pakai IP LAN lebih dulu bila HP dan PC berada di Wi-Fi/router yang sama; host publik tetap menjadi cadangan.'),
+              onChanged: (v) => _set('preferLan', v)),
+          const Divider(height: 20),
           SwitchListTile(
               value: p['kontrolBawaan'] == true,
               title: const Text('Kontrol bawaan (Moonlight)'),
@@ -162,6 +189,26 @@ class _OpsiStreamingScreenState extends State<OpsiStreamingScreen> {
                 title: Text(item.$2),
                 subtitle: Text(item.$3),
                 onChanged: (v) => _set(item.$1, v)),
+          const SizedBox(height: 8),
+          XyCard(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Row(children: [
+                Icon(Icons.headset_mic_outlined,
+                    size: 19, color: XyTheme.primary),
+                SizedBox(width: 9),
+                Text('Audio, mic, dan gamepad',
+                    style: TextStyle(fontWeight: FontWeight.w700)),
+              ]),
+              const SizedBox(height: 8),
+              Text(
+                'Suara game/Discord dari PC dikirim ke HP. Gamepad Bluetooth/USB dan kontrol sentuh diproses native. Protokol GameStream tidak mengirim mic HP ke PC; untuk on-mic gunakan Discord di HP atau mikrofon/headset yang terhubung ke PC rental. Ini menghindari klaim mic palsu dan echo audio.',
+                style: TextStyle(
+                    color: XyTheme.of(context).muted,
+                    fontSize: 11.5,
+                    height: 1.5),
+              ),
+            ]),
+          ),
           const SizedBox(height: 12),
           OutlinedButton(
               onPressed: () async {

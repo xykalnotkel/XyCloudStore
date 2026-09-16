@@ -41,14 +41,27 @@ public final class NativeStreaming {
     private ComputerDetails computer;
     private List<NvApp> apps;
     private String uniqueId, session;
+    private int lastProbeMs;
+    private String lastHost = "";
     public NativeStreaming(Activity activity) {
         this.activity = activity;
         this.saved = activity.getSharedPreferences("xy_stream_hosts", 0);
     }
     public void setEvents(Events listener) { events = listener; }
     public static void emit(String type, String message) {
-        Map<String,Object> map = new HashMap<>(); map.put("type",type); map.put("message",message);
+        emit(type, message, null);
+    }
+    /** Event terstruktur untuk status, diagnosa, dan reconnect di sisi Flutter. */
+    public static void emit(String type, String message, Map<String,Object> extra) {
+        Map<String,Object> map = new HashMap<>();
+        map.put("type",type); map.put("message",message);
+        if(extra!=null) map.putAll(extra);
         main.post(() -> { if(events != null) events.event(map); });
+    }
+    private static void emitStage(String code, String message, int progress) {
+        Map<String,Object> extra=new HashMap<>();
+        extra.put("code",code);extra.put("progress",progress);
+        emit("stage",message,extra);
     }
     /** Baris log untuk panel log aplikasi (ditampilkan di layar sesi). */
     public static void emitLog(String message) {
@@ -149,13 +162,15 @@ public final class NativeStreaming {
             try {
                 // Wajib sebelum IdentityManager / PairingManager menyentuh RSA+BC
                 XyCrypto.ensure();
-                emit("stage","Menghubungkan host streaming…");
+                lastHost=host;
+                emitStage("alamat","Memeriksa alamat host streaming…",10);
                 ComputerDetails.AddressTuple address=address(host);
+                emitStage("identitas","Menyiapkan identitas klien terenkripsi…",22);
                 try {
                     uniqueId=new IdentityManager(activity).getUniqueId();
                 } catch (Throwable cryptoBoot) {
                     // Sertifikat klien rusak / BC lama — hapus & buat ulang
-                    emit("stage","Memperbarui identitas klien streaming…");
+                    emitStage("identitas_baru","Memperbarui identitas klien streaming…",28);
                     activity.deleteFile("uniqueid");
                     activity.deleteFile("client.crt");
                     activity.deleteFile("client.key");
@@ -164,13 +179,22 @@ public final class NativeStreaming {
                 }
                 X509Certificate pinned=certificate(hostKey);
                 NvHTTP http=new NvHTTP(address,0,uniqueId,pinned,PlatformBinding.getCryptoProvider(activity));
+                emitStage("probe","Menguji respons Sunshine dan jalur jaringan…",38);
+                long probeStart=android.os.SystemClock.elapsedRealtime();
                 String info=http.getServerInfo(true);
+                lastProbeMs=(int)Math.min(Integer.MAX_VALUE,
+                    android.os.SystemClock.elapsedRealtime()-probeStart);
+                Map<String,Object> diagnosis=new HashMap<>();
+                diagnosis.put("latencyMs",lastProbeMs);
+                diagnosis.put("host",lastHost);
+                diagnosis.put("paired",http.getPairState(info)==PairingManager.PairState.PAIRED);
+                emit("diagnostic","Host merespons dalam "+lastProbeMs+" ms.",diagnosis);
                 ComputerDetails details=http.getComputerDetails(info);
                 details.activeAddress=address;
                 details.serverCert=pinned;
                 if(http.getPairState(info)!=PairingManager.PairState.PAIRED) {
                     String pin=PairingManager.generatePinString();
-                    emit("stage","Memasangkan perangkat dengan host…");
+                    emitStage("pairing","Memasangkan perangkat dengan host…",56);
                     emitPin(pin,request);
                     PairingManager pm=http.getPairingManager();
                     PairingManager.PairState state;
@@ -203,13 +227,14 @@ public final class NativeStreaming {
                 }
                 if(request!=generation)throw new InterruptedException();
                 http=new NvHTTP(address,details.httpsPort,uniqueId,details.serverCert,PlatformBinding.getCryptoProvider(activity));
-                emit("stage","Membaca aplikasi dari Sunshine…");
+                emitStage("aplikasi","Membaca aplikasi dari Sunshine…",78);
                 List<NvApp> list=http.getAppList();
                 if(list.isEmpty())throw new IllegalStateException("Sunshine belum menyediakan aplikasi. Tambahkan Desktop di web UI Sunshine.");
                 if(request!=generation)throw new InterruptedException();
                 computer=details;apps=list;
                 List<Map<String,Object>> results=new ArrayList<>();
                 for(NvApp app:list){Map<String,Object> item=new HashMap<>();item.put("id",app.getAppId());item.put("name",app.getAppName());item.put("hdr",app.isHdrSupported());results.add(item);}
+                emitStage("siap","Host siap — pilih layar atau game.",100);
                 main.post(()->reply.ok(results));
             } catch(Exception e) {
                 String message=e.getMessage();
@@ -235,11 +260,46 @@ public final class NativeStreaming {
             Map<String,Object> options=args.get("options") instanceof Map?(Map<String,Object>)args.get("options"):new HashMap<>();
             String resolution=text(options,"resolution","1280x720");
             if(!resolution.matches("(854x480|1280x720|1920x1080|2560x1440|3840x2160)"))resolution="1280x720";
-            String codec=text(options,"codec","auto");if(!codec.matches("auto|neverh265|forceh265"))codec="auto";
+            int fps=number(options,"fps",60,30,120);
+            int bitrate=number(options,"bitrate",10000,2000,80000);
+            String codec=text(options,"codec","auto");
+            if(!codec.matches("auto|neverh265|forceh265"))codec="auto";
+            boolean adaptive=flag(options,"adaptiveStreaming",true);
+            int recovery=number(options,"adaptiveRecovery",0,0,3);
+            String qualityReason="Kualitas pilihan pengguna";
+            // Reconnect bertingkat menurunkan beban sebelum percobaan berikutnya.
+            // Probe HTTPS bukan pengganti pengukuran packet-loss, tetapi menjadi
+            // pagar awal agar koneksi berat tidak langsung dipaksa 4K/120.
+            if(adaptive&&recovery>=3){
+                resolution="854x480";fps=Math.min(fps,30);bitrate=Math.min(bitrate,5000);
+                qualityReason="Pemulihan 3 — profil paling stabil";
+            }else if(adaptive&&recovery==2){
+                resolution="1280x720";fps=Math.min(fps,60);bitrate=Math.min(bitrate,9000);
+                qualityReason="Pemulihan 2 — beban video diturunkan";
+            }else if(adaptive&&recovery==1){
+                if(resolution.equals("2560x1440")||resolution.equals("3840x2160"))resolution="1920x1080";
+                fps=Math.min(fps,60);bitrate=Math.min(bitrate,16000);
+                qualityReason="Pemulihan 1 — puncak kualitas dibatasi";
+            }else if(adaptive&&lastProbeMs>450){
+                resolution="854x480";fps=Math.min(fps,30);bitrate=Math.min(bitrate,5000);
+                qualityReason="Jaringan berat — profil aman anti-lag";
+            }else if(adaptive&&lastProbeMs>220){
+                resolution="1280x720";fps=Math.min(fps,60);bitrate=Math.min(bitrate,10000);
+                qualityReason="Jaringan sedang — kualitas diturunkan sementara";
+            }else if(adaptive&&lastProbeMs>120){
+                if(resolution.equals("2560x1440")||resolution.equals("3840x2160"))resolution="1920x1080";
+                fps=Math.min(fps,60);bitrate=Math.min(bitrate,18000);
+                qualityReason="Jaringan cukup — puncak kualitas dibatasi sementara";
+            }
+            Map<String,Object> quality=new HashMap<>();
+            quality.put("resolution",resolution);quality.put("fps",fps);
+            quality.put("bitrate",bitrate);quality.put("latencyMs",lastProbeMs);
+            quality.put("adaptive",adaptive);quality.put("reason",qualityReason);
+            emit("quality",qualityReason,quality);
             PreferenceManager.getDefaultSharedPreferences(activity).edit()
                 .putString("list_resolution",resolution)
-                .putString("list_fps",String.valueOf(number(options,"fps",60,30,120)))
-                .putInt("seekbar_bitrate_kbps",number(options,"bitrate",10000,2000,80000))
+                .putString("list_fps",String.valueOf(fps))
+                .putInt("seekbar_bitrate_kbps",bitrate)
                 .putString("video_format",codec).putString("list_audio_config","2")
                 .putBoolean("checkbox_show_onscreen_controls",flag(options,"gamepad",true))
                 .putBoolean("checkbox_touchscreen_trackpad",flag(options,"trackpad",true))

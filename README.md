@@ -329,9 +329,18 @@ Sewa PC tidak lagi berhenti di kredensial RDP. Sekarang ada siklus sesi penuh:
 | `selesai` / `gagal` | Sesi ditutup, perangkat dilepas, mesin dibersihkan, unit kembali menganggur |
 
 Endpoint pengguna: `POST /api/sesi/mulai`, `GET /api/sesi/:id`, `POST /api/sesi/:id/pin`,
-`POST /api/sesi/:id/akhiri`.
+`POST /api/sesi/:id/stream`, `GET /api/sesi/:id/diagnostik`, `POST /api/sesi/:id/telemetri`,
+dan `POST /api/sesi/:id/akhiri`. Diagnostik menguji sampel port TCP dari jaringan Cloudflare;
+UDP tetap harus diperiksa pada router/firewall host. Telemetri hanya menyimpan state/jalur/
+latensi/kualitas—tidak pernah input kontrol, audio, gambar, atau isi gameplay.
 Endpoint agen (pakai header `x-agen-kode`): `POST /api/agen/heartbeat`, `POST /api/agen/perintah/:id`.
 Admin: `GET/POST /api/admin/agen`, `DELETE /api/admin/agen/:id`, `GET /api/admin/sesi`.
+
+Klien Android memiliki watchdog penyambungan 35 detik, fallback publik↔LAN, progres tahap +
+waktu, adaptive anti-lag berdasarkan respons awal, dan reconnect bertingkat 2/4/8 detik
+(maksimal 3 kali; kualitas diturunkan bertahap). Status tersebut terlihat di layar sesi dan
+Dashboard → Sesi PC. Audio host dan gamepad/touch diproses native. Uplink mikrofon HP bukan
+bagian protokol GameStream; gunakan Discord di HP atau mikrofon yang terhubung ke PC host.
 
 Program agen untuk PC/VM host ada di folder `agent-gui/` (ditulis ulang penuh dalam
 **Rust + Tauri**, tanpa runtime Python), dengan README berisi panduan pemasangan Sunshine,

@@ -944,6 +944,14 @@ class SesiMain {
   final int durasiMenit;
   final DateTime? mulai;
   final DateTime? berakhir;
+  final String? clientState;
+  final DateTime? clientLast;
+  final String? clientRoute;
+  final int? clientLatencyMs;
+  final String? clientQuality;
+  final int clientDisconnects;
+  final int clientReconnectAttempt;
+  final String? clientReason;
 
   SesiMain({
     required this.id,
@@ -956,6 +964,14 @@ class SesiMain {
     this.durasiMenit = 60,
     this.mulai,
     this.berakhir,
+    this.clientState,
+    this.clientLast,
+    this.clientRoute,
+    this.clientLatencyMs,
+    this.clientQuality,
+    this.clientDisconnects = 0,
+    this.clientReconnectAttempt = 0,
+    this.clientReason,
   });
 
   factory SesiMain.fromJson(Map<String, dynamic> j) => SesiMain(
@@ -970,6 +986,17 @@ class SesiMain {
         durasiMenit: j['durasi_menit'] ?? 60,
         mulai: DateTime.tryParse('${j['mulai']}'.replaceFirst(' ', 'T')),
         berakhir: DateTime.tryParse('${j['berakhir']}'.replaceFirst(' ', 'T')),
+        clientState: j['client_state'] as String?,
+        clientLast: j['client_last'] == null
+            ? null
+            : DateTime.tryParse('${j['client_last']}'.replaceFirst(' ', 'T')),
+        clientRoute: j['client_route'] as String?,
+        clientLatencyMs: (j['client_latency_ms'] as num?)?.toInt(),
+        clientQuality: j['client_quality'] as String?,
+        clientDisconnects: (j['client_disconnects'] as num?)?.toInt() ?? 0,
+        clientReconnectAttempt:
+            (j['client_reconnect_attempt'] as num?)?.toInt() ?? 0,
+        clientReason: j['client_reason'] as String?,
       );
 }
 

@@ -283,7 +283,7 @@ CREATE TABLE rilis (id INTEGER PRIMARY KEY CHECK (id = 1), versi TEXT NOT NULL, 
 --  sesi
 -- ------------------------------------------------------------
 DROP TABLE IF EXISTS sesi;
-CREATE TABLE sesi (id TEXT PRIMARY KEY, order_id TEXT, user_id TEXT NOT NULL, agen_id TEXT, status TEXT NOT NULL DEFAULT 'menyiapkan', pin TEXT, host TEXT, catatan TEXT, durasi_menit INTEGER NOT NULL DEFAULT 60, mulai TEXT, berakhir TEXT, dibuat TEXT NOT NULL DEFAULT (datetime('now')));
+CREATE TABLE sesi (id TEXT PRIMARY KEY, order_id TEXT, user_id TEXT NOT NULL, agen_id TEXT, status TEXT NOT NULL DEFAULT 'menyiapkan', pin TEXT, host TEXT, catatan TEXT, durasi_menit INTEGER NOT NULL DEFAULT 60, mulai TEXT, berakhir TEXT, dibuat TEXT NOT NULL DEFAULT (datetime('now')), client_state TEXT, client_last TEXT, client_route TEXT, client_latency_ms INTEGER, client_quality TEXT, client_disconnects INTEGER NOT NULL DEFAULT 0, client_reconnect_attempt INTEGER NOT NULL DEFAULT 0, client_reason TEXT);
 
 -- ------------------------------------------------------------
 --  setelan

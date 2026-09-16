@@ -11,6 +11,11 @@ class PengaturanLokal {
     'trackpad': true,
     'hostAudio': false,
     'stats': false,
+    // Pemulihan dan pemilihan jalur streaming. Data rahasia host tidak
+    // disimpan di sini; hanya preferensi kualitas milik pengguna.
+    'adaptiveStreaming': true,
+    'autoReconnect': true,
+    'preferLan': false,
     'vibration': true,
     'textScale': 1.0,
     'animasi': true,

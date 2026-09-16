@@ -2,6 +2,8 @@ package id.xycloud.stream;
 
 import android.os.Bundle;
 import com.limelight.Game;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Renderer full-screen + kontrol XyCloudStore, dalam satu APK yang sama.
@@ -11,6 +13,7 @@ import com.limelight.Game;
 public class XyGameActivity extends Game {
     private XyHud hud;
     private boolean connected;
+    private boolean terminated;
 
     @Override
     public void onCreate(Bundle state) {
@@ -38,20 +41,28 @@ public class XyGameActivity extends Game {
         connected = true;
         super.connectionStarted();
         XyLog.tulis("Video terhubung ke host. Mulai main!");
-        NativeStreaming.emit("connected", "Video terhubung.");
+        Map<String,Object> info = new HashMap<>();
+        info.put("reconnectable", false);
+        NativeStreaming.emit("connected", "Video terhubung.", info);
     }
 
     @Override
     public void stageFailed(String stage, int ports, int code) {
         XyLog.tulis("Tahap " + stage + " gagal (kode " + code + ").");
-        NativeStreaming.emit("error", "Tahap " + stage + " gagal (" + code + "). Port streaming host kemungkinan tertutup dari internet: buka/forward 47984-47990 (TCP+UDP) dan 48010 di PC (router/firewall, atau NSG/Security Group untuk VM cloud), lalu coba lagi.");
+        Map<String,Object> info = new HashMap<>();
+        info.put("stage", stage);info.put("ports", ports);info.put("code", code);
+        info.put("reconnectable", true);
+        NativeStreaming.emit("error", "Tahap " + stage + " gagal (" + code + "). Port streaming host kemungkinan tertutup dari internet: buka/forward 47984-47990 (TCP+UDP) dan 48010 di PC (router/firewall, atau NSG/Security Group untuk VM cloud), lalu coba lagi.", info);
         super.stageFailed(stage, ports, code);
     }
 
     @Override
     public void connectionTerminated(int code) {
+        terminated = true;
         XyLog.tulis("Koneksi video berakhir (kode " + code + ").");
-        NativeStreaming.emit("disconnected", "Koneksi video berakhir (" + code + ").");
+        Map<String,Object> info = new HashMap<>();
+        info.put("code", code);info.put("reconnectable", true);
+        NativeStreaming.emit("disconnected", "Koneksi video berakhir (" + code + ").", info);
         super.connectionTerminated(code);
     }
 
@@ -66,7 +77,9 @@ public class XyGameActivity extends Game {
         XyLog.tulis("Layar streaming ditutup.");
         if (hud != null) hud.lepasSemua();
         super.onDestroy();
+        Map<String,Object> info = new HashMap<>();
+        info.put("manual", !terminated);info.put("reconnectable", terminated);
         NativeStreaming.emit("closed",
-                connected ? "Kembali ke sesi. Waktu sewa tetap berjalan." : "Layar streaming ditutup.");
+                connected && !terminated ? "Kembali ke sesi. Waktu sewa tetap berjalan." : "Layar streaming ditutup.", info);
     }
 }

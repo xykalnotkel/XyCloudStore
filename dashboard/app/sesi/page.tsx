@@ -23,7 +23,7 @@ export default function SesiPage() {
           <table className="w-full text-left text-[12.5px] min-w-[720px]">
             <thead>
               <tr className="border-b border-[#E9E3F5] bg-[#F5F3FF]">
-                {["Sesi", "User", "Unit", "Order", "Status", "Mulai", "Catatan"].map((h) => (
+                {["Sesi", "User", "Unit", "Order", "Status", "Klien", "Mulai", "Catatan"].map((h) => (
                   <th key={h} className="px-4 py-2.5 text-[10.5px] uppercase tracking-wider text-[#7C738F] font-semibold">{h}</th>
                 ))}
               </tr>
@@ -39,6 +39,17 @@ export default function SesiPage() {
                   <td className="px-4 py-3 font-medium">{s.unit || s.agen_id || "—"}</td>
                   <td className="px-4 py-3 font-mono text-[11px]">{s.order_id ? String(s.order_id).slice(0, 10) : "—"}</td>
                   <td className="px-4 py-3"><Chip tone={toneStatus(s.status)}>{s.status}</Chip></td>
+                  <td className="px-4 py-3 min-w-[180px]">
+                    <div className="flex items-center gap-1.5">
+                      <span className={`w-1.5 h-1.5 rounded-full ${s.client_state === "connected" ? "bg-emerald-500" : s.client_state ? "bg-amber-500" : "bg-slate-300"}`} />
+                      <span className="font-semibold text-[11px]">{s.client_state || "belum ada laporan"}</span>
+                      {s.client_latency_ms != null && <span className="text-[10px] font-mono text-[#7C738F]">{s.client_latency_ms}ms</span>}
+                    </div>
+                    <div className="mt-1 text-[10px] text-[#7C738F] truncate max-w-[220px]">
+                      {s.client_route || "jalur —"}{s.client_disconnects ? ` • putus ${s.client_disconnects}x` : ""}
+                    </div>
+                    {s.client_quality && <div className="text-[10px] text-[#7C738F] truncate max-w-[220px]">{s.client_quality}</div>}
+                  </td>
                   <td className="px-4 py-3 text-[11px] font-mono text-[#7C738F]">{jam(s.mulai || s.dibuat)}</td>
                   <td className="px-4 py-3 text-[11.5px] text-[#6B5A8A] max-w-[180px] truncate">{s.catatan || "—"}</td>
                 </tr>
