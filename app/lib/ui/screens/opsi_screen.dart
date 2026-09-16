@@ -7,6 +7,7 @@ import '../../data/push_service.dart';
 import '../../providers/app_state.dart';
 import '../widgets/common.dart';
 import '../widgets/lembar.dart';
+import 'hud_preset_screen.dart';
 
 class OpsiStreamingScreen extends StatefulWidget {
   const OpsiStreamingScreen({super.key});
@@ -91,6 +92,20 @@ class _OpsiStreamingScreenState extends State<OpsiStreamingScreen> {
                 await _set('kontrolBawaan', v);
                 await NativeStream.setKontrolBawaan(v);
               }),
+          const Divider(height: 10),
+          ListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+              leading: const Icon(Icons.sports_esports_outlined,
+                  color: XyTheme.primary),
+              title: const Text('Editor HUD & Preset',
+                  style: TextStyle(fontWeight: FontWeight.w700)),
+              subtitle: const Text(
+                  'Buka editor landscape, tambah/geser/ubah ukuran tombol, simpan lokal, atau bagikan ke komunitas.'),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const HudPresetScreen()))),
+          const Divider(height: 18),
           _pilih('Resolusi', 'resolution', {
             '854x480': '480p · ringan',
             '1280x720': '720p',

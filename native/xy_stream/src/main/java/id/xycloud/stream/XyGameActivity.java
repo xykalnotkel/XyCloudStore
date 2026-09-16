@@ -56,8 +56,15 @@ public class XyGameActivity extends Game {
     }
 
     @Override
+    protected void onPause() {
+        if (hud != null) hud.lepasSemua();
+        super.onPause();
+    }
+
+    @Override
     protected void onDestroy() {
         XyLog.tulis("Layar streaming ditutup.");
+        if (hud != null) hud.lepasSemua();
         super.onDestroy();
         NativeStreaming.emit("closed",
                 connected ? "Kembali ke sesi. Waktu sewa tetap berjalan." : "Layar streaming ditutup.");

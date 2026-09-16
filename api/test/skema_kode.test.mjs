@@ -62,7 +62,8 @@ test('Skema: schema.sql + semua migrasi diterapkan harness tanpa galat', async (
     // Tabel inti yang dipakai seluruh alur harus ada.
     for (const t of ['users','orders','sesi','agen','pc_plans','akun_produk','akun_stok','transaksi',
                      'topup','cs_messages','rilis','setelan','batas','perintah','voucher','voucher_pakai',
-                     'forum_post','forum_balasan','ulasan','security_devices','log_admin','log_sistem','galat']) {
+                     'forum_post','forum_balasan','ulasan','security_devices','log_admin','log_sistem','galat',
+                     'hud_preset','hud_preset_suka']) {
       assert.ok(s[t], `tabel inti "${t}" hilang dari skema hasil migrasi`);
     }
     // Kolom yang dulu pernah terlewat di produksi — dijaga supaya tidak hilang lagi.

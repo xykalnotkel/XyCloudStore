@@ -129,7 +129,8 @@ export async function pakaiVoucherStrict(env, { kode, userId, refId, potongan })
  */
 export async function buatCadangan(env) {
   const tabel = ['users', 'pc_plans', 'akun_produk', 'akun_stok', 'orders', 'transaksi',
-                 'topup', 'banners', 'forum_post', 'forum_balasan', 'ulasan', 'voucher', 'agen'];
+                 'topup', 'banners', 'forum_post', 'forum_balasan', 'ulasan', 'voucher', 'agen',
+                 'hud_preset', 'hud_preset_suka'];
 
   const isi = {};
   let baris = 0;

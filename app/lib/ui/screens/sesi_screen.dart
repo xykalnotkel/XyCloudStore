@@ -431,7 +431,7 @@ class _SesiScreenState extends State<SesiScreen> {
                 child: const Text('Kembali ke pesanan')),
           const SizedBox(height: 22),
           Text(
-              'Kontrol XyCloudStore: bilah di atas video berisi QWERTY, F1–F12, Windows/Ctrl/Alt, dan numpad — geser pegangan \u201C\u2800\u2800\u201D untuk memindahkan posisi, A\u2212/A+ untuk ukuran. Tombol ☰ membuka panel kontrol (pilih kontrol bawaan bila diinginkan) dan log streaming. Gamepad sentuh, trackpad, resolusi, FPS, dan bitrate dapat diatur dari ikon pengaturan. API Sunshine yang siap belum menjamin GPU, layar virtual, atau port internet sudah benar.',
+              'Kontrol XyCloudStore: preset HUD kustom yang kamu pilih muncul langsung di atas video dan mendukung tahan, ketuk, serta toggle. Bilah atas tetap menyediakan QWERTY, F1–F12, Windows/Ctrl/Alt, dan numpad — geser pegangan \u201C\u2800\u2800\u201D untuk memindahkan keyboard, A\u2212/A+ untuk ukuran. Buat/edit/publikasikan preset dari ikon pengaturan → Editor HUD & Preset. Tombol ☰ membuka panel kontrol dan log streaming. API Sunshine yang siap belum menjamin GPU, layar virtual, atau port internet sudah benar.',
               style: TextStyle(fontSize: 12, color: p.muted, height: 1.6)),
         ]));
   }

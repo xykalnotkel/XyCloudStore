@@ -43,7 +43,7 @@ public final class XyPanel {
         RadioGroup grup = new RadioGroup(game);
         grup.setOrientation(LinearLayout.VERTICAL);
         RadioButton rbXy = opsi(grup, "Kontrol XyCloudStore",
-                "Keyboard QWERTY, F1\u2013F12, Windows, numpad \u2014 posisi & ukuran bisa diatur",
+                "HUD kustom/preset + QWERTY, F1\u2013F12, Windows, numpad \u2014 posisi & ukuran bisa diatur",
                 !pref.getBoolean("bawaan", false));
         RadioButton rbBawaan = opsi(grup, "Kontrol bawaan (Moonlight)",
                 "Overlay bawaan aplikasi streaming di video",
@@ -96,7 +96,8 @@ public final class XyPanel {
         catatan.setText(
                 "Perubahan resolusi, FPS, bitrate, codec, dan trackpad diatur di menu "
                         + "\u201CStreaming & Kontrol\u201D aplikasi dan berlaku saat koneksi berikutnya. "
-                        + "Geser \u201C\u2800\u2800\u201D di bilah atas untuk memindahkan posisi kontrol. "
+                        + "Preset tombol bebas diatur lewat Editor HUD pada menu Streaming & Kontrol. "
+                        + "Geser \u201C\u2800\u2800\u201D di bilah atas untuk memindahkan keyboard penuh. "
                         + "Tekan Win/Ctrl/Alt/\u21E7 untuk mengaktifkan, tekan lagi untuk melepas.");
         isi.addView(catatan);
 

@@ -38,6 +38,9 @@ export async function bersihkanAkun(env, user) {
     q("UPDATE orders SET user_id='dihapus',username=NULL,password=NULL,host=NULL WHERE user_id=?", id),
     q("UPDATE transaksi SET user_id='dihapus' WHERE user_id=?", id),
     q("UPDATE topup SET user_id='dihapus' WHERE user_id=?", id),
+    q('DELETE FROM hud_preset_suka WHERE user_id=? OR preset_id IN (SELECT id FROM hud_preset WHERE user_id=?)', id, id),
+    q('DELETE FROM hud_preset WHERE user_id=?', id),
+    env.DB.prepare('UPDATE hud_preset SET suka=(SELECT COUNT(*) FROM hud_preset_suka s WHERE s.preset_id=hud_preset.id)'),
     q('DELETE FROM security_device_users WHERE user_id=?', id),
     q('DELETE FROM users WHERE id=?', id),
   ]);

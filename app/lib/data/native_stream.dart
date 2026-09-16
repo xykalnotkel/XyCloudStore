@@ -49,6 +49,18 @@ class NativeStream {
       await _channel.invokeMethod('setKontrol', {'bawaan': bawaan});
     } catch (_) {}
   }
+
+  /// Kirim layout HUD aktif ke SharedPreferences milik overlay Android.
+  /// Mengembalikan false pada web/build lama supaya UI dapat memberi pesan
+  /// yang jelas tanpa menghilangkan preset yang sudah tersimpan lokal.
+  static Future<bool> terapkanHud(Map<String, dynamic>? data) async {
+    try {
+      await _channel.invokeMethod('setHudPreset', {'data': data});
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
 }
 
 class NativeSettings {

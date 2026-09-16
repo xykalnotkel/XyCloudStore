@@ -14,6 +14,7 @@ import com.limelight.nvstream.http.ComputerDetails;
 import com.limelight.nvstream.http.NvApp;
 import com.limelight.nvstream.http.NvHTTP;
 import com.limelight.nvstream.http.PairingManager;
+import org.json.JSONObject;
 import java.io.ByteArrayInputStream;
 import java.net.URI;
 import java.security.cert.CertificateFactory;
@@ -80,6 +81,38 @@ public final class NativeStreaming {
                     .putBoolean("bawaan",bawaan).apply();
                 XyLog.tulis(bawaan?"Mode kontrol disimpan: bawaan (Moonlight).":"Mode kontrol disimpan: XyCloudStore.");
                 reply.ok(null);return;
+            }
+            case "setHudPreset": {
+                try {
+                    Object data=args.get("data");
+                    SharedPreferences.Editor edit=activity
+                        .getSharedPreferences("xy_hud_v1",0).edit();
+                    if(data instanceof Map) {
+                        Object tombol=((Map<?,?>)data).get("tombol");
+                        if(!(tombol instanceof List)||((List<?>)tombol).size()>48) {
+                            reply.fail("HUD_INVALID","Preset HUD tidak valid atau melebihi 48 tombol.");
+                            return;
+                        }
+                        edit.putString("preset_json",new JSONObject((Map<?,?>)data).toString())
+                            .putBoolean("custom",true)
+                            .putBoolean("bawaan",false)
+                            // Preset bebas tampil bersih; keyboard lengkap tetap dapat
+                            // dibuka kapan saja lewat ABC/F/NUM pada bilah atas.
+                            .putBoolean("qwerty",false)
+                            .putBoolean("fkey",false)
+                            .putBoolean("numpad",false)
+                            .putBoolean("simbol",false)
+                            .apply();
+                        XyLog.tulis("Preset HUD kustom disimpan ("+((List<?>)tombol).size()+" tombol).");
+                    } else {
+                        edit.remove("preset_json").putBoolean("custom",false).apply();
+                        XyLog.tulis("Preset HUD kustom dinonaktifkan.");
+                    }
+                    reply.ok(null);
+                } catch(Exception e) {
+                    reply.fail("HUD_INVALID","Preset HUD gagal disimpan: "+e.getMessage());
+                }
+                return;
             }
             default:reply.fail("UNKNOWN","Perintah streaming tidak dikenal.");
         }

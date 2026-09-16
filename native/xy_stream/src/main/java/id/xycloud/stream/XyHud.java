@@ -16,6 +16,8 @@ import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import com.limelight.Game;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -49,12 +51,16 @@ public final class XyHud {
     private LinearLayout panelFkey;
     private LinearLayout panelNumpad;
     private LinearLayout panelSimbol;
+    private FrameLayout customRoot;
     private Button tombolFly; // tombol melayang "XY" saat HUD disembunyikan
 
     private final List<Button> tombolHuruf = new ArrayList<>();
     private final List<String> labelHuruf = new ArrayList<>();
     private final List<Button> tombolMod = new ArrayList<>();
+    private final List<Button> tombolKustomToggle = new ArrayList<>();
+    private final List<Integer> kustomAktif = new ArrayList<>();
 
+    private final String presetJson;
     private float skala = 1f;
     private int meta = 0; // modifikator aktif (toggle) untuk kunci berikutnya
 
@@ -63,10 +69,20 @@ public final class XyHud {
         this.ctx = game;
         this.pref = game.getSharedPreferences(PREF, Context.MODE_PRIVATE);
         this.skala = clamp(pref.getFloat("skala", 1f), 0.7f, 1.4f);
+        this.presetJson = pref.getString("preset_json", "");
     }
 
     /** Pasang HUD ke konten activity. Panggil sekali setelah super.onCreate(). */
     public void attach(ViewGroup root) {
+        // ---------- tombol bebas dari editor landscape Flutter ----------
+        customRoot = new FrameLayout(ctx);
+        customRoot.setClipChildren(false);
+        customRoot.setClipToPadding(false);
+        customRoot.setClickable(false);
+        root.addView(customRoot, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        muatPresetKustom();
+
         // ---------- bilah atas (draggable) ----------
         toolbar = new FrameLayout(ctx);
         LinearLayout baris = new LinearLayout(ctx);
@@ -86,6 +102,10 @@ public final class XyHud {
                 () -> setelPanel("fkey", panelFkey)), dp(34));
         baris.addView(tombolMode("NUM", pref.getBoolean("numpad", false),
                 () -> setelPanel("numpad", panelNumpad)), dp(46));
+        if (punyaPresetKustom()) {
+            baris.addView(tombolMode("HUD", pref.getBoolean("custom", true),
+                    () -> setelPanel("custom", customRoot)), dp(46));
+        }
         baris.addView(pemisah());
         Button minus = tombolTekan("A\u2212");
         minus.setOnClickListener(v -> aturSkala(-0.1f));
@@ -140,6 +160,14 @@ public final class XyHud {
                 dp(46), dp(46), Gravity.TOP | Gravity.END));
         tombolFly.setTranslationX(-dp(8));
         tombolFly.setTranslationY(dp(6));
+        toolbar.bringToFront();
+        tombolFly.bringToFront();
+        if (modeBawaan()) {
+            toolbar.setVisibility(View.GONE);
+            keyboardRoot.setVisibility(View.GONE);
+            customRoot.setVisibility(View.GONE);
+            tombolFly.setVisibility(View.VISIBLE);
+        }
     }
 
     // ================= tampil / sembunyi =================
@@ -151,6 +179,10 @@ public final class XyHud {
         toolbar.setVisibility(View.VISIBLE);
         if (keyboardRoot != null) {
             keyboardRoot.setVisibility(View.VISIBLE);
+        }
+        if (customRoot != null && punyaPresetKustom()) {
+            customRoot.setVisibility(pref.getBoolean("custom", true)
+                    ? View.VISIBLE : View.GONE);
         }
         tombolFly.setVisibility(View.GONE);
         pref.edit().putBoolean("bawaan", false).apply();
@@ -165,6 +197,10 @@ public final class XyHud {
         if (keyboardRoot != null) {
             keyboardRoot.setVisibility(View.GONE);
         }
+        if (customRoot != null) {
+            customRoot.setVisibility(View.GONE);
+        }
+        lepasSemua();
         tombolFly.setVisibility(View.VISIBLE);
         pref.edit().putBoolean("bawaan", true).apply();
         XyLog.tulis("Kontrol XyCloudStore disembunyikan (tombol XY untuk kembali).");
@@ -188,6 +224,10 @@ public final class XyHud {
         panelFkey.setVisibility(pref.getBoolean("fkey", false) ? View.VISIBLE : View.GONE);
         panelNumpad.setVisibility(pref.getBoolean("numpad", false) ? View.VISIBLE : View.GONE);
         panelSimbol.setVisibility(pref.getBoolean("simbol", false) ? View.VISIBLE : View.GONE);
+        if (customRoot != null) {
+            customRoot.setVisibility(punyaPresetKustom() && pref.getBoolean("custom", true)
+                    ? View.VISIBLE : View.GONE);
+        }
         terapkanSkala();
         keyboardRoot.setTranslationX(pref.getFloat("px", 0f) * layarLebar());
         keyboardRoot.setTranslationY(-pref.getFloat("py", 0f) * layarTinggi());
@@ -211,6 +251,172 @@ public final class XyHud {
         skala = clamp(skala + delta, 0.7f, 1.4f);
         pref.edit().putFloat("skala", skala).apply();
         terapkanSkala();
+    }
+
+    // ================= preset HUD kustom =================
+
+    private boolean punyaPresetKustom() {
+        return presetJson != null && !presetJson.trim().isEmpty();
+    }
+
+    /** Bangun tombol bebas dari JSON hasil editor Flutter. */
+    private void muatPresetKustom() {
+        if (!punyaPresetKustom() || customRoot == null) {
+            return;
+        }
+        try {
+            JSONObject data = new JSONObject(presetJson);
+            JSONArray mentah = data.optJSONArray("tombol");
+            if (mentah == null || mentah.length() > 48) {
+                XyLog.tulis("Preset HUD diabaikan: daftar tombol tidak valid.");
+                return;
+            }
+            final List<JSONObject> daftar = new ArrayList<>();
+            for (int i = 0; i < mentah.length(); i++) {
+                JSONObject item = mentah.optJSONObject(i);
+                if (item != null) daftar.add(item);
+            }
+            customRoot.post(() -> {
+                int lebarKanvas = customRoot.getWidth();
+                int tinggiKanvas = customRoot.getHeight();
+                if (lebarKanvas <= 0 || tinggiKanvas <= 0) return;
+                for (JSONObject item : daftar) {
+                    buatTombolKustom(item, lebarKanvas, tinggiKanvas);
+                }
+                XyLog.tulis("HUD kustom siap (" + customRoot.getChildCount() + " tombol).");
+            });
+        } catch (Exception e) {
+            XyLog.tulis("Preset HUD rusak dan tidak dimuat: " + e.getMessage());
+        }
+    }
+
+    private void buatTombolKustom(JSONObject item, int lebarKanvas, int tinggiKanvas) {
+        final int kode = item.optInt("kode", 0);
+        if (kode <= 0 || kode > 300) return;
+        String teks = item.optString("label", "?").trim();
+        if (teks.isEmpty()) teks = "?";
+        if (teks.codePointCount(0, teks.length()) > 8)
+            teks = teks.substring(0, teks.offsetByCodePoints(0, 8));
+        final String cara = item.optString("cara", "tahan");
+        final int lebar = dp((int) clamp((float) item.optDouble("lebar", 56), 36f, 160f));
+        final int tinggi = dp((int) clamp((float) item.optDouble("tinggi", 56), 36f, 100f));
+        final float x = clamp((float) item.optDouble("x", .45), 0f, 1f);
+        final float y = clamp((float) item.optDouble("y", .45), 0f, 1f);
+        final float opacity = clamp((float) item.optDouble("opacity", .86), .25f, 1f);
+
+        final Button b = tombolTekan(teks);
+        b.setTypeface(Typeface.DEFAULT_BOLD);
+        b.setTextSize(teks.length() > 5 ? 10.5f : 13f);
+        b.setAlpha(opacity);
+        b.setElevation(dp(2));
+        warnaTombolKustom(b, false);
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(lebar, tinggi);
+        lp.leftMargin = Math.round(x * Math.max(0, lebarKanvas - lebar));
+        lp.topMargin = Math.round(y * Math.max(0, tinggiKanvas - tinggi));
+        customRoot.addView(b, lp);
+
+        if ("toggle".equals(cara)) {
+            b.setTag(Boolean.FALSE);
+            tombolKustomToggle.add(b);
+        }
+        b.setOnTouchListener((v, e) -> {
+            int aksi = e.getActionMasked();
+            if ("ketuk".equals(cara)) {
+                if (aksi == MotionEvent.ACTION_DOWN) {
+                    warnaTombolKustom(b, true);
+                    ketuk(kode);
+                } else if (aksi == MotionEvent.ACTION_UP || aksi == MotionEvent.ACTION_CANCEL) {
+                    warnaTombolKustom(b, false);
+                }
+                return true;
+            }
+            if ("toggle".equals(cara)) {
+                if (aksi == MotionEvent.ACTION_DOWN) {
+                    b.setPressed(true);
+                } else if (aksi == MotionEvent.ACTION_UP) {
+                    b.setPressed(false);
+                    boolean aktif = !Boolean.TRUE.equals(b.getTag());
+                    b.setTag(aktif);
+                    int bit = bitModifikator(kode);
+                    if (aktif) {
+                        if (bit != 0) meta |= bit;
+                        game.xySendKey(kode, false, meta);
+                        kustomAktif.add(kode);
+                    } else {
+                        if (bit != 0) meta &= ~bit;
+                        game.xySendKey(kode, true, meta);
+                        kustomAktif.remove(Integer.valueOf(kode));
+                    }
+                    warnaModifikator();
+                    perbaruiLabelHuruf();
+                    warnaTombolKustom(b, aktif);
+                } else if (aksi == MotionEvent.ACTION_CANCEL) {
+                    b.setPressed(false);
+                }
+                return true;
+            }
+            if (aksi == MotionEvent.ACTION_DOWN) {
+                int bit = bitModifikator(kode);
+                if (bit != 0) meta |= bit;
+                game.xySendKey(kode, false, meta);
+                kustomAktif.add(kode);
+                warnaModifikator();
+                perbaruiLabelHuruf();
+                warnaTombolKustom(b, true);
+            } else if (aksi == MotionEvent.ACTION_UP || aksi == MotionEvent.ACTION_CANCEL) {
+                int bit = bitModifikator(kode);
+                if (bit != 0) meta &= ~bit;
+                game.xySendKey(kode, true, meta);
+                kustomAktif.remove(Integer.valueOf(kode));
+                warnaModifikator();
+                perbaruiLabelHuruf();
+                warnaTombolKustom(b, false);
+            }
+            return true;
+        });
+    }
+
+    private int bitModifikator(int kode) {
+        if (kode == KeyEvent.KEYCODE_CTRL_LEFT || kode == KeyEvent.KEYCODE_CTRL_RIGHT)
+            return KeyEvent.META_CTRL_ON;
+        if (kode == KeyEvent.KEYCODE_ALT_LEFT || kode == KeyEvent.KEYCODE_ALT_RIGHT)
+            return KeyEvent.META_ALT_ON;
+        if (kode == KeyEvent.KEYCODE_SHIFT_LEFT || kode == KeyEvent.KEYCODE_SHIFT_RIGHT)
+            return KeyEvent.META_SHIFT_ON;
+        if (kode == KeyEvent.KEYCODE_META_LEFT || kode == KeyEvent.KEYCODE_META_RIGHT)
+            return KeyEvent.META_META_ON;
+        return 0;
+    }
+
+    private void warnaTombolKustom(Button b, boolean aktif) {
+        b.setBackground(mbulat(14, aktif ? WARNA_AKIF : 0xD9263541));
+        b.setTextColor(Color.WHITE);
+    }
+
+    /** Lepas semua tombol tahan/toggle agar tidak ada key yang tersangkut. */
+    public void lepasSemua() {
+        for (Integer kode : new ArrayList<>(kustomAktif)) {
+            int bit = bitModifikator(kode);
+            if (bit != 0) meta &= ~bit;
+            game.xySendKey(kode, true, meta);
+        }
+        kustomAktif.clear();
+        for (Button b : tombolKustomToggle) {
+            b.setTag(Boolean.FALSE);
+            warnaTombolKustom(b, false);
+        }
+        int[][] mod = {
+                {KeyEvent.META_CTRL_ON, KeyEvent.KEYCODE_CTRL_LEFT},
+                {KeyEvent.META_META_ON, KeyEvent.KEYCODE_META_LEFT},
+                {KeyEvent.META_ALT_ON, KeyEvent.KEYCODE_ALT_LEFT},
+                {KeyEvent.META_SHIFT_ON, KeyEvent.KEYCODE_SHIFT_LEFT},
+        };
+        for (int[] m : mod) {
+            if ((meta & m[0]) != 0) game.xySendKey(m[1], true, 0);
+        }
+        meta = 0;
+        warnaModifikator();
+        perbaruiLabelHuruf();
     }
 
     // ================= pengantar kunci =================

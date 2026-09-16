@@ -97,6 +97,72 @@ const err = (message, status = 400, env) =>
     },
   });
 
+/** Validasi payload editor HUD sebelum boleh masuk galeri komunitas. */
+function validasiDataHud(mentah) {
+  let data = mentah;
+  if (typeof data === 'string') {
+    try { data = JSON.parse(data); } catch (_) {
+      return { ok: false, alasan: 'Data preset HUD bukan JSON yang valid.' };
+    }
+  }
+  if (!data || typeof data !== 'object' || Array.isArray(data) || !Array.isArray(data.tombol)) {
+    return { ok: false, alasan: 'Data preset HUD tidak lengkap.' };
+  }
+  if (data.tombol.length < 1 || data.tombol.length > 48) {
+    return { ok: false, alasan: 'Preset harus berisi 1–48 tombol.' };
+  }
+  const tombol = [];
+  for (let i = 0; i < data.tombol.length; i++) {
+    const b = data.tombol[i];
+    if (!b || typeof b !== 'object' || Array.isArray(b)) {
+      return { ok: false, alasan: `Tombol ke-${i + 1} tidak valid.` };
+    }
+    const label = Array.from(String(b.label || '').replace(/[\u0000-\u001f\u007f]/g, '').trim())
+      .slice(0, 8).join('');
+    const kode = Math.trunc(Number(b.kode));
+    const x = Number(b.x), y = Number(b.y);
+    const lebar = Number(b.lebar), tinggi = Number(b.tinggi);
+    const opacity = Number(b.opacity ?? .86);
+    const cara = ['tahan', 'ketuk', 'toggle'].includes(b.cara) ? b.cara : 'tahan';
+    if (!label || !Number.isInteger(kode) || kode < 1 || kode > 300
+        || !Number.isFinite(x) || x < 0 || x > 1
+        || !Number.isFinite(y) || y < 0 || y > 1
+        || !Number.isFinite(lebar) || lebar < 36 || lebar > 160
+        || !Number.isFinite(tinggi) || tinggi < 36 || tinggi > 100
+        || !Number.isFinite(opacity) || opacity < .25 || opacity > 1) {
+      return { ok: false, alasan: `Posisi, ukuran, atau mapping tombol “${label || i + 1}” tidak valid.` };
+    }
+    const idMentah = String(b.id || `t_${i + 1}`);
+    tombol.push({
+      id: /^[a-zA-Z0-9_-]{1,48}$/.test(idMentah) ? idMentah : `t_${i + 1}`,
+      label,
+      kode,
+      x: Number(x.toFixed(5)),
+      y: Number(y.toFixed(5)),
+      lebar: Math.round(lebar),
+      tinggi: Math.round(tinggi),
+      opacity: Number(opacity.toFixed(2)),
+      cara,
+    });
+  }
+  return { ok: true, data: { versi: 1, tombol } };
+}
+
+/** Bentuk aman preset untuk klien: JSON terurai dan foto lewat domain sendiri. */
+function bentukHudPreset(env, baris, userId) {
+  let data = {};
+  try { data = typeof baris.data === 'string' ? JSON.parse(baris.data) : (baris.data || {}); }
+  catch (_) { data = { versi: 1, tombol: [] }; }
+  return {
+    ...baris,
+    data,
+    publik: baris.publik === 1,
+    saya_suka: baris.saya_suka === 1,
+    saya: baris.user_id === userId,
+    pembuat_foto: baris.pembuat_foto ? samarkanGambar(env, baris.pembuat_foto, 's') : null,
+  };
+}
+
 // ---------- mode pemeliharaan bertingkat ----------
 // Cakupan pemeliharaan (`pemeliharaan_cakupan`):
 //   'semua'      -> blokir web + aplikasi Android (bawaan, perilaku lama)
@@ -1890,7 +1956,7 @@ async function statistikPublik(env) {
           return json(results, 200, env);
         }
         if (a === 'dbinfo' && req.method === 'GET') {
-          const daftar = ['users','orders','sesi','pc_plans','akun_produk','akun_stok','transaksi','topup','cs_messages','forum_post','forum_balasan','ulasan','ulasan_pc','voucher','voucher_pakai','banners','follows','dm','simpan_post','laporan','banding','log_admin','log_sistem','security_events','media_assets','rilis','agen','notifikasi','setelan','batas','perintah','promo_overlay'];
+          const daftar = ['users','orders','sesi','pc_plans','akun_produk','akun_stok','transaksi','topup','cs_messages','forum_post','forum_balasan','ulasan','ulasan_pc','voucher','voucher_pakai','banners','follows','dm','simpan_post','hud_preset','hud_preset_suka','laporan','banding','log_admin','log_sistem','security_events','media_assets','rilis','agen','notifikasi','setelan','batas','perintah','promo_overlay'];
           const hasil = [];
           for (const t of daftar) {
             try {
@@ -2572,7 +2638,7 @@ if (a.startsWith('peran/') && req.method === 'DELETE') {
           if (!struktur || typeof struktur !== 'object' || Array.isArray(struktur)) {
             return err('Format cadangan tidak dikenal. Unggah JSON {isi:{nama_tabel:[...]}} dari Cadangan DB.', 400, env);
           }
-          const izin = new Set(['users','pc_plans','akun_produk','akun_stok','orders','transaksi','topup','banners','forum_post','forum_balasan','ulasan','ulasan_pc','voucher','agen','notifikasi','laporan','setelan','promo_overlay','media_assets']);
+          const izin = new Set(['users','pc_plans','akun_produk','akun_stok','orders','transaksi','topup','banners','forum_post','forum_balasan','ulasan','ulasan_pc','voucher','agen','notifikasi','laporan','setelan','promo_overlay','media_assets','hud_preset']);
           let masuk = 0, dilewati = 0;
           for (const [tabel, baris] of Object.entries(struktur)) {
             if (!izin.has(tabel) || !Array.isArray(baris) || baris.length === 0) { dilewati += 1; continue; }
@@ -3256,6 +3322,133 @@ if (a.startsWith('peran/') && req.method === 'DELETE') {
           "INSERT INTO laporan(id,jenis,ref_id,pelapor,alasan,status) VALUES(?,'pengguna',?,?,?,'baru')",
         ).bind(idL, idU, me.sub, alasan).run();
         return json({ ok: true, id: idL }, 201, env);
+      }
+
+      // ---------------- HUD STREAMING & PRESET KOMUNITAS (Batch P) ----------------
+      if (p === 'hud/presets' && req.method === 'GET') {
+        const urut = url.searchParams.get('urut') === 'baru' ? 'baru' : 'populer';
+        const order = urut === 'baru'
+          ? 'h.dibuat DESC'
+          : '(h.suka * 3 + h.dipakai) DESC, h.dibuat DESC';
+        const { results } = await env.DB.prepare(
+          `SELECT h.id,h.user_id,h.nama,h.deskripsi,h.game,h.data,h.publik,
+                  h.suka,h.dipakai,h.dibuat,h.diubah,
+                  u.nama pembuat_nama,u.username pembuat_username,u.foto pembuat_foto,u.tier pembuat_tier,
+                  CASE WHEN EXISTS(SELECT 1 FROM hud_preset_suka hs WHERE hs.preset_id=h.id AND hs.user_id=?) THEN 1 ELSE 0 END saya_suka
+           FROM hud_preset h JOIN users u ON u.id=h.user_id
+           WHERE h.publik=1 AND u.deleted_at IS NULL AND u.diblokir=0
+           ORDER BY ${order} LIMIT 80`,
+        ).bind(me.sub).all();
+        return json(results.map((r) => bentukHudPreset(env, r, me.sub)), 200, env);
+      }
+      if (p === 'me/hud-presets' && req.method === 'GET') {
+        const { results } = await env.DB.prepare(
+          `SELECT h.id,h.user_id,h.nama,h.deskripsi,h.game,h.data,h.publik,
+                  h.suka,h.dipakai,h.dibuat,h.diubah,
+                  u.nama pembuat_nama,u.username pembuat_username,u.foto pembuat_foto,u.tier pembuat_tier,
+                  CASE WHEN EXISTS(SELECT 1 FROM hud_preset_suka hs WHERE hs.preset_id=h.id AND hs.user_id=?) THEN 1 ELSE 0 END saya_suka
+           FROM hud_preset h JOIN users u ON u.id=h.user_id
+           WHERE h.user_id=? ORDER BY h.diubah DESC LIMIT 40`,
+        ).bind(me.sub, me.sub).all();
+        return json(results.map((r) => bentukHudPreset(env, r, me.sub)), 200, env);
+      }
+      if (p === 'hud/presets' && req.method === 'POST') {
+        if (!(await bolehLanjut(env, `hud-terbit:${me.sub}`, 20, 86400))) {
+          return err('Batas publikasi preset hari ini tercapai. Coba lagi besok.', 429, env);
+        }
+        const b = await req.json().catch(() => ({}));
+        const nama = String(b.nama || '').trim().slice(0, 40);
+        const deskripsi = String(b.deskripsi || '').trim().slice(0, 160);
+        const game = String(b.game || '').trim().slice(0, 50);
+        if (nama.length < 3) return err('Nama preset minimal 3 karakter.', 422, env);
+        const teks = periksaGabungan(nama, deskripsi, game);
+        if (!teks.ok) return err(teks.alasan, 422, env);
+        const cek = validasiDataHud(b.data);
+        if (!cek.ok) return err(cek.alasan, 422, env);
+        const teksTombol = periksaTeks(cek.data.tombol.map((x) => x.label).join(' '), { maksUrl: 0 });
+        if (!teksTombol.ok) return err(teksTombol.alasan, 422, env);
+        const jumlah = await env.DB.prepare('SELECT COUNT(*) c FROM hud_preset WHERE user_id=?').bind(me.sub).first();
+        if ((jumlah?.c || 0) >= 40) return err('Maksimal 40 preset tersimpan di akun. Hapus yang tidak dipakai.', 409, env);
+        const id = uid('hud_');
+        const sekarang = new Date().toISOString();
+        await env.DB.prepare(
+          'INSERT INTO hud_preset(id,user_id,nama,deskripsi,game,data,publik,dibuat,diubah) VALUES(?,?,?,?,?,?,?,?,?)',
+        ).bind(id, me.sub, nama, deskripsi, game, JSON.stringify(cek.data), b.publik === false ? 0 : 1, sekarang, sekarang).run();
+        const baris = await env.DB.prepare(
+          `SELECT h.*,u.nama pembuat_nama,u.username pembuat_username,u.foto pembuat_foto,u.tier pembuat_tier,0 saya_suka
+           FROM hud_preset h JOIN users u ON u.id=h.user_id WHERE h.id=?`,
+        ).bind(id).first();
+        return json(bentukHudPreset(env, baris, me.sub), 201, env);
+      }
+      if (p.startsWith('hud/presets/') && p.endsWith('/pakai') && req.method === 'POST') {
+        if (!(await bolehLanjut(env, `hud-pakai:${me.sub}`, 80, 3600))) {
+          return err('Terlalu banyak impor preset. Tunggu sebentar.', 429, env);
+        }
+        const id = p.split('/')[2];
+        const ada = await env.DB.prepare(
+          `SELECT h.*,u.nama pembuat_nama,u.username pembuat_username,u.foto pembuat_foto,u.tier pembuat_tier,
+                  CASE WHEN EXISTS(SELECT 1 FROM hud_preset_suka hs WHERE hs.preset_id=h.id AND hs.user_id=?) THEN 1 ELSE 0 END saya_suka
+           FROM hud_preset h JOIN users u ON u.id=h.user_id
+           WHERE h.id=? AND (h.publik=1 OR h.user_id=?)`,
+        ).bind(me.sub, id, me.sub).first();
+        if (!ada) return err('Preset tidak ditemukan atau sudah tidak publik.', 404, env);
+        await env.DB.prepare('UPDATE hud_preset SET dipakai=dipakai+1 WHERE id=?').bind(id).run();
+        ada.dipakai = Number(ada.dipakai || 0) + 1;
+        return json(bentukHudPreset(env, ada, me.sub), 200, env);
+      }
+      if (p.startsWith('hud/presets/') && p.endsWith('/suka') && req.method === 'POST') {
+        if (!(await bolehLanjut(env, `hud-suka:${me.sub}`, 100, 3600))) {
+          return err('Terlalu banyak aksi suka. Tunggu sebentar.', 429, env);
+        }
+        const id = p.split('/')[2];
+        const preset = await env.DB.prepare('SELECT id FROM hud_preset WHERE id=? AND publik=1').bind(id).first();
+        if (!preset) return err('Preset tidak ditemukan atau sudah tidak publik.', 404, env);
+        const ada = await env.DB.prepare('SELECT 1 ada FROM hud_preset_suka WHERE preset_id=? AND user_id=?').bind(id, me.sub).first();
+        if (ada) {
+          await env.DB.prepare('DELETE FROM hud_preset_suka WHERE preset_id=? AND user_id=?').bind(id, me.sub).run();
+        } else {
+          await env.DB.prepare('INSERT OR IGNORE INTO hud_preset_suka(preset_id,user_id,waktu) VALUES(?,?,?)')
+            .bind(id, me.sub, new Date().toISOString()).run();
+        }
+        await env.DB.prepare('UPDATE hud_preset SET suka=(SELECT COUNT(*) FROM hud_preset_suka WHERE preset_id=?) WHERE id=?')
+          .bind(id, id).run();
+        const hitung = await env.DB.prepare('SELECT suka FROM hud_preset WHERE id=?').bind(id).first();
+        return json({ ok: true, disukai: !ada, suka: hitung?.suka || 0 }, 200, env);
+      }
+      if (p.startsWith('hud/presets/') && p.split('/').length === 3 && req.method === 'PATCH') {
+        const id = p.split('/')[2];
+        const lama = await env.DB.prepare('SELECT * FROM hud_preset WHERE id=? AND user_id=?').bind(id, me.sub).first();
+        if (!lama) return err('Preset milikmu tidak ditemukan.', 404, env);
+        const b = await req.json().catch(() => ({}));
+        const nama = String(b.nama ?? lama.nama).trim().slice(0, 40);
+        const deskripsi = String(b.deskripsi ?? lama.deskripsi).trim().slice(0, 160);
+        const game = String(b.game ?? lama.game).trim().slice(0, 50);
+        if (nama.length < 3) return err('Nama preset minimal 3 karakter.', 422, env);
+        const teks = periksaGabungan(nama, deskripsi, game);
+        if (!teks.ok) return err(teks.alasan, 422, env);
+        const cek = validasiDataHud(b.data ?? lama.data);
+        if (!cek.ok) return err(cek.alasan, 422, env);
+        const teksTombol = periksaTeks(cek.data.tombol.map((x) => x.label).join(' '), { maksUrl: 0 });
+        if (!teksTombol.ok) return err(teksTombol.alasan, 422, env);
+        const publik = b.publik === undefined ? lama.publik : (b.publik === false ? 0 : 1);
+        await env.DB.prepare('UPDATE hud_preset SET nama=?,deskripsi=?,game=?,data=?,publik=?,diubah=? WHERE id=?')
+          .bind(nama, deskripsi, game, JSON.stringify(cek.data), publik, new Date().toISOString(), id).run();
+        const baris = await env.DB.prepare(
+          `SELECT h.*,u.nama pembuat_nama,u.username pembuat_username,u.foto pembuat_foto,u.tier pembuat_tier,
+                  CASE WHEN EXISTS(SELECT 1 FROM hud_preset_suka hs WHERE hs.preset_id=h.id AND hs.user_id=?) THEN 1 ELSE 0 END saya_suka
+           FROM hud_preset h JOIN users u ON u.id=h.user_id WHERE h.id=?`,
+        ).bind(me.sub, id).first();
+        return json(bentukHudPreset(env, baris, me.sub), 200, env);
+      }
+      if (p.startsWith('hud/presets/') && p.split('/').length === 3 && req.method === 'DELETE') {
+        const id = p.split('/')[2];
+        const punya = await env.DB.prepare('SELECT id FROM hud_preset WHERE id=? AND user_id=?').bind(id, me.sub).first();
+        if (!punya) return err('Preset milikmu tidak ditemukan.', 404, env);
+        await env.DB.batch([
+          env.DB.prepare('DELETE FROM hud_preset_suka WHERE preset_id=?').bind(id),
+          env.DB.prepare('DELETE FROM hud_preset WHERE id=?').bind(id),
+        ]);
+        return json({ ok: true }, 200, env);
       }
 
       // ---------------- PROFIL PUBLIK, FOLLOW, DM, SIMPAN ----------------

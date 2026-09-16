@@ -119,6 +119,15 @@ abstract class XyRepository {
   Future<List<String>> simpanSaya();
   Future<Map<String, dynamic>> bisukan(String thread, int menit);
 
+  // ---------- HUD streaming & preset komunitas (Batch P) ----------
+  Future<List<HudPresetPublik>> hudPresetPublik({String urut = 'populer'});
+  Future<List<HudPresetPublik>> hudPresetSaya();
+  Future<HudPresetPublik> terbitkanHud(HudLayout layout, {bool publik = true});
+  Future<HudPresetPublik> perbaruiHudPublik(String id, HudLayout layout, {bool publik = true});
+  Future<HudPresetPublik> pakaiHudPublik(String id);
+  Future<Map<String, dynamic>> sukaiHud(String id);
+  Future<void> hapusHudPublik(String id);
+
   // ---------- sesi main ----------
   Future<SesiMain> sesiMulai(String orderId);
   Future<SesiMain> sesiStatus(String id);
@@ -485,6 +494,51 @@ class RemoteRepository implements XyRepository {
   @override
   Future<void> gantiPassword(String lama, String baru) async =>
       api.post('/me/password', {'lama': lama, 'baru': baru});
+
+  // ---------- HUD streaming & preset komunitas (Batch P) ----------
+  @override
+  Future<List<HudPresetPublik>> hudPresetPublik({String urut = 'populer'}) async =>
+      ((await api.get('/hud/presets', {'urut': urut})) as List)
+          .map((e) => HudPresetPublik.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+
+  @override
+  Future<List<HudPresetPublik>> hudPresetSaya() async =>
+      ((await api.get('/me/hud-presets')) as List)
+          .map((e) => HudPresetPublik.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+
+  @override
+  Future<HudPresetPublik> terbitkanHud(HudLayout layout, {bool publik = true}) async =>
+      HudPresetPublik.fromJson(Map<String, dynamic>.from(await api.post('/hud/presets', {
+        'nama': layout.nama,
+        'deskripsi': layout.deskripsi,
+        'game': layout.game,
+        'data': layout.toData(),
+        'publik': publik,
+      })));
+
+  @override
+  Future<HudPresetPublik> perbaruiHudPublik(String id, HudLayout layout, {bool publik = true}) async =>
+      HudPresetPublik.fromJson(Map<String, dynamic>.from(await api.patch('/hud/presets/$id', {
+        'nama': layout.nama,
+        'deskripsi': layout.deskripsi,
+        'game': layout.game,
+        'data': layout.toData(),
+        'publik': publik,
+      })));
+
+  @override
+  Future<HudPresetPublik> pakaiHudPublik(String id) async =>
+      HudPresetPublik.fromJson(Map<String, dynamic>.from(
+          await api.post('/hud/presets/$id/pakai', {})));
+
+  @override
+  Future<Map<String, dynamic>> sukaiHud(String id) async =>
+      Map<String, dynamic>.from(await api.post('/hud/presets/$id/suka', {}));
+
+  @override
+  Future<void> hapusHudPublik(String id) async => api.delete('/hud/presets/$id');
 
   @override
   Future<SesiMain> sesiMulai(String orderId) async =>
@@ -866,6 +920,46 @@ class MockRepository implements XyRepository {
 
   @override
   Future<void> gantiPassword(String lama, String baru) async {}
+
+  // ---------- HUD streaming & preset komunitas (Batch P) ----------
+  @override
+  Future<List<HudPresetPublik>> hudPresetPublik({String urut = 'populer'}) async =>
+      _delay(const <HudPresetPublik>[], 350);
+
+  @override
+  Future<List<HudPresetPublik>> hudPresetSaya() async =>
+      _delay(const <HudPresetPublik>[], 300);
+
+  @override
+  Future<HudPresetPublik> terbitkanHud(HudLayout layout, {bool publik = true}) async =>
+      _delay(HudPresetPublik(
+        id: 'hud_demo', userId: 'u_demo', nama: layout.nama,
+        deskripsi: layout.deskripsi, game: layout.game, layout: layout,
+        publik: publik, saya: true, pembuatNama: 'Pengguna Demo',
+      ), 500);
+
+  @override
+  Future<HudPresetPublik> perbaruiHudPublik(String id, HudLayout layout, {bool publik = true}) async =>
+      _delay(HudPresetPublik(
+        id: id, userId: 'u_demo', nama: layout.nama,
+        deskripsi: layout.deskripsi, game: layout.game, layout: layout,
+        publik: publik, saya: true, pembuatNama: 'Pengguna Demo',
+      ), 450);
+
+  @override
+  Future<HudPresetPublik> pakaiHudPublik(String id) async =>
+      _delay(HudPresetPublik(
+        id: id, userId: 'u_lain', nama: 'Preset Demo',
+        layout: HudLayout(id: 'komunitas_$id', nama: 'Preset Demo'),
+        pembuatNama: 'Komunitas', dipakai: 1,
+      ), 300);
+
+  @override
+  Future<Map<String, dynamic>> sukaiHud(String id) async =>
+      _delay({'disukai': true, 'suka': 1}, 250);
+
+  @override
+  Future<void> hapusHudPublik(String id) async => _delay(null, 250);
 
   // ---------- sosial (Batch D) ----------
   @override
