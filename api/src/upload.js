@@ -28,6 +28,16 @@ async function sha256Buf(buf) {
   return hex(await crypto.subtle.digest('SHA-256', buf));
 }
 
+/** Uint8Array → base64 dengan potongan aman (tidak melampaui batas argumen). */
+function keBase64(bytes) {
+  const potong = [];
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    potong.push(String.fromCharCode.apply(
+        null, bytes.subarray(i, Math.min(i + 0x8000, bytes.length))));
+  }
+  return btoa(potong.join(''));
+}
+
 /** Decode base64 standar (dengan/tanpa padding) → Uint8Array. */
 function b64Decode(b64) {
   const s = b64.replace(/-/g, '+').replace(/_/g, '/');
@@ -274,9 +284,9 @@ export async function unggahVideoBanner(env, { dataUri, folder = 'xycloudstore/b
       return { ok: true, url: j.secure_url, gif: gifSumber, id: j.public_id, format: j.format, sisaMp4: true };
     }
 
-    const gifBase64 = btoa(String.fromCharCode.apply(null, gifBytes));
+    const gifBase64 = keBase64(gifBytes);
     const ts2 = Math.floor(Date.now() / 1000);
-    let rid = crypto.randomUUID().replace(/-/g, '');
+    const rid = crypto.randomUUID().replace(/-/g, '');
     const r2 = await kirimUnggah(env, `https://api.cloudinary.com/v1_1/${env.CLOUDINARY_CLOUD}/image/upload`, {
       folder, timestamp: ts2,
       signParams: { folder, public_id: `${folder}/${rid}.gif` },
