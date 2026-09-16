@@ -111,7 +111,7 @@ async function cariDuplikat(env, hash) {
  * Konten identik (hash sama) dikembalikan dari aset lama tanpa unggah ulang.
  * GIF diberi public_id berakhiran `.gif` agar animasi selalu dikenal.
  */
-export async function unggahGambar(env, { dataUri, folder = 'xycloudstore' }) {
+export async function unggahGambar(env, { dataUri, folder = 'xycloudstore', dedup = true }) {
   if (!cloudOk(env)) return { ok: false, alasan: 'Kredensial Cloudinary belum diatur' };
   if (typeof dataUri !== 'string' || !dataUri.startsWith('data:')) {
     return { ok: false, alasan: 'Format berkas tidak dikenal' };
@@ -130,7 +130,7 @@ export async function unggahGambar(env, { dataUri, folder = 'xycloudstore' }) {
   const bytes = b64Decode(b64);
   const hash = await sha256Buf(bytes);
 
-  const duplikat = await cariDuplikat(env, hash);
+  const duplikat = dedup ? await cariDuplikat(env, hash) : null;
   if (duplikat) {
     return { ok: true, url: duplikat.url, id: duplikat.id, format: duplikat.format, bytes: duplikat.bytes, duplikat: true };
   }
@@ -163,6 +163,60 @@ export async function unggahGambar(env, { dataUri, folder = 'xycloudstore' }) {
     return { ok: true, url: j.secure_url, id: j.public_id, lebar: j.width, tinggi: j.height, format: j.format, bytes: j.bytes, hash };
   } catch (e) {
     return { ok: false, alasan: String(e) };
+  }
+}
+
+/**
+ * Salin foto profil dari endpoint resmi OAuth ke penyimpanan sendiri. Host
+ * dibatasi ketat dan setiap redirect divalidasi untuk mencegah SSRF. URL
+ * bertoken milik penyedia tidak pernah disimpan atau dikirim ke klien.
+ */
+export async function imporFotoSosial(env, url, provider) {
+  const hostDiizinkan = (host) => {
+    const h = String(host || '').toLowerCase();
+    if (provider === 'google') return h === 'lh3.googleusercontent.com' || h.endsWith('.googleusercontent.com');
+    if (provider === 'facebook') {
+      return h === 'graph.facebook.com' || h.endsWith('.fbcdn.net') || h.endsWith('.fbsbx.com');
+    }
+    return false;
+  };
+  try {
+    let target = new URL(String(url || ''));
+    let response = null;
+    for (let i = 0; i < 3; i++) {
+      if (target.protocol !== 'https:' || !hostDiizinkan(target.hostname)) return null;
+      response = await fetch(target, {
+        redirect: 'manual',
+        headers: { Accept: 'image/webp,image/jpeg,image/png' },
+        signal: typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+          ? AbortSignal.timeout(8_000) : undefined,
+      });
+      if (response.status >= 300 && response.status < 400) {
+        const lokasi = response.headers.get('location');
+        if (!lokasi) return null;
+        response.body?.cancel().catch(() => {});
+        target = new URL(lokasi, target);
+        continue;
+      }
+      break;
+    }
+    if (!response?.ok) return null;
+    const panjang = Number(response.headers.get('content-length') || 0);
+    if (panjang > 2 * 1024 * 1024) return null;
+    const mime = String(response.headers.get('content-type') || '').split(';')[0].toLowerCase();
+    if (!['image/png', 'image/jpeg', 'image/jpg', 'image/webp'].includes(mime)) return null;
+    const data = new Uint8Array(await response.arrayBuffer());
+    if (!data.length || data.length > 2 * 1024 * 1024) return null;
+    const uploaded = await unggahGambar(env, {
+      dataUri: `data:${mime};base64,${keBase64(data)}`,
+      folder: 'xycloudstore/profil/sosial',
+      // Setiap akun punya lifecycle penghapusan sendiri; jangan berbagi satu
+      // public_id lewat dedup lintas pengguna.
+      dedup: false,
+    });
+    return uploaded.ok ? uploaded.url : null;
+  } catch (_) {
+    return null;
   }
 }
 
@@ -470,15 +524,29 @@ export async function layaniMedia(env, rest, req, ctx) {
 /** Delete only expired CS uploads; never product/profile/other people's media. */
 export async function hapusMediaChat(env, url) {
   try {
-    const u=new URL(url);
-    const prefix=`/${env.CLOUDINARY_CLOUD}/image/upload/`;
-    if(u.hostname!=='res.cloudinary.com'||!u.pathname.startsWith(prefix))return true;
-    const match=u.pathname.match(/\/(xycloudstore\/chat\/[^?]+)\.[a-zA-Z0-9]+$/);
-    if(!match)return true;
-    const publicId=decodeURIComponent(match[1]), timestamp=Math.floor(Date.now()/1000);
-    const signature=await sha1(`invalidate=true&public_id=${publicId}&timestamp=${timestamp}${env.CLOUDINARY_SECRET}`);
-    const form=new FormData();form.set('public_id',publicId);form.set('invalidate','true');form.set('timestamp',String(timestamp));form.set('signature',signature);form.set('api_key',env.CLOUDINARY_KEY);
-    const r=await fetch(`https://api.cloudinary.com/v1_1/${env.CLOUDINARY_CLOUD}/image/destroy`,{method:'POST',body:form});
-    const j=await r.json();return r.ok&&['ok','not found'].includes(j.result);
-  }catch{return false;}
+    const u = new URL(url);
+    const prefix = `/${env.CLOUDINARY_CLOUD}/image/upload/`;
+    if (u.hostname !== 'res.cloudinary.com' || !u.pathname.startsWith(prefix)) return true;
+    // Queue hanya boleh memusnahkan aset privat yang lifecycle-nya jelas:
+    // lampiran chat dan avatar OAuth unik (dedup dimatikan untuk folder ini).
+    const match = u.pathname.match(/\/(xycloudstore\/(?:chat|profil\/sosial)\/[^?]+)\.[a-zA-Z0-9]+$/);
+    if (!match) return true;
+    const publicId = decodeURIComponent(match[1]);
+    if (!/^xycloudstore\/(?:chat|profil\/sosial)\/[A-Za-z0-9_./-]+$/.test(publicId)) return true;
+    const timestamp = Math.floor(Date.now() / 1000);
+    const signature = await sha1(`invalidate=true&public_id=${publicId}&timestamp=${timestamp}${env.CLOUDINARY_SECRET}`);
+    const form = new FormData();
+    form.set('public_id', publicId);
+    form.set('invalidate', 'true');
+    form.set('timestamp', String(timestamp));
+    form.set('signature', signature);
+    form.set('api_key', env.CLOUDINARY_KEY);
+    const r = await fetch(`https://api.cloudinary.com/v1_1/${env.CLOUDINARY_CLOUD}/image/destroy`, { method: 'POST', body: form });
+    const j = await r.json().catch(() => ({}));
+    const ok = r.ok && ['ok', 'not found'].includes(j.result);
+    if (ok && env.DB) {
+      await env.DB.prepare('DELETE FROM media_assets WHERE id=? OR url=?').bind(publicId, url).run().catch(() => {});
+    }
+    return ok;
+  } catch (_) { return false; }
 }

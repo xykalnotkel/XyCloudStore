@@ -7,7 +7,7 @@
  *  ditampilkan di dalam aplikasi pada menu Tentang.
  */
 
-const PEMBARUAN = '14 September 2026';
+const PEMBARUAN = '16 September 2026';
 
 const SYARAT = [
   ['Penerimaan Ketentuan',
@@ -42,7 +42,8 @@ const SYARAT = [
 
 const PRIVASI = [
   ['Data yang Kami Kumpulkan',
-   'Nama, alamat email, nomor WhatsApp, dan foto profil bila kamu masuk memakai Google. ' +
+   'Nama, alamat email, nomor WhatsApp, dan foto profil bila kamu masuk memakai Google atau Facebook. ' +
+   'ID akun Google/Facebook disimpan sebagai HMAC app-scoped yang tidak dapat dibalik, bukan ID mentah. ' +
    'Kami juga menyimpan riwayat pesanan, transaksi saldo, bukti transfer, ulasan, dan percakapan dengan admin.'],
   ['Perangkat dan Anti-Penyalahgunaan',
    'Identitas perangkat Android yang dipseudonimkan atau identitas instalasi/browser, model perangkat, serta hash alamat jaringan dipakai untuk membatasi pendaftaran dan OTP. Untuk referral, kami mencatat hash tiket, tahap klik/unduh/buka, varian APK, dan waktu pemasangan paket Android guna memastikan bonus berasal dari pemasangan baru; tiket mentah tidak disimpan di basis data. Kami tidak mengumpulkan IMEI atau advertising ID untuk fitur ini. Penghitung pendaftaran dapat tetap disimpan tanpa email setelah akun dihapus untuk mencegah pendaftaran berulang. Catatan kejadian keamanan dan atribusi gagal dibersihkan sesuai masa audit yang berlaku.'],
@@ -51,17 +52,18 @@ const PRIVASI = [
    'serta mengirim pemberitahuan penting mengenai pesanan. Kami tidak menjual data pribadi kepada siapa pun.'],
   ['Layanan Pihak Ketiga',
    'Kami memakai Cloudflare (server dan basis data), Resend (pengiriman email), OneSignal (notifikasi), ' +
-   'Cloudinary (penyimpanan gambar), dan Google Sign-In (login opsional). ' +
-   'Masing-masing hanya menerima data seperlunya untuk menjalankan fungsinya.'],
+   'Cloudinary (penyimpanan gambar), Google Sign-In, dan Facebook Login (login opsional). ' +
+   'Masing-masing hanya menerima data seperlunya untuk menjalankan fungsinya. Token akses sosial tidak disimpan oleh kami.'],
   ['Keamanan',
    'Password disimpan dalam bentuk hash SHA-256 dengan garam acak, tidak pernah dalam bentuk teks biasa. ' +
    'Komunikasi API memakai HTTPS. Streaming memakai protokol host tersendiri. Token login dan koleksi stiker disimpan di penyimpanan terenkripsi pada perangkatmu.'],
-  ['Penyimpanan Data',
-   'Data akun disimpan selama akun aktif; pesan CS yang lebih tua dari tujuh hari dihapus. Penghapusan akun dapat diminta melalui menu Hapus Akun setelah saldo dan sesi aktif diselesaikan. Data pembukuan dianonimkan. ' +
+  ['Penyimpanan dan Penghapusan Data',
+   'Data akun disimpan selama akun aktif; pesan CS yang lebih tua dari tujuh hari dihapus. Penghapusan akun dapat diminta melalui menu Profil > Pengaturan > Hapus Akun setelah saldo dan sesi aktif diselesaikan. Data pembukuan dianonimkan. ' +
+   'Pengguna Facebook juga dapat menghapus XyCloudStore dari menu Apps and Websites di Facebook; permintaan bertanda tangan Meta diproses oleh callback https://api.xycloud.my.id/api/auth/facebook/data-deletion dan memberi kode/status konfirmasi. Status konfirmasi tanpa ID Facebook mentah disimpan maksimal 180 hari. ' +
    'Salinan yang sudah disimpan penerima dan retensi cadangan penyedia tidak dapat dihapus seketika melalui aplikasi.'],
   ['Hak Kamu',
-   'Kamu berhak melihat, memperbaiki, atau meminta penghapusan data pribadimu, serta menolak menerima notifikasi ' +
-   'lewat pengaturan perangkat.'],
+   'Kamu berhak melihat, memperbaiki, memutus akun sosial, atau meminta penghapusan data pribadimu, serta menolak menerima notifikasi ' +
+   'lewat pengaturan perangkat. Hubungi Chat Admin bila permintaan tertunda karena saldo atau sesi aktif.'],
   ['Anak di Bawah Umur',
    'Layanan ditujukan untuk pengguna berusia 13 tahun ke atas. Pengguna di bawah 17 tahun sebaiknya memakai ' +
    'layanan dengan pendampingan orang tua atau wali.'],

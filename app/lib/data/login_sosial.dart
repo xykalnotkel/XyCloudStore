@@ -15,6 +15,7 @@ class LoginSosial {
   LoginSosial._();
 
   static const String skema = 'xycloudstore';
+  static bool _ulangIzinEmailFacebook = false;
 
   /// Client ID tipe Web, dipakai sebagai audiens ID token.
   static const String serverClientId = String.fromEnvironment(
@@ -60,8 +61,14 @@ class LoginSosial {
   /// Cara cadangan: halaman izin resmi di browser aman, hasilnya
   /// dikembalikan lewat tautan xycloudstore://auth?token=...
   static Future<String> tokenLewatHalaman(String provider) async {
+    if (provider != 'google' && provider != 'facebook') {
+      throw GagalLoginSosial('Penyedia login tidak dikenal.');
+    }
     final mulai = Uri.parse('${XyConfig.aktif}/api/auth/$provider/start')
-        .replace(queryParameters: {if(DeviceIdentity.id.isNotEmpty)'device':DeviceIdentity.id});
+        .replace(queryParameters: {
+          if (DeviceIdentity.id.isNotEmpty) 'device': DeviceIdentity.id,
+          if (provider == 'facebook' && _ulangIzinEmailFacebook) 'rerequest': 'email',
+        });
 
     try {
       final hasil = await FlutterWebAuth2.authenticate(
@@ -73,7 +80,16 @@ class LoginSosial {
       final u = Uri.parse(hasil);
       final token = u.queryParameters['token'];
       final galat = u.queryParameters['error'];
-      if (token != null && token.isNotEmpty) return token;
+      if (token != null && token.isNotEmpty) {
+        if (provider == 'facebook') _ulangIzinEmailFacebook = false;
+        return token;
+      }
+      if (provider == 'facebook' &&
+          (galat ?? '').toLowerCase().contains('tidak membagikan email')) {
+        // Klik berikutnya memakai auth_type=rerequest. Pesan ini menjadi
+        // education screen sebelum Meta meminta izin email sekali lagi.
+        _ulangIzinEmailFacebook = true;
+      }
       throw GagalLoginSosial(_pesanRamah(galat ?? 'Login dibatalkan'));
     } on GagalLoginSosial {
       rethrow;

@@ -181,12 +181,13 @@ npm run deploy
 ### Login sosial sungguhan
 Alur OAuth dijalankan di server: aplikasi membuka `/api/auth/{provider}/start`, pengguna menyetujui di
 halaman resmi Google atau Facebook, lalu server menukar kode, membuat akun bila perlu, dan
-mengembalikan token lewat `xycloudstore://auth?token=...`. Tidak butuh Firebase, tidak butuh SHA-1.
+mengembalikan token lewat `xycloudstore://auth?token=...`. Flow browser tidak membutuhkan Firebase.
 Tombol yang tampil di aplikasi mengikuti `GET /api/config`, jadi penyedia yang belum dikonfigurasi
 otomatis disembunyikan.
 
 Syarat Google: tambahkan `https://api.xycloud.my.id/api/auth/google/callback` pada Authorized redirect
-URIs di Google Cloud Console. Syarat Facebook: isi secret `FACEBOOK_APP_ID` dan `FACEBOOK_APP_SECRET`.
+URIs di Google Cloud Console. Facebook membutuhkan `FACEBOOK_APP_ID`, `FACEBOOK_APP_SECRET`, exact
+redirect URI, mode Live, serta callback penghapusan data. Lihat [panduan setup Meta dan checklist keamanan](docs/facebook-login-meta-setup-2026-09-16.md).
 
 **Login Google native pada versi terbaru:** membutuhkan OAuth client Android dengan package name dan SHA-1 sertifikat APK rilis. Web client tetap digunakan sebagai `serverClientId`; jangan diganti dengan Android client. Lihat [panduan konfigurasi beserta fingerprint APK](docs/login-google.md).
 

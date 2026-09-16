@@ -49,12 +49,12 @@ function bersihkanUser(env, u) {
 }
 import { kirimEmail } from './mail.js';
 import { kirimPush, siarkanPush } from './push.js';
-import { unggahGambar, unggahAudio, unggahVideoBanner, samarkanGambar, samarkanKMedia, samarkanBannerMedia, layaniGambar, layaniMedia } from './upload.js';
+import { unggahGambar, unggahAudio, unggahVideoBanner, imporFotoSosial, samarkanGambar, samarkanKMedia, samarkanBannerMedia, layaniGambar, layaniMedia } from './upload.js';
 import { penyediaBayar, metodeTersedia, buatTagihan, bacaPemberitahuan, cekStatusPenyedia } from './bayar.js';
 import { setelan, simpanSetelan, jalankanPemeliharaan, statistikLengkap, catatLog, pantauKesehatan } from './sistem.js';
 import { TIER, diskonTier, segarkanTier, cekVoucher, pakaiVoucher, pakaiVoucherStrict, buatCadangan } from './loyal.js';
 import { halamanLegal, isiLegal } from './legal.js';
-import { SKEMA_APLIKASI, providerSiap, urlMulai, ambilProfil, halamanKembali, verifikasiIdTokenGoogle } from './oauth.js';
+import { SKEMA_APLIKASI, providerSiap, urlMulai, ambilProfil, halamanKembali, verifikasiIdTokenGoogle, diagnostikFacebook, verifikasiSignedRequestFacebook } from './oauth.js';
 
 const _rateMem = new Map();
 function rateMem(key, max, windowSec) {
@@ -476,39 +476,165 @@ async function buatNotif(env, ctx, { userId, jenis, judul, pesan, aktor, refJeni
 const MASA_TOKEN = 30 * 24 * 60 * 60 * 1000;
 
 /**
- * Ambil akun berdasarkan email dari penyedia sosial, atau buat baru.
- * Akun sosial otomatis dianggap terverifikasi.
+ * Cari akun lewat identitas app-scoped penyedia, bukan email saja. HMAC ID
+ * membuat perubahan email Facebook/Google tetap masuk akun yang sama tanpa
+ * menyimpan ID penyedia mentah di D1.
  */
 async function akunSosial(env, ctx, prof, provider, deviceId, req) {
-  let u = await env.DB.prepare('SELECT * FROM users WHERE lower(email) = ?').bind(prof.email).first();
+  if (!prof?.id || !emailValid(prof.email)) {
+    throw new SecurityError('Penyedia tidak mengembalikan identitas dan email terverifikasi.', 401, 'SOCIAL_PROFILE_INVALID');
+  }
+  // Tahan URL penyedia hanya di memori. Foto baru diimpor bila akun belum
+  // punya avatar, sehingga login rutin tidak mengunduh/mengunggah ulang.
+  const fotoPenyedia = prof.foto;
+  prof = { ...prof, foto: null };
+  const providerHash = await securityHash(env, `social-id:${provider}`, String(prof.id));
+  const identity = await env.DB.prepare(
+    'SELECT user_id FROM social_identity WHERE provider=? AND provider_user_hash=?'
+  ).bind(provider, providerHash).first();
+  let u = identity
+    ? await env.DB.prepare('SELECT * FROM users WHERE id=?').bind(identity.user_id).first()
+    : null;
+  let dibuatBaru = false;
 
-  if(u)assertAccountEnabled(u,{izinkanBlokir:true});
+  if (identity && !u) {
+    throw new SecurityError('Tautan akun sosial tidak lagi valid. Hubungi admin.', 409, 'SOCIAL_IDENTITY_ORPHAN');
+  }
   if (!u) {
-    await beforeRegistration(env,req,deviceId);
+    u = await env.DB.prepare('SELECT * FROM users WHERE lower(email)=?').bind(prof.email).first();
+  }
+  if (u) assertAccountEnabled(u, { izinkanBlokir: true });
+
+  // Jangan simpan URL bertoken/CDN pihak ketiga. Kegagalan impor foto tidak
+  // menggagalkan login; pengguna tetap bisa mengunggah avatar sendiri.
+  if (fotoPenyedia && (!u || !u.foto)) {
+    prof.foto = await imporFotoSosial(env, fotoPenyedia, provider);
+  }
+
+  if (!u) {
+    await beforeRegistration(env, req, deviceId);
     const idBaru = uid('u_');
+    try {
+      await env.DB.prepare(
+        "INSERT INTO users (id,nama,email,password,phone,saldo,tier,email_verified,foto,registration_device) VALUES (?,?,?,?,?,0,'basic',1,?,?)"
+      ).bind(idBaru, prof.nama, prof.email, `sosial:${provider}`, null, prof.foto || null, deviceId).run();
+      dibuatBaru = true;
+      u = await env.DB.prepare('SELECT * FROM users WHERE id=?').bind(idBaru).first();
+    } catch (e) {
+      if (String(e).includes('DEVICE_LIMIT') || String(e).includes('DEVICE_BLOCKED') || String(e).includes('DEVICE_UNKNOWN')) {
+        translateRegistrationError(e);
+      }
+      // Dua callback berbeda bisa berlomba pada email yang sama. Pakai akun
+      // yang menang INSERT; jangan membuat akun kedua.
+      u = await env.DB.prepare('SELECT * FROM users WHERE lower(email)=?').bind(prof.email).first();
+      if (!u) throw e;
+      assertAccountEnabled(u, { izinkanBlokir: true });
+    }
+  }
+
+  if (!identity) {
+    try {
+      await env.DB.prepare(
+        `INSERT INTO social_identity(provider,provider_user_hash,user_id,email_at_link,created_at,last_login)
+         VALUES(?,?,?,?,?,?)`
+      ).bind(provider, providerHash, u.id, prof.email, new Date().toISOString(), new Date().toISOString()).run();
+      await auditSecurity(env, 'social_identity_linked', u.id, provider, '/api/auth/social/callback');
+    } catch (e) {
+      const pemilik = await env.DB.prepare(
+        'SELECT user_id FROM social_identity WHERE provider=? AND provider_user_hash=?'
+      ).bind(provider, providerHash).first();
+      if (pemilik && pemilik.user_id !== u.id) {
+        // Callback paralel bisa lebih dulu memasang identity yang sama. ID
+        // provider adalah otoritas; jangan meninggalkan akun duplikat.
+        const pemenang = await env.DB.prepare('SELECT * FROM users WHERE id=?').bind(pemilik.user_id).first();
+        if (!pemenang) throw new SecurityError('Tautan akun sosial rusak. Hubungi admin.', 409, 'SOCIAL_IDENTITY_ORPHAN');
+        if (dibuatBaru) await bersihkanAkun(env, u);
+        u = pemenang;
+        dibuatBaru = false;
+        assertAccountEnabled(u, { izinkanBlokir: true });
+      } else if (!pemilik) {
+        throw new SecurityError(
+          `Akun ini sudah terhubung ke akun ${provider} lain. Masuk dengan metode sebelumnya atau hubungi admin.`,
+          409, 'SOCIAL_LINK_CONFLICT',
+        );
+      }
+    }
+  } else {
     await env.DB.prepare(
-      "INSERT INTO users (id,nama,email,password,phone,saldo,tier,email_verified,foto,registration_device) VALUES (?,?,?,?,?,0,'basic',1,?,?)"
-    ).bind(idBaru, prof.nama, prof.email, `sosial:${provider}`, null, prof.foto || null,deviceId).run().catch(translateRegistrationError);
+      'UPDATE social_identity SET last_login=?,email_at_link=? WHERE provider=? AND provider_user_hash=?'
+    ).bind(new Date().toISOString(), prof.email, provider, providerHash).run();
+  }
 
-    const sapa = {
-      id: uid('m_'),
-      room: `user:${idBaru}`,
-      teks: `Selamat datang, ${prof.nama.split(' ')[0]}. Kirim pesan untuk menghubungi tim CS. Percakapan disimpan selama 7 hari.`,
-      waktu: new Date().toISOString(),
-    };
-    ctx.waitUntil(env.DB.prepare('INSERT INTO cs_messages (id,room,user_id,dari,teks,waktu) VALUES (?,?,?,?,?,?)')
-      .bind(sapa.id, sapa.room, idBaru, 'system', sapa.teks, sapa.waktu).run());
-    ctx.waitUntil(kirimEmail(env, { to: prof.email, template: 'selamatDatang', data: { nama: prof.nama } }));
-
-    u = await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(idBaru).first();
-  } else if (!u.email_verified || (prof.foto && !u.foto)) {
-    await env.DB.prepare('UPDATE users SET email_verified = 1, foto = COALESCE(foto, ?) WHERE id = ?')
+  if (!u.email_verified || (prof.foto && !u.foto)) {
+    await env.DB.prepare('UPDATE users SET email_verified=1,foto=COALESCE(foto,?) WHERE id=?')
       .bind(prof.foto || null, u.id).run();
     u.email_verified = 1;
     u.foto = u.foto || prof.foto;
   }
 
+  if (dibuatBaru) {
+    const sapa = {
+      id: uid('m_'), room: `user:${u.id}`,
+      teks: `Selamat datang, ${prof.nama.split(' ')[0]}. Kirim pesan untuk menghubungi tim CS. Percakapan disimpan selama 7 hari.`,
+      waktu: new Date().toISOString(),
+    };
+    ctx.waitUntil(env.DB.prepare('INSERT INTO cs_messages (id,room,user_id,dari,teks,waktu) VALUES (?,?,?,?,?,?)')
+      .bind(sapa.id, sapa.room, u.id, 'system', sapa.teks, sapa.waktu).run());
+    ctx.waitUntil(kirimEmail(env, { to: prof.email, template: 'selamatDatang', data: { nama: prof.nama } }));
+  }
   return u;
+}
+
+function kodePenghapusanSosial() {
+  const bytes = crypto.getRandomValues(new Uint8Array(24));
+  return [...bytes].map((x) => x.toString(16).padStart(2, '0')).join('');
+}
+
+async function prosesPenghapusanSosial(env, requestId, userId) {
+  const lock = await env.DB.prepare(
+    "UPDATE social_deletion_request SET status='memproses',note=NULL WHERE id=? AND status IN ('menunggu','gagal')"
+  ).bind(requestId).run();
+  if (Number(lock.meta?.changes || 0) !== 1) return;
+  try {
+    const u = userId ? await env.DB.prepare('SELECT * FROM users WHERE id=?').bind(userId).first() : null;
+    if (!u) {
+      await env.DB.prepare(
+        "UPDATE social_deletion_request SET status='selesai',user_id=NULL,completed_at=?,note=NULL WHERE id=?"
+      ).bind(new Date().toISOString(), requestId).run();
+      return;
+    }
+    const info = await infoHapusAkun(env, u);
+    if (!info.boleh_hapus) {
+      const note = Array.isArray(info.penghalang) && info.penghalang.length
+        ? String(info.penghalang[0]).slice(0, 180)
+        : 'Menunggu saldo atau sesi aktif diselesaikan.';
+      await env.DB.prepare(
+        "UPDATE social_deletion_request SET status='menunggu',note=? WHERE id=?"
+      ).bind(note, requestId).run();
+      return;
+    }
+    await bersihkanAkun(env, u);
+    await env.DB.prepare(
+      "UPDATE social_deletion_request SET status='selesai',user_id=NULL,completed_at=?,note=NULL WHERE id=?"
+    ).bind(new Date().toISOString(), requestId).run();
+    await auditSecurity(env, 'social_deletion_completed', requestId, 'facebook', '/api/auth/facebook/data-deletion');
+  } catch (_) {
+    await env.DB.prepare(
+      "UPDATE social_deletion_request SET status='gagal',note='Akan dicoba kembali secara otomatis.' WHERE id=?"
+    ).bind(requestId).run().catch(() => {});
+  }
+}
+
+function halamanStatusPenghapusan(status, note = '') {
+  const label = {
+    selesai: 'Data akun sudah dihapus',
+    menunggu: 'Permintaan sedang menunggu',
+    memproses: 'Permintaan sedang diproses',
+    gagal: 'Pemrosesan akan dicoba kembali',
+    petunjuk: 'Cara menghapus data Facebook',
+  }[status] || 'Kode konfirmasi tidak ditemukan';
+  const aman = String(note || '').replace(/[&<>"']/g, '');
+  return `<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>Penghapusan Data XyCloudStore</title></head><body style="margin:0;background:#f6f3ff;color:#201936;font-family:Arial,sans-serif"><main style="max-width:620px;margin:64px auto;padding:28px;background:#fff;border:1px solid #e5dcff;border-radius:20px"><div style="color:#6c2be2;font-weight:800">XYCLOUDSTORE</div><h1 style="font-size:25px">${label}</h1><p>${aman || 'Simpan kode konfirmasi Anda. Status halaman ini diperbarui otomatis saat penghapusan selesai.'}</p><p style="color:#625b72;font-size:14px">Jika masih menunggu, selesaikan pesanan aktif/saldo atau hubungi dukungan melalui aplikasi.</p></main></body></html>`;
 }
 
 const emailValid = (v) => /^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(String(v || '').trim());
@@ -949,11 +1075,23 @@ export default {
     // jaring pengaman pembayaran: tanya penyedia soal top up QRIS/e-wallet
     // yang masih 'menunggu' (webhook bisa telat/hilang)
     ctx.waitUntil(pollPembayaran(env));
+    // Retry permintaan penghapusan Meta yang sebelumnya terhalang sesi/saldo
+    // atau sempat gagal sementara. Maksimum 20 tiap jam agar kerja terukur.
+    ctx.waitUntil((async () => {
+      const pending = await env.DB.prepare(
+        "SELECT id,user_id FROM social_deletion_request WHERE status IN ('menunggu','gagal') ORDER BY requested_at LIMIT 20"
+      ).all();
+      for (const row of (pending.results || [])) {
+        await prosesPenghapusanSosial(env, row.id, row.user_id);
+      }
+    })().catch(() => {}));
     // Tiket mentah tidak disimpan; baris hash yang kedaluwarsa dibersihkan
-    // setelah masa audit 30 hari agar tabel funnel tidak tumbuh tanpa batas.
+    // setelah masa audit 30 hari. Status konfirmasi penghapusan disimpan 180
+    // hari lalu dihapus agar kedua tabel audit tidak tumbuh tanpa batas.
     ctx.waitUntil(env.DB.batch([
       env.DB.prepare("UPDATE referral_attribution SET status='kedaluwarsa' WHERE claimed_by IS NULL AND status NOT IN ('ditolak','kedaluwarsa') AND datetime(expires_at)<datetime('now')"),
       env.DB.prepare("DELETE FROM referral_attribution WHERE claimed_by IS NULL AND datetime(expires_at)<datetime('now','-30 days')"),
+      env.DB.prepare("DELETE FROM social_deletion_request WHERE status='selesai' AND datetime(completed_at)<datetime('now','-180 days')"),
     ]).catch(() => {}));
     // cadangan otomatis sekali sehari pada jam 19 UTC (dini hari WIB)
     if (new Date().getUTCHours() === 19) {
@@ -1716,6 +1854,79 @@ async function statistikPublik(env) {
   }
 }
 
+// ---------------- PENGHAPUSAN DATA FACEBOOK / META ----------------
+      if (p === 'auth/facebook/data-deletion' && req.method === 'GET') {
+        return new Response(halamanStatusPenghapusan('petunjuk',
+          'Hapus akun dari menu Profil > Pengaturan > Hapus Akun, atau putuskan XyCloudStore di Pengaturan Facebook. Permintaan resmi Meta diproses lewat URL ini dan menghasilkan kode konfirmasi.'), {
+          headers: { ...securityHeaders(env), 'Content-Type': 'text/html; charset=utf-8' },
+        });
+      }
+      if (p === 'auth/facebook/deletion-status' && req.method === 'GET') {
+        const code = String(url.searchParams.get('code') || '').trim();
+        let row = null;
+        if (/^[a-f0-9]{48}$/i.test(code)) {
+          const id = await securityHash(env, 'social-deletion', code.toLowerCase());
+          row = await env.DB.prepare(
+            'SELECT status,note FROM social_deletion_request WHERE id=?'
+          ).bind(id).first();
+        }
+        return new Response(halamanStatusPenghapusan(row?.status, row?.note), {
+          status: row ? 200 : 404,
+          headers: { ...securityHeaders(env), 'Content-Type': 'text/html; charset=utf-8' },
+        });
+      }
+      if (['auth/facebook/data-deletion', 'auth/facebook/deauthorize'].includes(p) && req.method === 'POST') {
+        const callbackRoute = `/api/${p}`;
+        if (!providerSiap(env).facebook) return err('Facebook Login belum dikonfigurasi.', 503, env);
+        const contentType = String(req.headers.get('content-type') || '').toLowerCase();
+        const rawBody = await req.text();
+        if (rawBody.length > 32_768) return err('Data autentikasi terlalu besar.', 413, env);
+        let signedRequest = '';
+        if (contentType.includes('application/json')) {
+          let payload = {};
+          try { payload = JSON.parse(rawBody); } catch (_) { payload = {}; }
+          if (!payload || typeof payload !== 'object' || Array.isArray(payload)) payload = {};
+          signedRequest = String(payload.signed_request || '');
+        } else {
+          const form = new URLSearchParams(rawBody);
+          signedRequest = String(form.get('signed_request') || '');
+        }
+        const verified = await verifikasiSignedRequestFacebook(env, signedRequest);
+        if (!verified.ok) {
+          await auditSecurity(env, 'facebook_deletion_rejected', ip, verified.alasan, callbackRoute);
+          return err('Tanda tangan permintaan Meta tidak sah.', 401, env);
+        }
+        await requireRate(env, 'facebook-delete-user', verified.userId, 5, 86400);
+
+        const providerHash = await securityHash(env, 'social-id:facebook', verified.userId);
+        const identity = await env.DB.prepare(
+          "SELECT user_id FROM social_identity WHERE provider='facebook' AND provider_user_hash=?"
+        ).bind(providerHash).first();
+        const code = kodePenghapusanSosial();
+        const requestId = await securityHash(env, 'social-deletion', code);
+        const now = new Date().toISOString();
+        await env.DB.prepare(
+          `INSERT INTO social_deletion_request(id,provider,user_id,status,requested_at,completed_at,note)
+           VALUES(?,'facebook',?,?,?,?,?)`
+        ).bind(
+          requestId,
+          identity?.user_id || null,
+          identity ? 'menunggu' : 'selesai',
+          now,
+          identity ? null : now,
+          identity ? null : 'Tidak ada data akun yang tertaut.',
+        ).run();
+        await auditSecurity(env, 'facebook_deletion_requested', requestId,
+          identity ? 'linked' : 'not-linked', callbackRoute);
+        if (identity?.user_id) ctx.waitUntil(prosesPenghapusanSosial(env, requestId, identity.user_id));
+
+        const statusUrl = `${env.PUBLIC_URL || 'https://api.xycloud.my.id'}/api/auth/facebook/deletion-status?code=${encodeURIComponent(code)}`;
+        return new Response(JSON.stringify({ url: statusUrl, confirmation_code: code }), {
+          status: 200,
+          headers: securityHeaders(env),
+        });
+      }
+
 // ---------------- LOGIN GOOGLE NATIVE (tanpa browser) ----------------
       if (p === 'auth/google/native' && req.method === 'POST') {
         await requireRate(env,'google-native-ip',ip,12,300);
@@ -1736,48 +1947,81 @@ async function statistikPublik(env) {
         const provider = bagian[1];
         const aksi = bagian[2];
         const siap = providerSiap(env);
-
-        if (!siap[provider]) {
-          return err(`Login ${provider} belum dikonfigurasi`, 501, env);
+        if (!['google', 'facebook'].includes(provider)) return err('Penyedia login tidak dikenal.', 404, env);
+        if ((aksi === 'start' || aksi === 'callback') && req.method !== 'GET') {
+          return err('Metode tidak diizinkan.', 405, env);
         }
+        if (!siap[provider]) return err(`Login ${provider} belum dikonfigurasi`, 503, env);
+
+        const cookieHapus = 'xy_oauth_nonce=; HttpOnly; Secure; SameSite=Lax; Path=/api/auth; Max-Age=0';
+        const kembali = (tujuan, pesan, status = 200) => new Response(halamanKembali(tujuan, pesan), {
+          status,
+          headers: {
+            ...securityHeaders(env),
+            'Content-Type': 'text/html; charset=utf-8',
+            'Set-Cookie': cookieHapus,
+            'Referrer-Policy': 'no-referrer',
+          },
+        });
 
         if (aksi === 'start') {
-          await requireRate(env,'oauth-start-ip',ip,12,300);
-          const deviceId=await deviceFromRequest(env,req,{raw:url.searchParams.get('device')});
-          const state=await newOAuthState(env,provider,deviceId);
-          return new Response(null,{status:302,headers:{Location:urlMulai(env,provider,state),
-            'Set-Cookie':`xy_oauth_nonce=${state}; HttpOnly; Secure; SameSite=Lax; Path=/api/auth; Max-Age=600`}});
-        }
-        let deviceId;
-        try{deviceId=await consumeOAuthState(env,req,provider);}catch(e){
-          return new Response(halamanKembali(`${SKEMA_APLIKASI}://auth?error=Login%20kedaluwarsa.%20Mulai%20ulang.`, 'Login tidak valid'),{headers:{'Content-Type':'text/html; charset=utf-8'}});
+          await requireRate(env, 'oauth-start-ip', ip, 12, 300);
+          const deviceId = await deviceFromRequest(env, req, { raw: url.searchParams.get('device') });
+          const state = await newOAuthState(env, provider, deviceId);
+          return new Response(null, {
+            status: 302,
+            headers: {
+              ...securityHeaders(env),
+              Location: urlMulai(env, provider, state, {
+                rerequestEmail: provider === 'facebook' && url.searchParams.get('rerequest') === 'email',
+              }),
+              'Set-Cookie': `xy_oauth_nonce=${state}; HttpOnly; Secure; SameSite=Lax; Path=/api/auth; Max-Age=600`,
+              'Referrer-Policy': 'no-referrer',
+            },
+          });
         }
 
-        // callback
+        let deviceId;
+        try {
+          deviceId = await consumeOAuthState(env, req, provider);
+        } catch (_) {
+          await auditSecurity(env, 'oauth_state_rejected', ip, provider, `/api/auth/${provider}/callback`);
+          return kembali(`${SKEMA_APLIKASI}://auth?error=${encodeURIComponent('Login kedaluwarsa. Mulai ulang.')}`, 'Login tidak valid', 400);
+        }
+
         const code = url.searchParams.get('code');
         const galat = url.searchParams.get('error');
         if (galat || !code) {
-          return new Response(
-            halamanKembali(`${SKEMA_APLIKASI}://auth?error=${encodeURIComponent(galat || 'dibatalkan')}`, 'Login dibatalkan'),
-            { headers: { 'Content-Type': 'text/html; charset=utf-8' } }
+          await auditSecurity(env, 'oauth_cancelled', ip, provider, `/api/auth/${provider}/callback`);
+          return kembali(
+            `${SKEMA_APLIKASI}://auth?error=${encodeURIComponent('Login dibatalkan sebelum selesai.')}`,
+            'Login dibatalkan',
           );
         }
 
         const prof = await ambilProfil(env, provider, code);
         if (!prof.ok) {
-          return new Response(
-            halamanKembali(`${SKEMA_APLIKASI}://auth?error=${encodeURIComponent(prof.alasan)}`, 'Login gagal'),
-            { headers: { 'Content-Type': 'text/html; charset=utf-8' } }
+          await auditSecurity(env, 'oauth_provider_rejected', ip, `${provider}:${prof.alasan}`, `/api/auth/${provider}/callback`);
+          return kembali(
+            `${SKEMA_APLIKASI}://auth?error=${encodeURIComponent(prof.alasan)}`,
+            'Login gagal', 401,
           );
         }
 
-        const u = await akunSosial(env, ctx, prof, provider,deviceId,req);
-
-        const token = await issueUserToken(env,u,typeof deviceId==='undefined'?null:deviceId);
-        return new Response(
-          halamanKembali(`${SKEMA_APLIKASI}://auth?token=${encodeURIComponent(token)}`, `Halo ${u.nama.split(' ')[0]}`),
-          { headers: { 'Content-Type': 'text/html; charset=utf-8' } }
-        );
+        try {
+          const u = await akunSosial(env, ctx, prof, provider, deviceId, req);
+          const token = await issueUserToken(env, u, typeof deviceId === 'undefined' ? null : deviceId);
+          return kembali(
+            `${SKEMA_APLIKASI}://auth?token=${encodeURIComponent(token)}`,
+            `Halo ${u.nama.split(' ')[0]}`,
+          );
+        } catch (e) {
+          const alasan = e instanceof KontenError
+            ? String(e.message || 'Login tidak dapat diselesaikan.').slice(0, 220)
+            : 'Login tidak dapat diselesaikan. Coba lagi atau hubungi admin.';
+          await auditSecurity(env, 'oauth_account_rejected', ip, `${provider}:${alasan}`, `/api/auth/${provider}/callback`);
+          return kembali(`${SKEMA_APLIKASI}://auth?error=${encodeURIComponent(alasan)}`, 'Login gagal', e.status || 400);
+        }
       }
 
       // ---------------- AUTH ----------------
@@ -3059,9 +3303,34 @@ if (a.startsWith('peran/') && req.method === 'DELETE') {
             push: Boolean(env.ONESIGNAL_API_KEY),
             gambar: Boolean(env.CLOUDINARY_KEY),
             pembayaran: penyediaBayar(env),
-            loginGoogle: Boolean(env.GOOGLE_CLIENT_ID),
+            loginGoogle: providerSiap(env).google,
+            loginFacebook: providerSiap(env).facebook,
             wilayah: req.cf?.colo || '-',
             waktu: new Date().toISOString(),
+          }, 200, env);
+        }
+
+        // ---- diagnostik OAuth aman (tanpa App Secret/access token) ----
+        if (a === 'sistem/oauth' && req.method === 'GET') {
+          const [facebook, jumlahIdentity, penghapusan] = await Promise.all([
+            diagnostikFacebook(env),
+            env.DB.prepare(
+              'SELECT provider,COUNT(*) AS jumlah FROM social_identity GROUP BY provider ORDER BY provider'
+            ).all().catch(() => ({ results: [] })),
+            env.DB.prepare(
+              "SELECT status,COUNT(*) AS jumlah FROM social_deletion_request GROUP BY status ORDER BY status"
+            ).all().catch(() => ({ results: [] })),
+          ]);
+          return json({
+            google: {
+              configured: providerSiap(env).google,
+              nativeConfigured: Boolean(String(env.GOOGLE_CLIENT_ID_ANDROID || '').trim()),
+              callback: `${env.PUBLIC_URL || 'https://api.xycloud.my.id'}/api/auth/google/callback`,
+            },
+            facebook,
+            identities: jumlahIdentity.results || [],
+            deletionRequests: penghapusan.results || [],
+            checkedAt: new Date().toISOString(),
           }, 200, env);
         }
 

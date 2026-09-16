@@ -546,6 +546,19 @@ CREATE INDEX IF NOT EXISTS idx_users_trash ON users(deleted_at);
 CREATE TABLE IF NOT EXISTS oauth_states (
  id TEXT PRIMARY KEY, provider TEXT NOT NULL, device_id TEXT, expires_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS social_identity (
+ provider TEXT NOT NULL, provider_user_hash TEXT NOT NULL, user_id TEXT NOT NULL,
+ email_at_link TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')),
+ last_login TEXT NOT NULL DEFAULT (datetime('now')),
+ PRIMARY KEY(provider,provider_user_hash), UNIQUE(provider,user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_social_identity_user ON social_identity(user_id);
+CREATE TABLE IF NOT EXISTS social_deletion_request (
+ id TEXT PRIMARY KEY, provider TEXT NOT NULL, user_id TEXT,
+ status TEXT NOT NULL DEFAULT 'menunggu', requested_at TEXT NOT NULL DEFAULT (datetime('now')),
+ completed_at TEXT, note TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_social_deletion_status ON social_deletion_request(status,requested_at);
 CREATE TABLE IF NOT EXISTS media_assets (
  id TEXT PRIMARY KEY, url TEXT NOT NULL UNIQUE, folder TEXT NOT NULL, format TEXT,
  width INTEGER, height INTEGER, bytes INTEGER, animated INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')),
