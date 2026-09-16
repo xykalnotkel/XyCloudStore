@@ -32,7 +32,7 @@ if 'xySendKey' not in s:
             long now = android.os.SystemClock.uptimeMillis();
             android.view.KeyEvent ev = new android.view.KeyEvent(now, now,
                     isUp ? android.view.KeyEvent.ACTION_UP : android.view.KeyEvent.ACTION_DOWN,
-                    keyCode, 0, metaState, 0, 0, android.view.InputDevice.SOURCE_KEYBOARD, false);
+                    keyCode, 0, metaState, 0);
             short translated = keyboardTranslator.translate(keyCode, -1);
             if (translated != 0) {
                 conn.sendKeyboardInput(translated,
@@ -79,7 +79,8 @@ if 'xy_lanskap' not in s:
             // Lebar auto-fit ke layar; video di-letterbox di dalam permukaan 16:9.
             streamView.setDesiredAspectRatio(16.0 / 9.0);
         }''')
-    s=s.replace('        StreamConfiguration config = new StreamConfiguration.Builder()','        // XyCloudStore (xy_lanskap): biarkan Sunshine menerapkan resolusi\n        // 1920x1080@60 yang dikunci Agent (dd_manual_resolution).\n        prefConfig.optimizeGameSettings = true;\n        StreamConfiguration config = new StreamConfiguration.Builder()')
+    # Note: v12.1 tidak punya prefConfig.optimizeGameSettings (dihapus Moonlight);
+    # kunci resolusi host tetap via opsi dd_* Sunshine (dipasang Agent).
     game.write_text(s)
 # Bounded pairing wait (the UI can cancel rather than waiting forever).
 http=vendor/'app/src/main/java/com/limelight/nvstream/http/NvHTTP.java'

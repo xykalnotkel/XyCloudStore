@@ -43,7 +43,7 @@ public final class XyHud {
     private final SharedPreferences pref;
     private final Handler hand = new Handler(Looper.getMainLooper());
 
-    private View toolbar;
+    private FrameLayout toolbar;
     private LinearLayout keyboardRoot;
     private LinearLayout panelQwerty;
     private LinearLayout panelFkey;
@@ -438,7 +438,7 @@ public final class XyHud {
         b.setTag(awal);
         catatMode(b);
         b.setOnClickListener(v -> {
-            boolean aktif = Boolean.valueOf(v.getTag()) != Boolean.TRUE;
+            boolean aktif = !Boolean.TRUE.equals(v.getTag());
             v.setTag(aktif);
             aksi.run();
             catatMode(b);
@@ -447,7 +447,7 @@ public final class XyHud {
     }
 
     private void catatMode(Button b) {
-        boolean aktif = Boolean.valueOf(b.getTag());
+        boolean aktif = Boolean.TRUE.equals(b.getTag());
         b.setBackground(mbulat(9, aktif ? WARNA_AKIF : WARNA_LAT));
         b.setTextColor(aktif ? Color.WHITE : WARNA_KUNCI);
     }
