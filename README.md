@@ -314,6 +314,19 @@ Aturannya: petunjuk Intel memilih `x86_64`, petunjuk `armv7` memilih `armeabi-v7
 Android 6 ke atas dianggap `arm64-v8a`, sisanya memakai berkas universal.
 Pengguna tetap bisa memilih sendiri dari daftar semua versi.
 
+### Referral teratribusi instalasi
+
+Tautan `/unduh?ref=KODE` sekarang membuat ticket acak 256-bit yang hanya disimpan sebagai
+HMAC di D1. Unduhan APK rilis ditandai server, lalu tombol **Buka aplikasi & aktifkan
+undangan** menyerahkan ticket ke Android melalui `xycloudstore://referral`. Reward baru cair
+setelah `PackageManager.firstInstallTime` membuktikan paket dipasang sesudah klik/unduh,
+aplikasi mengikat ticket ke identitas perangkat, akun dibuat sesudah klik, perangkat pendaftaran
+cocok, email terverifikasi, bukan self-referral, dan ticket belum pernah dipakai. Mengetik kode
+saja tidak memberi saldo. Karena distribusi berupa sideload, timestamp/identitas klien tetap bukan
+pengganti Play Integrity atau hardware attestation pada perangkat yang telah dikompromikan.
+Rollout dikunci oleh `referral_install_aktif` dan baru dinyalakan setelah APK berisi
+`ReferralActivity` dirilis. Rincian: `docs/batch-r-referral-install-attribution-2026-09-16.md`.
+
 ---
 
 ## Sesi Main (remote PC untuk game)

@@ -431,6 +431,7 @@ input,select,textarea{border-color:#DCE2E9!important;border-radius:10px!importan
             border-radius:16px;padding:16px 18px;font-size:13.5px">Mendeteksi perangkat...</div>
           <div style="margin-top:20px" id="tombolUtama"></div>
           <p style="opacity:.62;font-size:12px;margin-top:14px" id="infoVersi"></p>
+          <div id="referralAktivasi" style="display:none;margin-top:18px"></div>
         </div>
         <div id="daftarVarian"></div>
       </div>
@@ -441,7 +442,8 @@ input,select,textarea{border-color:#DCE2E9!important;border-radius:10px!importan
       <ol class="muted" style="font-size:14px;margin:12px 0 0;padding-left:20px;line-height:2">
         <li>Unduh berkas APK di atas.</li>
         <li>Buka berkasnya, Android akan meminta izin memasang dari sumber ini. Izinkan sekali saja.</li>
-        <li>Buka aplikasi, daftar dengan email, lalu masukkan kode verifikasi yang kami kirim.</li>
+        <li>Jika halaman ini dibuka dari undangan teman, kembali ke sini lalu tekan <b>Buka aplikasi &amp; aktifkan undangan</b>.</li>
+        <li>Di aplikasi, buat akun baru dengan email lalu masukkan kode verifikasi yang kami kirim.</li>
       </ol>
     </div>
   </div>
@@ -938,11 +940,90 @@ function pilihAbiManual(nilai) {
   muatUnduh();
 }
 
+// Referral sideload tidak memiliki Play Install Referrer. Karena itu halaman
+// membuat tiket capability sekali pakai, menandai unduhan di server, lalu
+// menyerahkannya ke aplikasi lewat deep link setelah pemasangan.
+const KUNCI_ATRIBUSI_REFERRAL = 'xy_referral_install_v1';
+let ATRIBUSI_REFERRAL_PROMISE;
+
+function bacaAtribusiReferralTersimpan() {
+  try {
+    const a = JSON.parse(localStorage.getItem(KUNCI_ATRIBUSI_REFERRAL) || 'null');
+    if (!a || !/^[A-F0-9]{6,16}$/.test(a.kode || '') || !/^[a-f0-9]{64}$/.test(a.ticket || '')
+        || Date.parse(a.kedaluwarsa || '') <= Date.now()) {
+      localStorage.removeItem(KUNCI_ATRIBUSI_REFERRAL);
+      return null;
+    }
+    return a;
+  } catch (_) {
+    localStorage.removeItem(KUNCI_ATRIBUSI_REFERRAL);
+    return null;
+  }
+}
+
+async function siapkanAtribusiReferral() {
+  if (ATRIBUSI_REFERRAL_PROMISE) return ATRIBUSI_REFERRAL_PROMISE;
+  ATRIBUSI_REFERRAL_PROMISE = (async () => {
+    const dariUrl = String(new URLSearchParams(location.search).get('ref') || '').trim().toUpperCase();
+    const kode = /^[A-Z0-9]{6,16}$/.test(dariUrl) ? dariUrl : '';
+    const tersimpan = bacaAtribusiReferralTersimpan();
+    if (!kode) return tersimpan;
+    if (tersimpan?.kode === kode) return tersimpan;
+
+    const r = await fetch('/api/referral/klik', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kode }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || 'Kode undangan belum bisa diproses.');
+    const a = j.data;
+    localStorage.setItem(KUNCI_ATRIBUSI_REFERRAL, JSON.stringify(a));
+    return a;
+  })();
+  return ATRIBUSI_REFERRAL_PROMISE;
+}
+
+function urlUnduhReferral(url, atribusi) {
+  if (!atribusi) return url;
+  const nama = decodeURIComponent(String(url || '').split('/').pop() || '');
+  return `/api/referral/unduh?ticket=${encodeURIComponent(atribusi.ticket)}&file=${encodeURIComponent(nama)}`;
+}
+
+function tampilkanAktivasiReferral(atribusi, galat = '') {
+  const kotak = document.getElementById('referralAktivasi');
+  if (!kotak) return;
+  if (!atribusi && !galat) { kotak.style.display = 'none'; return; }
+  kotak.style.display = 'block';
+  if (galat) {
+    kotak.innerHTML = `<div style="padding:13px 15px;border-radius:14px;background:rgba(255,185,80,.14);border:1px solid rgba(255,220,160,.35);font-size:12.5px">
+      Tautan undangan tidak aktif: ${esc(galat)} Unduhan biasa tetap tersedia, tetapi bonus referral tidak akan diproses.</div>`;
+    return;
+  }
+  const deepLink = `xycloudstore://referral?ticket=${encodeURIComponent(atribusi.ticket)}&code=${encodeURIComponent(atribusi.kode)}`;
+  kotak.innerHTML = `<div style="padding:15px;border-radius:16px;background:rgba(255,255,255,.13);border:1px solid rgba(255,255,255,.24)">
+    <b>Undangan ${esc(atribusi.pengundang || 'temanmu')} terdeteksi</b>
+    <div style="font-size:12.5px;opacity:.82;line-height:1.6;margin-top:7px">
+      1. Unduh APK lewat tombol di atas. 2. Pasang APK. 3. Kembali ke halaman ini lalu tekan tombol berikut.</div>
+    <a class="btn" href="${esc(deepLink)}" style="margin-top:12px;background:#fff;color:var(--u2);padding:10px 16px">
+      Buka aplikasi &amp; aktifkan undangan</a>
+    <div style="font-size:11.5px;opacity:.68;line-height:1.5;margin-top:9px">
+      Aplikasi harus dipasang baru setelah unduhan ini. Buat akun baru di perangkat yang sama dan verifikasi email.
+      Tiket sekali pakai berlaku 7 hari; kode saja, app yang sudah terpasang, atau akun lama tidak menghasilkan bonus.</div>
+  </div>`;
+}
+
 async function muatUnduh() {
   const kotak = document.getElementById('deteksi');
   if (!kotak) return;
 
   try {
+    let atribusi = null;
+    let galatAtribusi = '';
+    try { atribusi = await siapkanAtribusiReferral(); }
+    catch (e) { galatAtribusi = e.message || String(e); }
+    tampilkanAktivasiReferral(atribusi, galatAtribusi);
+
     const r = await fetch('/api/rilis');
     const j = (await r.json()).data;
     const perangkat = await deteksiPerangkat();
@@ -979,7 +1060,7 @@ async function muatUnduh() {
 
     document.getElementById('tombolUtama').innerHTML =
       `<a class="btn" style="background:#fff;color:var(--u2);box-shadow:0 14px 30px rgba(0,0,0,.2)"
-         href="${esc(pilihan.url)}">Unduh ${esc(pilihan.label)} &middot; ${pilihan.ukuranMb} MB</a>`;
+         href="${esc(urlUnduhReferral(pilihan.url, atribusi))}">Unduh ${esc(pilihan.label)} &middot; ${pilihan.ukuranMb} MB</a>`;
 
     document.getElementById('infoVersi').textContent =
       `Versi ${j.versi || '-'} · diperbarui ${(j.tanggal || '').slice(0, 10)} · ditandatangani kunci rilis resmi`;
@@ -993,7 +1074,7 @@ async function muatUnduh() {
           <div><b>${esc(b.label)}${b.abi === pilihan.abi ? '<span class="cocok">PAS UNTUKMU</span>' : ''}</b>
             <small>${cocok ? esc(b.keterangan) : 'Tidak cocok untuk perangkatmu'} &middot; ${b.ukuranMb} MB</small></div>
           ${cocok
-            ? `<a href="${esc(b.url)}">Unduh</a>`
+            ? `<a href="${esc(urlUnduhReferral(b.url, atribusi))}">Unduh</a>`
             : '<a href="#" onclick="return false" aria-disabled="true">Tidak cocok</a>'}
         </div>`;
       }).join('') +

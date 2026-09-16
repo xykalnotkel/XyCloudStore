@@ -72,7 +72,7 @@ function rateMem(key, max, windowSec) {
 const securityHeaders = (env) => ({
   'Content-Type': 'application/json',
   'Access-Control-Allow-Origin': env?.ALLOW_ORIGIN || '*',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-admin-key, x-xy-device',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-admin-key, x-xy-device, x-xy-device-kind, x-xy-device-model, x-xy-referral-ticket',
   'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS',
   'X-Content-Type-Options': 'nosniff',
   'X-Frame-Options': 'SAMEORIGIN',
@@ -589,6 +589,216 @@ async function issueUserToken(env,u,deviceId=null){
 
 const uid = (p = '') => p + crypto.randomUUID().replace(/-/g, '').slice(0, 12);
 
+// ============================================================
+//  REFERRAL: tiket klik -> unduh -> dibuka di aplikasi -> klaim
+// ============================================================
+const TIKET_REFERRAL_RE = /^[a-f0-9]{64}$/i;
+
+function tiketReferralAcak() {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  return [...bytes].map((x) => x.toString(16).padStart(2, '0')).join('');
+}
+
+function tiketReferralDari(body, req) {
+  const raw = String(body?.ticket || req.headers.get('x-xy-referral-ticket') || '').trim().toLowerCase();
+  return TIKET_REFERRAL_RE.test(raw) ? raw : '';
+}
+
+function waktuReferral(value) {
+  const mentah = String(value || '').trim();
+  if (!mentah) return Number.NaN;
+  const zona = /(?:z|[+-]\d\d:?\d\d)$/i.test(mentah) ? mentah : `${mentah.replace(' ', 'T')}Z`;
+  return Date.parse(zona);
+}
+
+async function hashTiketReferral(env, raw) {
+  return securityHash(env, 'referral-ticket', raw);
+}
+
+async function referralInstallAktif(env) {
+  return String(await setelan(env, 'referral_install_aktif', '0')) === '1';
+}
+
+async function tolakAtribusiReferral(env, attributionId, userId, risiko, pesan, status = 409) {
+  await env.DB.prepare(
+    "UPDATE referral_attribution SET status='ditolak', risiko=? WHERE id=? AND claimed_by IS NULL"
+  ).bind(risiko, attributionId).run();
+  await auditSecurity(env, 'referral_denied', `${attributionId}:${userId}`, risiko, '/api/referral/atribusi');
+  throw new KontenError(pesan, status);
+}
+
+// Penolakan akun/permintaan tidak selalu boleh membakar ticket. Contohnya,
+// pengguna bisa tanpa sengaja login ke akun lama sebelum membuat akun baru;
+// capability tetap milik perangkat sah dan harus bisa dicoba lagi.
+async function gagalKlaimReferral(env, attributionId, userId, risiko, pesan, status = 409) {
+  await auditSecurity(env, 'referral_claim_failed', `${attributionId}:${userId}`, risiko, '/api/referral/atribusi');
+  throw new KontenError(pesan, status);
+}
+
+/**
+ * Klaim reward hanya setelah tiket terbukti mengunduh APK dan dibuka oleh
+ * instalasi yang sama. INSERT referral dilindungi unique index; trigger D1
+ * memberi dua reward + buku besar + mengonsumsi tiket secara atomik.
+ */
+async function klaimAtribusiReferral(env, ctx, req, userId, body = {}) {
+  const raw = tiketReferralDari(body, req);
+  if (!raw) throw new KontenError('Tiket undangan tidak ada. Buka aplikasi dari halaman unduhan temanmu.', 400);
+  const deviceId = await deviceFromRequest(env, req, { required: true });
+  const attributionId = await hashTiketReferral(env, raw);
+  const attr = await env.DB.prepare(
+    `SELECT a.*, u.nama AS nama_pengundang, u.deleted_at AS pengundang_dihapus,
+            u.diblokir AS pengundang_diblokir, u.registration_device AS perangkat_pengundang
+       FROM referral_attribution a JOIN users u ON u.id=a.pengundang
+      WHERE a.id=?`
+  ).bind(attributionId).first();
+  if (!attr) throw new KontenError('Tiket undangan tidak valid.', 404);
+
+  if (attr.claimed_by) {
+    if (attr.claimed_by === userId) {
+      const sudah = await env.DB.prepare('SELECT * FROM referral WHERE attribution_id=? AND diundang=?')
+        .bind(attributionId, userId).first();
+      return { ok: true, sudah: true, referral: sudah || null, pesan: 'Bonus referral ini sudah aktif.' };
+    }
+    throw new KontenError('Tiket undangan sudah dipakai akun lain.', 409);
+  }
+  if (attr.status === 'ditolak') {
+    throw new KontenError('Tiket undangan telah ditolak oleh pemeriksaan keamanan.', 409);
+  }
+  if (waktuReferral(attr.expires_at) <= Date.now()) {
+    await env.DB.prepare("UPDATE referral_attribution SET status='kedaluwarsa' WHERE id=? AND claimed_by IS NULL")
+      .bind(attributionId).run();
+    throw new KontenError('Tiket undangan sudah kedaluwarsa. Minta temanmu membagikan tautan baru.', 410);
+  }
+  if (!attr.downloaded_at) throw new KontenError('APK belum diunduh melalui tautan undangan ini.', 409);
+  if (!attr.installed_at || !attr.package_installed_at || !attr.device_id) {
+    throw new KontenError('Buka aplikasi hasil pemasangan dari tombol aktivasi di halaman unduhan terlebih dahulu.', 409);
+  }
+  if (attr.device_id !== deviceId) {
+    return gagalKlaimReferral(env, attributionId, userId, 'perangkat_berbeda',
+      'Tiket ini dibuka di perangkat lain dan tidak dapat dipindahkan.', 403);
+  }
+
+  const kodeDikirim = String(body?.kode || '').trim().toUpperCase();
+  if (kodeDikirim && kodeDikirim !== attr.kode) {
+    throw new KontenError('Kode undangan tidak cocok dengan tautan instalasi.', 400);
+  }
+  if (attr.pengundang === userId) {
+    return tolakAtribusiReferral(env, attributionId, userId, 'referral_diri_sendiri',
+      'Kamu tidak bisa memakai kode referral milik sendiri.', 409);
+  }
+  if (attr.pengundang_dihapus || Number(attr.pengundang_diblokir) === 1) {
+    return tolakAtribusiReferral(env, attributionId, userId, 'pengundang_tidak_aktif',
+      'Akun pengundang tidak dapat menerima referral.', 409);
+  }
+
+  const pengguna = await env.DB.prepare(
+    'SELECT id,nama,email_verified,created_at,diundang_oleh,registration_device,deleted_at,diblokir FROM users WHERE id=?'
+  ).bind(userId).first();
+  if (!pengguna || pengguna.deleted_at || Number(pengguna.diblokir) === 1) {
+    throw new KontenError('Akun ini tidak dapat menerima referral.', 403);
+  }
+  if (Number(pengguna.email_verified) !== 1) {
+    throw new KontenError('Verifikasi email akunmu dahulu agar bonus referral aman.', 409);
+  }
+  if (pengguna.diundang_oleh) {
+    const sudah = await env.DB.prepare('SELECT * FROM referral WHERE diundang=?').bind(userId).first();
+    if (sudah?.attribution_id === attributionId) {
+      return { ok: true, sudah: true, referral: sudah, pesan: 'Bonus referral ini sudah aktif.' };
+    }
+    throw new KontenError('Akun ini sudah pernah memakai referral.', 409);
+  }
+  if (pengguna.registration_device !== deviceId) {
+    return gagalKlaimReferral(env, attributionId, userId, 'perangkat_registrasi_berbeda',
+      'Bonus hanya berlaku untuk akun yang dibuat di perangkat instalasi ini.', 403);
+  }
+  // Toleransi satu menit hanya untuk perbedaan format/jam penyimpanan D1.
+  if (waktuReferral(pengguna.created_at) < waktuReferral(attr.clicked_at) - 60_000) {
+    return gagalKlaimReferral(env, attributionId, userId, 'akun_mendahului_klik',
+      'Referral hanya berlaku untuk akun baru yang dibuat setelah tautan dibuka.', 409);
+  }
+
+  const perangkatPengundang = attr.perangkat_pengundang === deviceId || await env.DB.prepare(
+    'SELECT 1 AS ada FROM security_device_users WHERE device_id=? AND user_id=? LIMIT 1'
+  ).bind(deviceId, attr.pengundang).first();
+  if (perangkatPengundang) {
+    return tolakAtribusiReferral(env, attributionId, userId, 'perangkat_sama_pengundang',
+      'Pengundang dan akun baru tidak boleh berasal dari perangkat yang sama.', 403);
+  }
+
+  const sudah = await env.DB.prepare('SELECT * FROM referral WHERE diundang=? OR attribution_id=? LIMIT 1')
+    .bind(userId, attributionId).first();
+  if (sudah) {
+    if (sudah.diundang === userId && sudah.attribution_id === attributionId) {
+      return { ok: true, sudah: true, referral: sudah, pesan: 'Bonus referral ini sudah aktif.' };
+    }
+    throw new KontenError('Akun atau tiket ini sudah pernah menerima bonus referral.', 409);
+  }
+
+  const bonusPengundang = Math.max(0, Math.min(100000, Number(env.BONUS_REFERRAL_PENGUNDANG || env.BONUS_REFERRAL || 10000)));
+  const bonusDiundang = Math.max(0, Math.min(100000, Number(env.BONUS_REFERRAL_DIUNDANG || env.BONUS_DIUNDANG || 5000)));
+  const now = new Date().toISOString();
+  const claimIp = await securityHash(env, 'referral-ip', req.headers.get('cf-connecting-ip') || 'tanpa-ip');
+  const risiko = attr.click_ip_hash && attr.click_ip_hash !== claimIp ? 'jaringan_berubah' : null;
+  const referralId = uid('ref_');
+  await env.DB.prepare(
+    'UPDATE referral_attribution SET claim_ip_hash=?, risiko=COALESCE(risiko,?) WHERE id=? AND claimed_by IS NULL'
+  ).bind(claimIp, risiko, attributionId).run();
+
+  try {
+    await env.DB.prepare(
+      `INSERT INTO referral
+       (id,pengundang,diundang,bonus_pengundang,bonus_diundang,status,dibuat,selesai,
+        attribution_id,kode,sumber,device_id,risiko)
+       VALUES (?,?,?,?,?,'selesai',?,?,?,?, 'install_ticket',?,?)`
+    ).bind(
+      referralId, attr.pengundang, userId, bonusPengundang, bonusDiundang,
+      attr.clicked_at, now, attributionId, attr.kode, deviceId, risiko,
+    ).run();
+  } catch (e) {
+    const ada = await env.DB.prepare('SELECT * FROM referral WHERE diundang=? OR attribution_id=? LIMIT 1')
+      .bind(userId, attributionId).first();
+    if (ada?.diundang === userId && ada?.attribution_id === attributionId) {
+      return { ok: true, sudah: true, referral: ada, pesan: 'Bonus referral ini sudah aktif.' };
+    }
+    if (/UNIQUE constraint|REFERRAL_/i.test(String(e?.message || e))) {
+      throw new KontenError('Akun atau tiket ini baru saja dipakai oleh permintaan lain.', 409);
+    }
+    throw e;
+  }
+
+  const [saldoPenerima, saldoPengundang] = await Promise.all([
+    env.DB.prepare('SELECT saldo FROM users WHERE id=?').bind(userId).first(),
+    env.DB.prepare('SELECT saldo FROM users WHERE id=?').bind(attr.pengundang).first(),
+  ]);
+  ctx.waitUntil(Promise.all([
+    buatNotif(env, ctx, {
+      userId: attr.pengundang,
+      jenis: 'referral',
+      judul: 'Bonus referral masuk',
+      pesan: `${pengguna.nama} memasang aplikasi dari tautanmu. Bonus Rp${bonusPengundang.toLocaleString('id-ID')} masuk.`,
+      aktor: pengguna.nama,
+      refJenis: 'referral',
+      refId: referralId,
+    }),
+    push(env, `user:${userId}`, 'wallet.update', { saldo: saldoPenerima?.saldo ?? 0, reason: 'referral' }),
+    push(env, `user:${attr.pengundang}`, 'wallet.update', { saldo: saldoPengundang?.saldo ?? 0, reason: 'referral' }),
+  ]));
+
+  return {
+    ok: true,
+    sudah: false,
+    referral: {
+      id: referralId,
+      pengundang: attr.pengundang,
+      bonus_pengundang: bonusPengundang,
+      bonus_diundang: bonusDiundang,
+      status: 'selesai',
+      attribution_id: attributionId,
+    },
+    pesan: `Referral berhasil. Bonus Rp${bonusDiundang.toLocaleString('id-ID')} masuk ke saldomu.`,
+  };
+}
+
 /** Cek admin key dari header x-admin-key atau query ?key= */
 function isAdmin(req, env) {
   const url = new URL(req.url);
@@ -739,6 +949,12 @@ export default {
     // jaring pengaman pembayaran: tanya penyedia soal top up QRIS/e-wallet
     // yang masih 'menunggu' (webhook bisa telat/hilang)
     ctx.waitUntil(pollPembayaran(env));
+    // Tiket mentah tidak disimpan; baris hash yang kedaluwarsa dibersihkan
+    // setelah masa audit 30 hari agar tabel funnel tidak tumbuh tanpa batas.
+    ctx.waitUntil(env.DB.batch([
+      env.DB.prepare("UPDATE referral_attribution SET status='kedaluwarsa' WHERE claimed_by IS NULL AND status NOT IN ('ditolak','kedaluwarsa') AND datetime(expires_at)<datetime('now')"),
+      env.DB.prepare("DELETE FROM referral_attribution WHERE claimed_by IS NULL AND datetime(expires_at)<datetime('now','-30 days')"),
+    ]).catch(() => {}));
     // cadangan otomatis sekali sehari pada jam 19 UTC (dini hari WIB)
     if (new Date().getUTCHours() === 19) {
       ctx.waitUntil((async () => {
@@ -757,7 +973,7 @@ export default {
         status: 204,
         headers: {
           'Access-Control-Allow-Origin': env?.ALLOW_ORIGIN || '*',
-          'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-admin-key, x-xy-device',
+          'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-admin-key, x-xy-device, x-xy-device-kind, x-xy-device-model, x-xy-referral-ticket',
           'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS',
           'Access-Control-Max-Age': '86400',
           'Cache-Control': 'no-store',
@@ -2378,21 +2594,34 @@ async function statistikPublik(env) {
           return json({ ok: true }, 200, env);
         }
 
-        // ---- ringkasan referral ----
+        // ---- funnel referral: klik -> unduh -> terpasang -> diklaim ----
         if (a === 'referral' && req.method === 'GET') {
           const { results } = await env.DB.prepare(
-            `SELECT r.*, p.nama AS nama_pengundang, d.nama AS nama_diundang
-             FROM referral r
-             LEFT JOIN users p ON p.id = r.pengundang
-             LEFT JOIN users d ON d.id = r.diundang
-             ORDER BY r.dibuat DESC LIMIT 100`
+            `SELECT a.id, a.kode, p.nama AS nama_pengundang, d.nama AS nama_diundang,
+                    a.status, COALESCE(r.bonus_pengundang,0) AS bonus_pengundang,
+                    COALESCE(r.bonus_diundang,0) AS bonus_diundang,
+                    a.clicked_at AS dibuat, a.downloaded_at, a.download_variant,
+                    a.installed_at, a.package_installed_at, a.claimed_at AS selesai,
+                    COALESCE(r.sumber,'install_ticket') AS sumber,
+                    COALESCE(r.risiko,a.risiko) AS risiko,
+                    CASE WHEN a.device_id IS NULL THEN NULL ELSE substr(a.device_id,1,10)||'…' END AS perangkat
+               FROM referral_attribution a
+               JOIN users p ON p.id=a.pengundang
+               LEFT JOIN referral r ON r.attribution_id=a.id
+               LEFT JOIN users d ON d.id=a.claimed_by
+              UNION ALL
+             SELECT r.id, COALESCE(r.kode,'-'), p.nama, d.nama, r.status,
+                    r.bonus_pengundang, r.bonus_diundang, r.dibuat,
+                    NULL, NULL, NULL, NULL, r.selesai, COALESCE(r.sumber,'legacy'),
+                    r.risiko,
+                    CASE WHEN r.device_id IS NULL THEN NULL ELSE substr(r.device_id,1,10)||'…' END
+               FROM referral r
+               JOIN users p ON p.id=r.pengundang
+               LEFT JOIN users d ON d.id=r.diundang
+              WHERE r.attribution_id IS NULL
+              ORDER BY dibuat DESC LIMIT 500`
           ).all();
-          const teratas = await env.DB.prepare(
-            `SELECT u.nama, u.kode_referral, COUNT(r.id) jumlah, SUM(r.bonus_pengundang) bonus
-             FROM referral r JOIN users u ON u.id = r.pengundang
-             GROUP BY r.pengundang ORDER BY jumlah DESC LIMIT 10`
-          ).all();
-          return json({ daftar: results, teratas: teratas.results }, 200, env);
+          return json(results, 200, env);
         }
 
         // ---- analitik kunjungan situs ----
@@ -3170,6 +3399,149 @@ if (a.startsWith('peran/') && req.method === 'DELETE') {
 
       }
 
+      // ---------------- REFERRAL INSTALL ATTRIBUTION (publik) ----------------
+      // 1) Landing membuat capability ticket dari kode pengundang.
+      if (p === 'referral/klik' && req.method === 'POST') {
+        if (!await referralInstallAktif(env)) {
+          return err('Aktivasi referral instalasi menunggu APK terbaru. Unduhan biasa tetap tersedia.', 503, env);
+        }
+        const b = await req.json().catch(() => ({}));
+        const kode = String(b.kode || '').trim().toUpperCase();
+        if (!/^[A-Z0-9]{6,16}$/.test(kode)) return err('Kode referral tidak valid.', 400, env);
+        await requireRate(env, 'referral-click-ip', ip, 24, 86400);
+
+        const pengundang = await env.DB.prepare(
+          'SELECT id,nama,kode_referral,diblokir,deleted_at FROM users WHERE kode_referral=?'
+        ).bind(kode).first();
+        if (!pengundang || pengundang.deleted_at || Number(pengundang.diblokir) === 1) {
+          return err('Kode referral tidak ditemukan atau tidak aktif.', 404, env);
+        }
+
+        const raw = tiketReferralAcak();
+        const id = await hashTiketReferral(env, raw);
+        const now = new Date();
+        const expires = new Date(now.getTime() + 7 * 86400_000).toISOString();
+        const ipHash = await securityHash(env, 'referral-ip', ip);
+        const uaHash = await securityHash(env, 'referral-ua', req.headers.get('user-agent') || 'tanpa-ua');
+        await env.DB.prepare(
+          `INSERT INTO referral_attribution
+           (id,pengundang,kode,status,clicked_at,expires_at,click_ip_hash,click_ua_hash)
+           VALUES (?,?,?,'diklik',?,?,?,?)`
+        ).bind(id, pengundang.id, kode, now.toISOString(), expires, ipHash, uaHash).run();
+        ctx.waitUntil(env.DB.batch([
+          env.DB.prepare("UPDATE referral_attribution SET status='kedaluwarsa' WHERE claimed_by IS NULL AND status NOT IN ('ditolak','kedaluwarsa') AND datetime(expires_at)<datetime('now')"),
+          env.DB.prepare("DELETE FROM referral_attribution WHERE claimed_by IS NULL AND datetime(expires_at)<datetime('now','-30 days')"),
+        ]).catch(() => {}));
+
+        return json({
+          ticket: raw,
+          kode,
+          kedaluwarsa: expires,
+          pengundang: String(pengundang.nama || 'Teman').split(/\s+/)[0],
+        }, 201, env);
+      }
+
+      // 2) Unduhan hanya ditandai bila nama APK memang ada di rilis aktif.
+      if (p === 'referral/unduh' && req.method === 'GET') {
+        const raw = String(url.searchParams.get('ticket') || '').trim().toLowerCase();
+        const nama = String(url.searchParams.get('file') || '').trim();
+        if (!TIKET_REFERRAL_RE.test(raw) || !/^[A-Za-z0-9._-]+\.apk$/.test(nama)) {
+          return err('Tautan unduhan referral tidak valid.', 400, env);
+        }
+        await requireRate(env, 'referral-download-ip', ip, 40, 3600);
+        const id = await hashTiketReferral(env, raw);
+        const attr = await env.DB.prepare('SELECT * FROM referral_attribution WHERE id=?').bind(id).first();
+        if (!attr) return err('Tiket undangan tidak ditemukan.', 404, env);
+        if (attr.claimed_by || attr.status === 'ditolak') return err('Tiket undangan tidak dapat dipakai.', 409, env);
+        if (waktuReferral(attr.expires_at) <= Date.now()) {
+          await env.DB.prepare("UPDATE referral_attribution SET status='kedaluwarsa' WHERE id=? AND claimed_by IS NULL").bind(id).run();
+          return err('Tiket undangan sudah kedaluwarsa.', 410, env);
+        }
+
+        const info = await infoRilis(env, ctx);
+        const berkas = (info.berkas || []).find((x) => x.nama === nama);
+        if (!berkas) return err('Berkas APK tidak ada pada rilis aktif.', 404, env);
+        const now = new Date().toISOString();
+        await env.DB.prepare(
+          `UPDATE referral_attribution
+              SET downloaded_at=COALESCE(downloaded_at,?), download_variant=COALESCE(download_variant,?),
+                  status=CASE WHEN status='diklik' THEN 'diunduh' ELSE status END
+            WHERE id=? AND claimed_by IS NULL`
+        ).bind(now, String(berkas.abi || nama).slice(0, 80), id).run();
+        return new Response(null, {
+          status: 302,
+          headers: {
+            ...securityHeaders(env),
+            Location: berkas.url,
+            'Referrer-Policy': 'no-referrer',
+            'Cache-Control': 'no-store',
+          },
+        });
+      }
+
+      // 3) Activity khusus menyimpan ticket; aplikasi mengikatnya ke identitas
+      // instalasi Android sebelum akun boleh mengklaim reward.
+      if (p === 'referral/buka' && req.method === 'POST') {
+        const b = await req.json().catch(() => ({}));
+        const raw = tiketReferralDari(b, req);
+        if (!raw) return err('Tiket undangan tidak valid.', 400, env);
+        await requireRate(env, 'referral-open-ip', ip, 30, 3600);
+        const deviceId = await deviceFromRequest(env, req, { required: true });
+        const id = await hashTiketReferral(env, raw);
+        const attr = await env.DB.prepare('SELECT * FROM referral_attribution WHERE id=?').bind(id).first();
+        if (!attr) return err('Tiket undangan tidak ditemukan.', 404, env);
+        if (attr.status === 'ditolak') return err('Tiket undangan telah ditolak oleh pemeriksaan keamanan.', 409, env);
+        if (waktuReferral(attr.expires_at) <= Date.now()) {
+          await env.DB.prepare("UPDATE referral_attribution SET status='kedaluwarsa' WHERE id=? AND claimed_by IS NULL").bind(id).run();
+          return err('Tiket undangan sudah kedaluwarsa.', 410, env);
+        }
+        if (!attr.downloaded_at) return err('Unduh APK dari tautan ini sebelum membuka aplikasi.', 409, env);
+        if (attr.claimed_by && attr.device_id !== deviceId) return err('Tiket undangan sudah digunakan.', 409, env);
+        if (attr.device_id && attr.device_id !== deviceId) {
+          ctx.waitUntil(auditSecurity(env, 'referral_device_mismatch', id, deviceId, '/api/referral/buka'));
+          return err('Tiket ini sudah terikat ke perangkat lain.', 403, env);
+        }
+
+        // PackageManager.firstInstallTime membedakan pemasangan baru dari app
+        // yang sudah ada sebelum tautan diklik. Nilai tetap divalidasi server;
+        // toleransi 10 menit mengakomodasi jam OEM yang sedikit meleset.
+        const packageInstalledMs = Number(b.package_installed_at);
+        const packageUpdatedMs = Number(b.package_updated_at || b.package_installed_at);
+        const toleransiJam = 10 * 60_000;
+        const clickMs = waktuReferral(attr.clicked_at);
+        const downloadMs = waktuReferral(attr.downloaded_at);
+        if (!Number.isFinite(packageInstalledMs) || packageInstalledMs <= 0
+            || packageInstalledMs < clickMs - toleransiJam
+            || packageInstalledMs < downloadMs - toleransiJam
+            || packageInstalledMs > Date.now() + toleransiJam) {
+          await env.DB.prepare(
+            "UPDATE referral_attribution SET status='ditolak',risiko='aplikasi_sudah_terpasang' WHERE id=? AND claimed_by IS NULL"
+          ).bind(id).run();
+          ctx.waitUntil(auditSecurity(env, 'referral_install_time_invalid', id, String(packageInstalledMs), '/api/referral/buka'));
+          return err('Bonus memerlukan pemasangan baru setelah tautan undangan dibuka dan APK diunduh.', 409, env);
+        }
+
+        const now = new Date().toISOString();
+        const packageInstalledAt = new Date(packageInstalledMs).toISOString();
+        const packageUpdatedAt = Number.isFinite(packageUpdatedMs) && packageUpdatedMs > 0
+          ? new Date(Math.max(packageInstalledMs, Math.min(packageUpdatedMs, Date.now() + toleransiJam))).toISOString()
+          : packageInstalledAt;
+        await env.DB.prepare(
+          `UPDATE referral_attribution
+              SET device_id=COALESCE(device_id,?), installed_at=COALESCE(installed_at,?),
+                  package_installed_at=COALESCE(package_installed_at,?),
+                  package_updated_at=COALESCE(package_updated_at,?),
+                  status=CASE WHEN claimed_by IS NULL THEN 'terpasang' ELSE status END
+            WHERE id=? AND (device_id IS NULL OR device_id=?)`
+        ).bind(deviceId, now, packageInstalledAt, packageUpdatedAt, id, deviceId).run();
+        return json({
+          ok: true,
+          kode: attr.kode,
+          status: attr.claimed_by ? 'diklaim' : 'terpasang',
+          kedaluwarsa: attr.expires_at,
+        }, 200, env);
+      }
+
       // ---- ulasan sebuah produk ----
       if (p.startsWith('akun/produk/') && p.endsWith('/ulasan') && req.method === 'GET') {
         const pid = p.split('/')[2];
@@ -3721,64 +4093,36 @@ if (a.startsWith('peran/') && req.method === 'DELETE') {
         const total = results.filter((r) => r.status === 'selesai')
           .reduce((a, r) => a + (r.bonus_pengundang || 0), 0);
 
+        const atribusi = me.dv ? await env.DB.prepare(
+          `SELECT kode,status,clicked_at,downloaded_at,installed_at,expires_at,risiko
+             FROM referral_attribution
+            WHERE device_id=? AND claimed_by IS NULL
+            ORDER BY clicked_at DESC LIMIT 1`
+        ).bind(me.dv).first() : null;
+
         return json({
+          aktif: await referralInstallAktif(env),
           kode: u.kode_referral,
           tautan: `${env.WEB_URL || 'https://xycloud.my.id'}/unduh?ref=${u.kode_referral}`,
-          bonusPengundang: Number(env.BONUS_REFERRAL || 10000),
-          bonusDiundang: Number(env.BONUS_DIUNDANG || 5000),
+          bonusPengundang: Number(env.BONUS_REFERRAL_PENGUNDANG || env.BONUS_REFERRAL || 10000),
+          bonusDiundang: Number(env.BONUS_REFERRAL_DIUNDANG || env.BONUS_DIUNDANG || 5000),
           totalBonus: total,
+          atribusi,
           daftar: results,
         }, 200, env);
       }
 
-      // ---- pakai kode referral orang lain ----
-      if (p === 'referral/pakai' && req.method === 'POST') {
-        const { kode } = await req.json().catch(() => ({}));
-        const k = String(kode || '').trim().toUpperCase();
-        if (!k) return err('Kode referral kosong', 400, env);
-
-        const aku = await env.DB.prepare('SELECT diundang_oleh, created_at FROM users WHERE id = ?')
-          .bind(me.sub).first();
-        if (aku?.diundang_oleh) return err('Kamu sudah pernah memakai kode referral', 409, env);
-
-        const pengundang = await env.DB.prepare('SELECT id, nama FROM users WHERE kode_referral = ?')
-          .bind(k).first();
-        if (!pengundang) return err('Kode referral tidak ditemukan', 404, env);
-        if (pengundang.id === me.sub) return err('Tidak bisa memakai kodemu sendiri', 400, env);
-
-        const bonusA = Number(env.BONUS_REFERRAL || 10000);
-        const bonusB = Number(env.BONUS_DIUNDANG || 5000);
-
-        await env.DB.batch([
-          env.DB.prepare('UPDATE users SET diundang_oleh = ? WHERE id = ?').bind(pengundang.id, me.sub),
-          env.DB.prepare('UPDATE users SET saldo = saldo + ? WHERE id = ?').bind(bonusA, pengundang.id),
-          env.DB.prepare('UPDATE users SET saldo = saldo + ? WHERE id = ?').bind(bonusB, me.sub),
-          env.DB.prepare('INSERT INTO transaksi (id,user_id,judul,tipe,nominal) VALUES (?,?,?,?,?)')
-            .bind(uid('t_'), pengundang.id, 'Bonus mengundang teman', 'topup', bonusA),
-          env.DB.prepare('INSERT INTO transaksi (id,user_id,judul,tipe,nominal) VALUES (?,?,?,?,?)')
-            .bind(uid('t_'), me.sub, 'Bonus memakai kode referral', 'topup', bonusB),
-          env.DB.prepare(
-            "INSERT INTO referral (id,pengundang,diundang,bonus_pengundang,bonus_diundang,status,selesai) VALUES (?,?,?,?,?,'selesai',?)"
-          ).bind(uid('rf_'), pengundang.id, me.sub, bonusA, bonusB, new Date().toISOString()),
-        ]);
-
-        ctx.waitUntil(buatNotif(env, ctx, {
-          userId: pengundang.id,
-          jenis: 'wallet',
-          judul: 'Bonus referral masuk',
-          pesan: `Temanmu memakai kodemu. Saldo bertambah Rp${bonusA.toLocaleString('id-ID')}.`,
-          aktor: 'XyCloudStore',
-        }));
-
-        const saldoBaru = await env.DB.prepare('SELECT saldo FROM users WHERE id = ?').bind(me.sub).first();
-        ctx.waitUntil(push(env, room, 'wallet.update', { saldo: saldoBaru?.saldo ?? 0 }));
-
-        return json({
-          ok: true,
-          bonus: bonusB,
-          pengundang: pengundang.nama,
-          saldo: saldoBaru?.saldo ?? 0,
-        }, 200, env);
+      // Kode saja tidak lagi menghasilkan saldo. Kedua nama endpoint memakai
+      // validator tiket install yang sama agar klien lama gagal dengan aman.
+      if ((p === 'referral/atribusi' || p === 'referral/pakai') && req.method === 'POST') {
+        await requireRate(env, 'referral-claim-user', me.sub, 12, 3600);
+        const b = await req.json().catch(() => ({}));
+        if (!tiketReferralDari(b, req) && !await referralInstallAktif(env)) {
+          return err('Referral baru dipause sampai APK verifikasi instalasi terbaru dirilis.', 503, env);
+        }
+        const hasil = await klaimAtribusiReferral(env, ctx, req, me.sub, b);
+        const saldo = await env.DB.prepare('SELECT saldo FROM users WHERE id=?').bind(me.sub).first();
+        return json({ ...hasil, bonus: hasil.referral?.bonus_diundang || 0, saldo: saldo?.saldo || 0 }, 200, env);
       }
 
       // ---- favorit produk ----

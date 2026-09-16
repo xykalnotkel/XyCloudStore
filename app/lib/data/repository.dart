@@ -4,6 +4,7 @@ import '../core/config.dart';
 import '../models/models.dart';
 import 'api_client.dart';
 import 'mock_data.dart';
+import 'referral_attribution.dart';
 
 /// Dilempar ketika akun ada tetapi emailnya belum diverifikasi.
 class PerluVerifikasi implements Exception {
@@ -274,7 +275,10 @@ class RemoteRepository implements XyRepository {
 
   @override
   Future<Map<String, dynamic>> pakaiReferral(String kode) async =>
-      Map<String, dynamic>.from(await api.post('/referral/pakai', {'kode': kode}));
+      Map<String, dynamic>.from(await api.post('/referral/pakai', {
+        'kode': kode,
+        if (ReferralAttribution.ticket != null) 'ticket': ReferralAttribution.ticket,
+      }));
 
   @override
   Future<InfoBlokir> infoBlokir() async => InfoBlokir.fromJson(

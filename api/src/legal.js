@@ -45,7 +45,7 @@ const PRIVASI = [
    'Nama, alamat email, nomor WhatsApp, dan foto profil bila kamu masuk memakai Google. ' +
    'Kami juga menyimpan riwayat pesanan, transaksi saldo, bukti transfer, ulasan, dan percakapan dengan admin.'],
   ['Perangkat dan Anti-Penyalahgunaan',
-   'Identitas perangkat Android yang dipseudonimkan atau identitas instalasi/browser, model perangkat, serta hash alamat jaringan dipakai untuk membatasi pendaftaran dan OTP. Kami tidak mengumpulkan IMEI atau advertising ID untuk fitur ini. Penghitung pendaftaran dapat tetap disimpan tanpa email setelah akun dihapus untuk mencegah pendaftaran berulang. Catatan kejadian keamanan disimpan hingga 30 hari.'],
+   'Identitas perangkat Android yang dipseudonimkan atau identitas instalasi/browser, model perangkat, serta hash alamat jaringan dipakai untuk membatasi pendaftaran dan OTP. Untuk referral, kami mencatat hash tiket, tahap klik/unduh/buka, varian APK, dan waktu pemasangan paket Android guna memastikan bonus berasal dari pemasangan baru; tiket mentah tidak disimpan di basis data. Kami tidak mengumpulkan IMEI atau advertising ID untuk fitur ini. Penghitung pendaftaran dapat tetap disimpan tanpa email setelah akun dihapus untuk mencegah pendaftaran berulang. Catatan kejadian keamanan dan atribusi gagal dibersihkan sesuai masa audit yang berlaku.'],
   ['Cara Kami Memakainya',
    'Data dipakai untuk memproses pesanan, memverifikasi pembayaran, mengirim kredensial akun, menjawab pertanyaanmu, ' +
    'serta mengirim pemberitahuan penting mengenai pesanan. Kami tidak menjual data pribadi kepada siapa pun.'],

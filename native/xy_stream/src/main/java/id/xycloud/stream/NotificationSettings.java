@@ -46,6 +46,29 @@ public final class NotificationSettings {
                 Map<String,Object> result=new HashMap<>();result.put("id",id.toString());result.put("kind",kind);result.put("model",Build.MANUFACTURER+" "+Build.MODEL);return result;
             }catch(Exception e){throw new IllegalStateException("Identitas perangkat belum tersedia");}
         }
+        if(method.equals("referralAttribution")){
+            android.content.SharedPreferences sp=activity.getSharedPreferences(ReferralActivity.PREFS,0);
+            String ticket=sp.getString(ReferralActivity.KEY_TICKET,"");
+            long captured=sp.getLong(ReferralActivity.KEY_CAPTURED_AT,0L);
+            // Server tetap sumber kebenaran expiry; pembersihan lokal ini hanya
+            // mencegah capability basi tinggal tanpa batas di perangkat.
+            if(captured<=0L||System.currentTimeMillis()-captured>8L*24L*60L*60L*1000L){
+                sp.edit().clear().apply();return null;
+            }
+            if(ticket==null||!ticket.matches("^[a-f0-9]{64}$"))return null;
+            Map<String,Object> result=new HashMap<>();
+            result.put("ticket",ticket);result.put("code",sp.getString(ReferralActivity.KEY_CODE,""));
+            result.put("capturedAt",captured);
+            try {
+                android.content.pm.PackageInfo pkg=activity.getPackageManager().getPackageInfo(activity.getPackageName(),0);
+                result.put("packageInstalledAt",pkg.firstInstallTime);
+                result.put("packageUpdatedAt",pkg.lastUpdateTime);
+            }catch(Exception e){throw new IllegalStateException("Waktu pemasangan aplikasi tidak tersedia");}
+            return result;
+        }
+        if(method.equals("clearReferralAttribution")){
+            activity.getSharedPreferences(ReferralActivity.PREFS,0).edit().clear().commit();return null;
+        }
         if(method.equals("notificationStatus")){
             ensureChannels();List<Map<String,Object>> out=new ArrayList<>();
             NotificationManager manager=(NotificationManager)activity.getSystemService(Activity.NOTIFICATION_SERVICE);

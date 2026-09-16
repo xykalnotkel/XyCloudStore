@@ -11,6 +11,7 @@ import '../data/lapor_galat.dart';
 import '../data/login_sosial.dart';
 import '../data/push_service.dart';
 import '../data/realtime_service.dart';
+import '../data/referral_attribution.dart';
 import '../data/repository.dart';
 import '../models/models.dart';
 import '../models/stiker.dart';
@@ -18,7 +19,7 @@ import '../models/promosi.dart';
 import '../data/stiker_store.dart';
 
 /// State global aplikasi + jembatan ke channel realtime.
-class AppState extends ChangeNotifier {
+class AppState extends ChangeNotifier with WidgetsBindingObserver {
   AppState({bool mulaiOtomatis = true}) {
     _api = ApiClient();
     _api.onPerawatan = (pesan) {
@@ -32,13 +33,24 @@ class AppState extends ChangeNotifier {
     // Mode non-otomatis dipakai widget test/screenshot agar tidak menyalakan
     // jaringan, plugin native, realtime, atau pemulihan sesi di latar belakang.
     if (!mulaiOtomatis) return;
+    WidgetsBinding.instance.addObserver(this);
     unawaited(muatKonfigurasi());
     unawaited(muatPromosi());
     unawaited(muatTema());
     unawaited(muatPengaturan());
     unawaited(muatKunciBiometrik());
     unawaited(periksaPembaruan());
+    unawaited(konfirmasiInstalReferral());
     unawaited(pulihkanSesi());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // ReferralActivity bisa membangunkan MainActivity yang masih hidup.
+      // Baca ulang SharedPreferences native, bukan menunggu restart aplikasi.
+      unawaited(sinkronAtribusiReferral());
+    }
   }
 
   // ================= passkey / sidik jari (Batch I) =================
@@ -226,6 +238,7 @@ class AppState extends ChangeNotifier {
       if (t == null || t.isEmpty) return;
       _repo.pasangToken(t);
       user = await _repo.profilSaya();
+      await sinkronAtribusiReferral();
       await muatSemua();
       _mulaiRealtime();
       _daftarkanPush();
@@ -343,6 +356,7 @@ class AppState extends ChangeNotifier {
     try {
       user = await _repo.login(email, password);
       await _simpanSesi();
+      await sinkronAtribusiReferral();
       await muatSemua();
       _mulaiRealtime();
       _daftarkanPush();
@@ -395,6 +409,7 @@ class AppState extends ChangeNotifier {
       user = await _repo.verifikasiEmail(email, kode);
       emailMenungguVerifikasi = null;
       await _simpanSesi();
+      await sinkronAtribusiReferral();
       await muatSemua();
       _mulaiRealtime();
       _daftarkanPush();
@@ -438,6 +453,7 @@ class AppState extends ChangeNotifier {
     try {
       user = await _repo.resetPassword(email: email, kode: kode, password: password);
       await _simpanSesi();
+      await sinkronAtribusiReferral();
       await muatSemua();
       _mulaiRealtime();
       _daftarkanPush();
@@ -493,6 +509,7 @@ class AppState extends ChangeNotifier {
       _repo.pasangToken(token);
       await Prefs.simpanToken(token);
       user = await _repo.profilSaya();
+      await sinkronAtribusiReferral();
       await muatSemua();
       _mulaiRealtime();
       _daftarkanPush();
@@ -516,6 +533,7 @@ class AppState extends ChangeNotifier {
       if (idToken != null) {
         user = await _repo.masukGoogleNative(idToken);
         await _simpanSesi();
+        await sinkronAtribusiReferral();
         await muatSemua();
         _mulaiRealtime();
         _daftarkanPush();
@@ -526,6 +544,7 @@ class AppState extends ChangeNotifier {
       _repo.pasangToken(token);
       await Prefs.simpanToken(token);
       user = await _repo.profilSaya();
+      await sinkronAtribusiReferral();
       await muatSemua();
       _mulaiRealtime();
       _daftarkanPush();
@@ -685,18 +704,109 @@ class AppState extends ChangeNotifier {
   }
 
   // ================= undang teman =================
+  Map<String, dynamic>? atribusiReferral;
+  String? pesanAtribusiReferral;
+  Future<Map<String, dynamic>?>? _konfirmasiReferralAktif;
+
+  bool _galatReferralTerminal(ApiException e) {
+    if (e.status == 404 || e.status == 410 || e.code == 'DEVICE_BLOCKED') return true;
+    return RegExp(
+      r'tiket.+(?:sudah dipakai|sudah digunakan|perangkat lain|telah ditolak)|terikat ke perangkat lain|pemasangan baru|diri sendiri|pengundang.+tidak dapat|pengundang dan akun baru.+perangkat yang sama',
+      caseSensitive: false,
+    ).hasMatch(e.pesan);
+  }
+
+  /// Ikat capability ticket yang disimpan Activity native ke pseudonymous
+  /// device identity. Ini boleh dilakukan sebelum pengguna masuk.
+  Future<Map<String, dynamic>?> konfirmasiInstalReferral() async {
+    final sedang = _konfirmasiReferralAktif;
+    if (sedang != null) return sedang;
+    final pekerjaan = _jalankanKonfirmasiInstalReferral();
+    _konfirmasiReferralAktif = pekerjaan;
+    try {
+      return await pekerjaan;
+    } finally {
+      if (identical(_konfirmasiReferralAktif, pekerjaan)) {
+        _konfirmasiReferralAktif = null;
+      }
+    }
+  }
+
+  Future<Map<String, dynamic>?> _jalankanKonfirmasiInstalReferral() async {
+    await ReferralAttribution.prepare();
+    final ticket = ReferralAttribution.ticket;
+    if (ticket == null) return null;
+    try {
+      final d = Map<String, dynamic>.from(await _api.post('/referral/buka', {
+        'ticket': ticket,
+        'package_installed_at': ReferralAttribution.packageInstalledAt,
+        'package_updated_at': ReferralAttribution.packageUpdatedAt,
+      }));
+      atribusiReferral = d;
+      pesanAtribusiReferral = d['status'] == 'diklaim'
+          ? 'Undangan ini sudah aktif.'
+          : 'Instalasi dari tautan undangan sudah terverifikasi.';
+      notifyListeners();
+      return d;
+    } on ApiException catch (e) {
+      atribusiReferral = {'ok': false, 'status': 'gagal'};
+      pesanAtribusiReferral = e.pesan;
+      if (_galatReferralTerminal(e)) await ReferralAttribution.clear();
+      notifyListeners();
+      return null;
+    } catch (_) {
+      // Jaringan boleh dicoba lagi; capability jangan dihapus.
+      return null;
+    }
+  }
+
+  /// Setelah sesi tersedia, klaim hanya lewat endpoint install-attribution.
+  /// Return null menjaga kegagalan referral agar tidak menggagalkan login.
+  Future<Map<String, dynamic>?> sinkronAtribusiReferral({String? kode}) async {
+    await konfirmasiInstalReferral();
+    final ticket = ReferralAttribution.ticket;
+    if (ticket == null || user == null) return atribusiReferral;
+    try {
+      final d = Map<String, dynamic>.from(await _api.post('/referral/atribusi', {
+        'ticket': ticket,
+        if ((kode ?? ReferralAttribution.kode)?.isNotEmpty == true)
+          'kode': (kode ?? ReferralAttribution.kode)!.trim().toUpperCase(),
+      }));
+      atribusiReferral = d;
+      pesanAtribusiReferral = '${d['pesan'] ?? 'Bonus referral berhasil diaktifkan.'}';
+      await ReferralAttribution.clear();
+      user = await _repo.profilSaya();
+      notifyListeners();
+      return d;
+    } on ApiException catch (e) {
+      atribusiReferral = {'ok': false, 'status': 'gagal'};
+      pesanAtribusiReferral = e.pesan;
+      if (_galatReferralTerminal(e)) await ReferralAttribution.clear();
+      notifyListeners();
+      return null;
+    } catch (_) {
+      // Koneksi gagal: pertahankan ticket untuk retry otomatis berikutnya.
+      return null;
+    }
+  }
+
   Future<Map<String, dynamic>> dataReferral() => _repo.dataReferral();
 
   Future<Map<String, dynamic>?> pakaiReferral(String kode) async {
     error = null;
-    try {
-      final d = await _repo.pakaiReferral(kode);
-      await muatProfilRingkas();
-      return d;
-    } catch (e) {
-      error = _pesan(e);
-      return null;
+    if (XyConfig.useMock) {
+      try {
+        final d = await _repo.pakaiReferral(kode);
+        await muatProfilRingkas();
+        return d;
+      } catch (e) {
+        error = _pesan(e);
+        return null;
+      }
     }
+    final d = await sinkronAtribusiReferral(kode: kode);
+    if (d == null) error = pesanAtribusiReferral ?? 'Buka tautan undangan dan pasang aplikasi terlebih dahulu.';
+    return d;
   }
 
   // ================= favorit produk =================
@@ -1609,6 +1719,7 @@ class AppState extends ChangeNotifier {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _rtSub?.cancel();
     _rtState?.cancel();
     _rt?.dispose();

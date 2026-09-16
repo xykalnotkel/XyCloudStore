@@ -6,7 +6,7 @@ Yang ditambahkan:
   - izin internet
   - izin REQUEST_INSTALL_PACKAGES (untuk update via DownloadManager)
   - izin POST_NOTIFICATIONS (Android 13+ untuk progress notif)
-  - activity penangkap balikan login sosial (skema xycloudstore://)
+  - activity penangkap balikan login sosial (khusus xycloudstore://auth)
   - daftar <queries> supaya bisa membuka WhatsApp, browser, dan email
 
 Pemakaian: python3 tools/patch_manifest.py android/app/src/main/AndroidManifest.xml
@@ -22,7 +22,7 @@ ACTIVITY_CALLBACK = """
                 <action android:name="android.intent.action.VIEW"/>
                 <category android:name="android.intent.category.DEFAULT"/>
                 <category android:name="android.intent.category.BROWSABLE"/>
-                <data android:scheme="xycloudstore"/>
+                <data android:scheme="xycloudstore" android:host="auth"/>
             </intent-filter>
         </activity>
     </application>"""
@@ -89,7 +89,14 @@ def main() -> int:
         isi = isi.replace('<application', '<application android:requestLegacyExternalStorage="true"', 1)
 
     if 'flutter_web_auth_2.CallbackActivity' not in isi:
-        isi = isi.replace('    </application>', ACTIVITY_CALLBACK, 1)
+        isi = re.sub(r'\s*</application>', '\n' + ACTIVITY_CALLBACK, isi, count=1)
+    # Manifest lama pernah menangkap seluruh scheme xycloudstore. Batasi juga
+    # input yang sudah memiliki CallbackActivity agar host referral tidak ambigu.
+    isi = re.sub(
+        r'<data\s+android:scheme="xycloudstore"(?![^>]*android:host)[^>]*/>',
+        '<data android:scheme="xycloudstore" android:host="auth"/>',
+        isi,
+    )
 
     if '<queries>' not in isi:
         isi = isi.replace('</manifest>', QUERIES, 1)

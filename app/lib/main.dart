@@ -14,6 +14,7 @@ import 'package:flutter/foundation.dart';
 import 'data/lapor_galat.dart';
 import 'data/push_service.dart';
 import 'data/device_identity.dart';
+import 'data/referral_attribution.dart';
 import 'providers/app_state.dart';
 import 'ui/screens/flow_gate.dart';
 import 'ui/screens/kunci_biometrik_screen.dart';
@@ -27,6 +28,7 @@ import 'ui/widgets/perawatan_screen.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await DeviceIdentity.prepare();
+  await ReferralAttribution.prepare();
   await initializeDateFormatting('id_ID', null);
   await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
