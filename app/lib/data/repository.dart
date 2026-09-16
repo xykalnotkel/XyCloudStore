@@ -84,7 +84,10 @@ abstract class XyRepository {
 
   // ---------- profil lengkap & dompet sosial (Batch I) ----------
   /// Unggah GIF/MP4 sebagai banner profil (server otomatis jadikan GIF).
-  Future<Map<String, dynamic>> unggahBannerMedia(String dataUri);
+  Future<Map<String, dynamic>> unggahBannerMedia(
+    String dataUri, {
+    void Function(int terkirim, int total)? onProgress,
+  });
   Future<void> hapusBannerMedia();
 
   /// Leaderboard nyata: periode 'bulan' (belanja bulan ini) / 'total'.
@@ -380,8 +383,15 @@ class RemoteRepository implements XyRepository {
 
   // ---------- Batch I ----------
   @override
-  Future<Map<String, dynamic>> unggahBannerMedia(String dataUri) async =>
-      Map<String, dynamic>.from(await api.post('/me/banner-media', {'berkas': dataUri}));
+  Future<Map<String, dynamic>> unggahBannerMedia(
+    String dataUri, {
+    void Function(int terkirim, int total)? onProgress,
+  }) async =>
+      Map<String, dynamic>.from(await api.postUnggah(
+        '/me/banner-media',
+        {'berkas': dataUri},
+        onProgress: onProgress,
+      ));
 
   @override
   Future<void> hapusBannerMedia() async => api.delete('/me/banner-media');
@@ -806,7 +816,10 @@ class MockRepository implements XyRepository {
 
   // ---------- Batch I ----------
   @override
-  Future<Map<String, dynamic>> unggahBannerMedia(String dataUri) =>
+  Future<Map<String, dynamic>> unggahBannerMedia(
+    String dataUri, {
+    void Function(int terkirim, int total)? onProgress,
+  }) =>
       _delay({'ok': true, 'banner_media': null}, 600);
 
   @override

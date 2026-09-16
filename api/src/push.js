@@ -78,7 +78,9 @@ export async function siarkanPush(env, { judul, pesan, data }) {
         headings: { en: judul, id: judul },
         contents: { en: pesan, id: pesan },
         android_accent_color: `FF${UNGU}`,
-    existing_android_channel_id: kanalPush(data?.tipe),
+        // Ikon di-override di build ke logo XyCloudStore (tools/siapkan_ikon_push.py).
+        small_icon: 'ic_stat_onesignal_default',
+        existing_android_channel_id: kanalPush(data?.tipe),
         data: data || {},
       }),
     });

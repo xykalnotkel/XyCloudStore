@@ -781,9 +781,12 @@ class AppState extends ChangeNotifier {
 
   // ================= banner media kustom (Batch I) =================
   /// Unggah GIF/MP4 jadi banner profil. Server menolak akun basic (403).
-  Future<String?> unggahBannerMedia(String dataUri) async {
+  Future<String?> unggahBannerMedia(
+    String dataUri, {
+    void Function(int terkirim, int total)? onProgress,
+  }) async {
     try {
-      await _repo.unggahBannerMedia(dataUri);
+      await _repo.unggahBannerMedia(dataUri, onProgress: onProgress);
       await muatProfilRingkas();
       return null;
     } catch (e) {

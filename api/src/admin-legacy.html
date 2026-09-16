@@ -772,9 +772,9 @@ async function balas(){
 function formLencana(id, badgeLama, tierLama){
   buka('Lencana dan Tier',`
     <div class="field"><label>Lencana khusus (kosongkan untuk melepas)</label>
-      <input id="f_badge" value="${esc(badgeLama||'')}" placeholder="XySpace, Staff, Moderator, Legend"></div>
+      <input id="f_badge" value="${esc(badgeLama||'')}" placeholder="XyVerse, Staff, Moderator, Legend"></div>
     <div class="row" style="gap:8px;flex-wrap:wrap;margin:-4px 0 14px">
-      ${['XySpace','Staff','Moderator','Legend','Early'].map(b=>
+      ${['XyVerse','Staff','Moderator','Legend','Early'].map(b=>
         `<button class="btn sm ghost" onclick="document.getElementById('f_badge').value='${b}'">${b}</button>`).join('')}
     </div>
     <div class="field"><label>Tier keanggotaan</label><select id="f_tier">

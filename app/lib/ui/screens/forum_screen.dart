@@ -415,7 +415,7 @@ class _LencanaTierState extends State<LencanaTier>
     );
   }
 }
-/// Lencana khusus pemberian admin, contohnya XySpace atau Staff.
+/// Lencana khusus pemberian admin, contohnya XyVerse atau Staff.
 class LencanaKhusus extends StatelessWidget {
   const LencanaKhusus(this.teks, {super.key});
   final String teks;

@@ -19,7 +19,7 @@ void main(){
    final bytes=Uint8List.fromList([137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82]);
    final item=await store.simpan(const Stiker(nama:'Private test label',mime:'image/png'),bytes:bytes);
    final info=await store.informasi();
-   expect(info['count'],1);expect('${info['path']}',contains('xy_stiker'));
+   expect(info['count'],1);expect('${info['path']}',contains('Stiker'));
    expect(await store.baca(item),bytes);
    final index=await File('${info['path']}/index.crypto15').readAsBytes();
    expect(utf8.decode(index,allowMalformed:true),isNot(contains('Private test label')));

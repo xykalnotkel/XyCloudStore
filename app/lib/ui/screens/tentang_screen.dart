@@ -100,10 +100,10 @@ class _TentangScreenState extends State<TentangScreen> {
           const SectionHeader('Pengembang'),
           XyCard(
             child: Column(children: [
-              Image.asset('assets/brand/xyspace_wordmark.png', height: 34),
+              Image.asset('assets/brand/xyverse_wordmark.png', height: 34),
               const SizedBox(height: 14),
                Text(
-                'XyCloudStore dikembangkan oleh XySpace, studio kecil asal Indonesia yang membangun '
+                'XyCloudStore dikembangkan oleh XyVerse, studio kecil asal Indonesia yang membangun '
                 'produk digital untuk pemain dan kreator.',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: XyTheme.of(context).muted, fontSize: 12.8, height: 1.65),
@@ -116,7 +116,7 @@ class _TentangScreenState extends State<TentangScreen> {
               Text('Dibuat dengan sepenuh hati di Indonesia',
                   style: TextStyle(color: XyTheme.of(context).muted, fontSize: 11)),
               SizedBox(height: 4),
-              Text('© 2026 XyCloudStore by XySpace', style: TextStyle(color: XyTheme.of(context).muted, fontSize: 11)),
+              Text('© 2026 XyCloudStore by XyVerse', style: TextStyle(color: XyTheme.of(context).muted, fontSize: 11)),
             ]),
           ),
         ],

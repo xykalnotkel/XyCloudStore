@@ -34,9 +34,22 @@ function muatB64(b64) {
   for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
   return u;
 }
+
+/**
+ * Sanitasi objek user sebelum dikirim ke klien: tanpa hash password,
+ * foto & banner media disamarkan jadi jalur domain sendiri (tidak ada
+ * URL Cloudinary/penyedia yang bocor). Aman dipanggil berulang.
+ */
+function bersihkanUser(env, u) {
+  if (!u) return u;
+  delete u.password;
+  if (u.foto) u.foto = samarkanGambar(env, u.foto, 's');
+  if (u.banner_media) u.banner_media = samarkanBannerMedia(env, u.banner_media);
+  return u;
+}
 import { kirimEmail } from './mail.js';
 import { kirimPush, siarkanPush } from './push.js';
-import { unggahGambar, unggahAudio, unggahVideoBanner, samarkanGambar, layaniGambar } from './upload.js';
+import { unggahGambar, unggahAudio, unggahVideoBanner, samarkanGambar, samarkanKMedia, samarkanBannerMedia, layaniGambar, layaniMedia } from './upload.js';
 import { penyediaBayar, metodeTersedia, buatTagihan, bacaPemberitahuan, cekStatusPenyedia } from './bayar.js';
 import { setelan, simpanSetelan, jalankanPemeliharaan, statistikLengkap, catatLog, pantauKesehatan } from './sistem.js';
 import { TIER, diskonTier, segarkanTier, cekVoucher, pakaiVoucher, pakaiVoucherStrict, buatCadangan } from './loyal.js';
@@ -716,7 +729,7 @@ export default {
 
     // ---------- situs publik ----------
     if (domainWeb && (path === '/' || !path.includes('.')) && !path.startsWith('/api/')
-        && !path.startsWith('/img/') && !path.startsWith('/unduh/') && !path.startsWith('/legal/')
+        && !path.startsWith('/img/') && !path.startsWith('/media/') && !path.startsWith('/unduh/') && !path.startsWith('/legal/')
         && !path.startsWith('/brand/') && !path.startsWith('/bayar/')) {
       // Mode pemeliharaan khusus situs: tampilkan halaman perawatan yang jelas,
       // bukan web.html yang gagal memuat data. Berkas /brand/ tetap boleh dimuat
@@ -875,7 +888,7 @@ footer{position:fixed;left:0;right:0;bottom:0;z-index:2;background:rgba(10,5,28,
     // Vercel deployment support dynamic + solid UI no glassmorphism
     const isAdminHost = host.startsWith('admin.');
     if (isAdminHost) {
-      if (!(path.startsWith('/api/') || path.startsWith('/ws/') || path.startsWith('/img/') || path.startsWith('/brand/') || path.startsWith('/unduh/') || path.startsWith('/legal/') || path === '/robots.txt' || path === '/sitemap.xml' || path === '/manifest.webmanifest' || path === '/sw.js' || path === '/health')) {
+      if (!(path.startsWith('/api/') || path.startsWith('/ws/') || path.startsWith('/img/') || path.startsWith('/media/') || path.startsWith('/brand/') || path.startsWith('/unduh/') || path.startsWith('/legal/') || path === '/robots.txt' || path === '/sitemap.xml' || path === '/manifest.webmanifest' || path === '/sw.js' || path === '/health')) {
         try {
           // coba Vercel dulu (dynamic), fallback ke Pages static
           const targets = [
@@ -1058,6 +1071,7 @@ ${halaman.map(([u, p2, f]) => `  <url>
     }
 
     if (path.startsWith('/img/')) return layaniGambar(env, path, req,ctx);
+    if (path.startsWith('/media/')) return layaniMedia(env, path.slice('/media/'.length), req, ctx);
 
     if (path === '/brand/og.png') {
       return new Response(OG_PNG, {
@@ -1430,7 +1444,7 @@ async function statistikPublik(env) {
 
         const u = await akunSosial(env, ctx, prof, 'google',deviceId,req);
         const token = await issueUserToken(env,u,typeof deviceId==='undefined'?null:deviceId);
-        delete u.password;
+        bersihkanUser(env, u);
         return json({ token, user: u }, 200, env);
       }
 
@@ -1516,7 +1530,7 @@ async function statistikPublik(env) {
         }
 
         const token = await issueUserToken(env,u,typeof deviceId==='undefined'?null:deviceId);
-        delete u.password;
+        bersihkanUser(env, u);
         return json({ token, user: u }, 200, env);
       }
 
@@ -1595,7 +1609,7 @@ async function statistikPublik(env) {
         ctx.waitUntil(kirimEmail(env, { to: email, template: 'selamatDatang', data: { nama: u.nama } }));
 
         const token = await issueUserToken(env,u,typeof deviceId==='undefined'?null:deviceId);
-        delete u.password;
+        bersihkanUser(env, u);
         u.email_verified = 1;
         return json({ token, user: u }, 200, env);
       }
@@ -1652,7 +1666,7 @@ async function statistikPublik(env) {
 
         u.session_version=(u.session_version||0)+1;
         const token = await issueUserToken(env,u,typeof deviceId==='undefined'?null:deviceId);
-        delete u.password;
+        bersihkanUser(env, u);
         u.email_verified = 1;
         return json({ token, user: u }, 200, env);
       }
@@ -1712,7 +1726,7 @@ async function statistikPublik(env) {
         if(a==='media'&&req.method==='GET'){
           if(admin.peran!=='pemilik')return err('Hanya pemilik',403,env);
           const {results}=await env.DB.prepare('SELECT * FROM media_assets ORDER BY created_at DESC LIMIT 200').all();
-          return json(results.map(m=>({...m,preview:samarkanGambar(env,m.url,'t')})),200,env);
+          return json(results.map(m=>({...m,preview:samarkanKMedia(env,m.url,'t'),url_proxy:samarkanKMedia(env,m.url,'m')})),200,env);
         }
 
         if (a === 'stats' && req.method === 'GET') {
@@ -3272,6 +3286,8 @@ if (a.startsWith('peran/') && req.method === 'DELETE') {
         ]);
         return json({
           ...u,
+          foto: u.foto ? samarkanGambar(env, u.foto, 's') : null,
+          banner_media: samarkanBannerMedia(env, u.banner_media),
           pengikut: pengikut.c, mengikuti: mengikuti.c, posting: posting.c,
           sayaIkuti: Boolean(sayaIkuti), saya: idU === me.sub,
         }, 200, env);
@@ -3396,7 +3412,7 @@ if (a.startsWith('peran/') && req.method === 'DELETE') {
         await pulihkanBlokirKadaluarsa(env, me.sub);
         const u = await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(me.sub).first();
         if (!u) return err('Akun tidak ditemukan', 404, env);
-        delete u.password;
+        bersihkanUser(env, u);
         // Hash PIN transfer tidak pernah dikirim; app hanya butuh tahu ada/tidak.
         u.pin_transfer_aktif = u.pin_transfer ? 1 : 0;
         delete u.pin_transfer;
@@ -3586,7 +3602,7 @@ if (a.startsWith('peran/') && req.method === 'DELETE') {
           }
         };
         const profil = await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(me.sub).first();
-        if (profil) delete profil.password;
+        if (profil) bersihkanUser(env, profil);
 
         const data = {
           diambil: new Date().toISOString(),
@@ -3901,16 +3917,17 @@ if (a.startsWith('peran/') && req.method === 'DELETE') {
         }
 
         const u = await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(me.sub).first();
-        delete u.password;
+        bersihkanUser(env, u);
         u.pin_transfer_aktif = u.pin_transfer ? 1 : 0;
         delete u.pin_transfer;
-        ctx.waitUntil(push(env, 'forum', 'forum.profil', { user_id: u.id, nama: u.nama, foto: samarkanGambar(env, u.foto, 's') }));
+        ctx.waitUntil(push(env, 'forum', 'forum.profil', { user_id: u.id, nama: u.nama, foto: u.foto }));
         return json(u, 200, env);
       }
 
-      // ---- banner profil media kustom (Batch I): GIF / MP4 → GIF otomatis ----
-      // Khusus langganan Pro/VIP. MP4 diunggah ke Cloudinary (resource video)
-      // lalu disajikan sebagai GIF animasi lewat transformasi f_gif.
+      // ---- banner profil media kustom (Batch N): GIF / MP4 → GIF mandiri ----
+      // Khusus langganan Pro/VIP. Video diunggah, dikonversi jadi GIF, lalu
+      // MP4 dihapus dari penyimpanan (tidak ada aset dobel). Respons memakai
+      // jalur domain sendiri — tidak ada URL Cloudinary yang bocor.
       if (p === 'me/banner-media' && req.method === 'POST') {
         const uT = await env.DB.prepare('SELECT tier FROM users WHERE id=?').bind(me.sub).first();
         if (String(uT?.tier || 'basic') === 'basic') {
@@ -3943,9 +3960,9 @@ if (a.startsWith('peran/') && req.method === 'DELETE') {
         } catch (_) {
           return err('Banner gagal tersimpan di cloud. Coba sekali lagi.', 502, env);
         }
-        const media = JSON.stringify({ tipe, url: hasil.url, gif: hasil.gif || hasil.url });
+        const media = JSON.stringify({ tipe, url: hasil.url, gif: hasil.gif || hasil.url, mp4Terhapus: hasil.mp4Terhapus === true });
         await env.DB.prepare('UPDATE users SET banner_media=? WHERE id=?').bind(media, me.sub).run();
-        return json({ ok: true, banner_media: media }, 200, env);
+        return json({ ok: true, banner_media: samarkanBannerMedia(env, media) }, 200, env);
       }
       if (p === 'me/banner-media' && req.method === 'DELETE') {
         await env.DB.prepare('UPDATE users SET banner_media=NULL WHERE id=?').bind(me.sub).run();

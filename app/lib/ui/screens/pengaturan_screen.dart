@@ -9,6 +9,7 @@ import '../../core/biometrik.dart';
 import '../../core/cache.dart';
 import '../../core/keamanan.dart';
 import '../../core/kompres.dart';
+import '../../core/media_lokal.dart';
 import '../../core/prefs.dart';
 import '../../core/motion.dart';
 import '../../core/theme.dart';
@@ -181,6 +182,8 @@ class _UbahProfilScreenState extends State<UbahProfilScreen> {
   bool proses = false;
   String? pesan;
   bool _sibukBanner = false;
+  double? _progresBanner; // 0..1; null = tidak sedang unggah
+  String _tahapBanner = '';
 
   /// Salinan aturan validasi username dari server (Batch I) supaya umpan
   /// balik instan tanpa menunggu jaringan; keputusan akhir tetap di server.
@@ -351,19 +354,37 @@ class _UbahProfilScreenState extends State<UbahProfilScreen> {
 
     setState(() {
       _sibukBanner = true;
+      _progresBanner = 0;
+      _tahapBanner = 'Menyiapkan berkas…';
       pesan = null;
     });
     final dataUri = 'data:$mime;base64,${base64Encode(bytes)}';
-    final galat = await context.read<AppState>().unggahBannerMedia(dataUri);
+    final mulai = DateTime.now();
+    final galat = await context.read<AppState>().unggahBannerMedia(
+      dataUri,
+      onProgress: (terkirim, total) {
+        if (!mounted) return;
+        final p = total <= 0 ? 0.0 : (terkirim / total).clamp(0.0, .9);
+        final tahap = p >= .899
+            ? 'Mengunggah… tunggu server konversi video → GIF'
+            : 'Mengunggah ${(terkirim / 1048576).toStringAsFixed(1)} / ${(total / 1048576).toStringAsFixed(1)} MB';
+        setState(() {
+          _progresBanner = p;
+          _tahapBanner = tahap;
+        });
+      },
+    );
     if (!mounted) return;
+    final detik = DateTime.now().difference(mulai).inMilliseconds / 1000;
     setState(() {
       _sibukBanner = false;
+      _progresBanner = null;
       pesan = galat;
     });
     if (galat == null) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(video && mime == 'video/mp4'
-              ? 'Banner terpasang! Video otomatis diconvert ke GIF.'
+              ? 'Banner terpasang! Video diconvert ke GIF dan MP4 dihapus dari cloud (${detik.toStringAsFixed(0)} dtk).'
               : 'Banner GIF terpasang!')));
     }
   }
@@ -888,6 +909,33 @@ class _UbahProfilScreenState extends State<UbahProfilScreen> {
                 ]),
             ]),
           ),
+          // Progres unggah banner: progress bar + persen + tahap (jelas).
+          if (_progresBanner != null) ...[
+            const SizedBox(height: 12),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(XyRadius.pill),
+              child: LinearProgressIndicator(
+                value: _progresBanner,
+                minHeight: 8,
+                backgroundColor: t.lineSoft,
+                valueColor: const AlwaysStoppedAnimation<Color>(XyTheme.primary),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(_tahapBanner,
+                      style: TextStyle(color: t.muted, fontSize: 11.5)),
+                ),
+                Text('${(_progresBanner! * 100).toStringAsFixed(0)}%',
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        color: XyTheme.primary,
+                        fontSize: 12)),
+              ],
+            ),
+          ],
           const SizedBox(height: 10),
           Text('Nomor WhatsApp dipakai admin untuk menghubungimu soal pesanan.',
               style: TextStyle(color: t.muted, fontSize: 12, height: 1.5)),
@@ -1452,6 +1500,8 @@ class DataScreen extends StatefulWidget {
 
 class _DataScreenState extends State<DataScreen> {
   int kb = 0;
+  String? _pathMedia;
+  int _mediaBytes = 0;
 
   @override
   void initState() {
@@ -1461,12 +1511,27 @@ class _DataScreenState extends State<DataScreen> {
 
   Future<void> _hitung() async {
     final n = await Cache.ukuranKb();
-    if (mounted) setState(() => kb = n);
+    String? path;
+    var mediaBytes = 0;
+    try {
+      final akar = await MediaLokal.siapkan();
+      path = akar.path;
+      final per = await MediaLokal.ukuranPerFolder();
+      per.forEach((_, v) => mediaBytes += v);
+    } catch (_) {}
+    if (mounted) {
+      setState(() {
+        kb = n;
+        _pathMedia = path;
+        _mediaBytes = mediaBytes;
+      });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final s = context.watch<AppState>();
+    final t = XyTheme.of(context);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Data dan Penyimpanan')),
@@ -1512,6 +1577,42 @@ class _DataScreenState extends State<DataScreen> {
                 'dan tetap bisa dilihat ketika sedang tanpa internet.',
                 style: TextStyle(color: XyTheme.of(context).muted, fontSize: 12.5, height: 1.6),
               ),
+              // Batch N: jelaskan letak folder media lokal (struktur ala WA).
+              if (_pathMedia != null) ...[
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(11),
+                  decoration: BoxDecoration(
+                    color: t.lineSoft,
+                    borderRadius: BorderRadius.circular(XyRadius.md),
+                    border: Border.all(color: t.line),
+                  ),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Row(children: [
+                      Icon(Icons.folder_rounded, size: 15, color: t.muted),
+                      const SizedBox(width: 6),
+                      const Text('Folder media lokal',
+                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                      const Spacer(),
+                      Text('${(_mediaBytes / 1048576).toStringAsFixed(1)} MB',
+                          style: TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w700,
+                              color: XyTheme.primary)),
+                    ]),
+                    const SizedBox(height: 6),
+                    Text('Stiker · Video · Image · Voicenote · Document · Database '
+                        '(tersembunyi dari galeri lewat .nomedia)',
+                        style: TextStyle(color: t.muted, fontSize: 11, height: 1.45)),
+                    const SizedBox(height: 4),
+                    Text(_pathMedia!,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: t.muted, fontSize: 10)),
+                  ]),
+                ),
+              ],
               const SizedBox(height: 16),
               SizedBox(
                 height: 46,

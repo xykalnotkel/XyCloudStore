@@ -1,6 +1,7 @@
 import 'device_identity.dart';
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import '../core/config.dart';
 
@@ -67,6 +68,49 @@ class ApiClient {
   Future<dynamic> post(String path, [Map<String, dynamic>? body]) => _coba(() => _http
       .post(_uri(path), headers: _headers, body: jsonEncode(body ?? {}))
       .timeout(const Duration(seconds: 20)));
+
+  /// Unggah (POST) dengan pelaporan progres pengiriman riil per byte.
+  /// Dipakai untuk berkas besar (banner GIF/video, foto profil) supaya
+  /// pengguna melihat progres bar + persen, bukan spinner berputar yang
+  /// terasa "tidak terhubung".
+  Future<dynamic> postUnggah(
+    String path,
+    Map<String, dynamic> body, {
+    void Function(int terkirim, int total)? onProgress,
+    int timeoutDetik = 150,
+  }) async {
+    final sesi = _token;
+    Future<dynamic> jalankan() async {
+      final bytes = Uint8List.fromList(utf8.encode(jsonEncode(body)));
+      var sudah = 0;
+      final kiriman = http.StreamedRequest('POST', _uri(path))
+        ..headers.addAll(_headers)
+        ..contentLength = bytes.length;
+      await Future<void>(() async {
+        const chunkBytes = 64 * 1024;
+        for (var i = 0; i < bytes.length; i += chunkBytes) {
+          final akhir = (i + chunkBytes > bytes.length) ? bytes.length : i + chunkBytes;
+          kiriman.sink.add(bytes.sublist(i, akhir));
+          sudah += (akhir - i);
+          onProgress?.call(sudah, bytes.length);
+        }
+        await kiriman.sink.close();
+      });
+      final resp = await _http.send(kiriman).timeout(Duration(seconds: timeoutDetik));
+      final bodyTeks = await resp.stream.bytesToString();
+      if (sesi != null && sesi != _token) throw ApiException(401, 'Sesi telah berubah.');
+      return _parse(http.Response(bodyTeks, resp.statusCode,
+          headers: resp.headers, request: kiriman));
+    }
+    try {
+      return await jalankan();
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      if (XyConfig.pindahKeCadangan()) return await jalankan();
+      rethrow;
+    }
+  }
 
   Future<dynamic> patch(String path, [Map<String, dynamic>? body]) => _coba(() => _http
       .patch(_uri(path), headers: _headers, body: jsonEncode(body ?? {}))

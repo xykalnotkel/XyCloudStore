@@ -1,9 +1,20 @@
 /**
  * ============================================================
- *  XyCloudStore - Unggah gambar (Cloudinary, tanda tangan server)
+ *  XyCloudStore - Unggah & sajikan media (Cloudinary, tanda tangan server)
  * ============================================================
  *  Dipakai untuk gambar produk, bukti transfer, lampiran chat,
- *  dan foto pada ulasan. Kunci rahasia tidak pernah keluar dari Worker.
+ *  foto ulasan, dan banner profil.
+ *
+ *  Prinsip (Batch N, 2026-09-16):
+ *  * Kunci rahasia TIDAK PERNAH keluar dari Worker.
+ *  * URL Cloudinary mentah TIDAK PERNAH keluar ke klien — semua
+ *    respons disamarkan jadi jalur domain sendiri (/img/ atau /media/).
+ *  * Unggahan di-dedup memakai hash isi berkas (SHA-256). Konten
+ *    identik tidak diunggah ulang → tidak ada aset duplikat.
+ *  * Video banner diubah MENJADI GIF asli (aset mandiri), lalu MP4
+ *    dihapus dari Cloudinary — tidak ada penyimpanan dobel.
+ *  * GIF selalu disimpan dengan ekstensi `.gif` pada public_id supaya
+ *    jalur proxy /img/ mengenalinya sebagai animasi (tetap bergerak).
  */
 
 const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -12,64 +23,134 @@ async function sha1(teks) {
   return hex(await crypto.subtle.digest('SHA-1', new TextEncoder().encode(teks)));
 }
 
+/** Hash isi berkas (untuk dedup). */
+async function sha256Buf(buf) {
+  return hex(await crypto.subtle.digest('SHA-256', buf));
+}
+
+/** Decode base64 standar (dengan/tanpa padding) → Uint8Array. */
+function b64Decode(b64) {
+  const s = b64.replace(/-/g, '+').replace(/_/g, '/');
+  const pad = s.length % 4 === 0 ? '' : '='.repeat(4 - (s.length % 4));
+  const bin = atob(s + pad);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+const cloudOk = (env) => !!(env && env.CLOUDINARY_CLOUD && env.CLOUDINARY_KEY && env.CLOUDINARY_SECRET);
+
 /**
- * Unggah gambar. `dataUri` boleh berupa `data:image/png;base64,...`
- * atau URL http/https yang bisa diambil Cloudinary.
+ * Tanda tangan Cloudinary: parameter (sudah berisi timestamp) diurutkan
+ * abjad lalu digabung + secret. `file`, `api_key`, dan `resource_type`
+ * TIDAK ikut ditandatangani (konvensi Cloudinary).
+ */
+async function tandaTangan(params, secret) {
+  const keys = Object.keys(params).sort();
+  const dasar = keys.map((k) => `${k}=${params[k]}`).join('&');
+  return sha1(`${dasar}${secret}`);
+}
+
+/**
+ * Pengirim unggah Cloudinary bertanda-tangan.
+ * `signParams` = parameter yang ikut ditandatangani (mis. folder, format, public_id);
+ * timestamp otomatis ikut ditandatangani.
+ */
+async function kirimUnggah(env, endpoint, { folder, timestamp, signParams = {}, file, resourceType }) {
+  const waktu = String(timestamp ?? Math.floor(Date.now() / 1000));
+  const params = { ...signParams, timestamp: waktu };
+  const signature = await tandaTangan(params, env.CLOUDINARY_SECRET);
+  const form = new FormData();
+  form.append('file', file);
+  form.append('api_key', env.CLOUDINARY_KEY);
+  form.append('timestamp', waktu);
+  for (const k of Object.keys(params)) form.append(k, String(params[k]));
+  form.append('signature', signature);
+  if (resourceType) form.append('resource_type', resourceType);
+  return fetch(endpoint, { method: 'POST', body: form });
+}
+
+/** Catat / perbarui baris media_assets (idempoten). */
+async function catatMedia(env, { id, url, folder, format, width, height, bytes, animated, hash }) {
+  try {
+    await env.DB.prepare(
+      `INSERT INTO media_assets(id,url,folder,format,width,height,bytes,animated,hash)
+       VALUES(?,?,?,?,?,?,?,?,?)
+       ON CONFLICT(id) DO UPDATE SET
+         url=excluded.url, folder=excluded.folder, format=excluded.format,
+         width=excluded.width, height=excluded.height, bytes=excluded.bytes,
+         animated=excluded.animated, hash=excluded.hash`
+    ).bind(id, url, folder, format || null, width || null, height || null, bytes || null, animated ? 1 : 0, hash || null).run();
+  } catch (_) { /* media_assets boleh gagal diam-diam; bukan jalur kritis akun */ }
+}
+
+/** Cari aset dengan hash sama yang URL-nya masih hidup. */
+async function cariDuplikat(env, hash) {
+  if (!hash || !env.DB) return null;
+  const item = await env.DB.prepare('SELECT * FROM media_assets WHERE hash=? LIMIT 1').bind(hash).first();
+  if (!item || !item.url) return null;
+  try {
+    const cek = await fetch(item.url, { method: 'HEAD' });
+    if (cek.ok) return item;
+  } catch (_) {}
+  return null;
+}
+
+/**
+ * Unggah gambar. `dataUri` wajib `data:image/*;base64,...`.
+ * Konten identik (hash sama) dikembalikan dari aset lama tanpa unggah ulang.
+ * GIF diberi public_id berakhiran `.gif` agar animasi selalu dikenal.
  */
 export async function unggahGambar(env, { dataUri, folder = 'xycloudstore' }) {
-  if (!env.CLOUDINARY_CLOUD || !env.CLOUDINARY_KEY || !env.CLOUDINARY_SECRET) {
-    return { ok: false, alasan: 'Kredensial Cloudinary belum diatur' };
+  if (!cloudOk(env)) return { ok: false, alasan: 'Kredensial Cloudinary belum diatur' };
+  if (typeof dataUri !== 'string' || !dataUri.startsWith('data:')) {
+    return { ok: false, alasan: 'Format berkas tidak dikenal' };
   }
-  if (!dataUri) return { ok: false, alasan: 'Tidak ada berkas' };
-  // v3.3 security: hanya izinkan image/*, tolak text/html, svg berbahaya, dll. Max size cek di pemanggil, tapi di sini juga cek prefix
-  if (typeof dataUri === 'string' && dataUri.startsWith('data:')) {
-    const m = dataUri.match(/^data:([^;]+);base64,/i);
-    const mime = (m ? m[1] : '').toLowerCase();
-    const allowed = ['image/png','image/jpeg','image/jpg','image/webp','image/gif'];
-    if (!allowed.includes(mime)) {
-      return { ok: false, alasan: `Tipe berkas tidak diizinkan: ${mime || 'unknown'}. Hanya png/jpeg/webp/gif` };
-    }
-    // cek ukuran kasar: base64 length * 0.75
-    const b64 = dataUri.split(',')[1] || '';
-    const approxBytes = Math.floor(b64.length * 0.75);
-    if (approxBytes > 5 * 1024 * 1024) {
-      return { ok: false, alasan: 'Berkas terlalu besar, maksimal 5MB' };
-    }
+  const m = dataUri.match(/^data:([^;]+);base64,/i);
+  if (!m) return { ok: false, alasan: 'Format data URI tidak valid' };
+  const mime = (m[1] || '').toLowerCase();
+  const allowed = ['image/png','image/jpeg','image/jpg','image/webp','image/gif'];
+  if (!allowed.includes(mime)) {
+    return { ok: false, alasan: `Tipe berkas tidak diizinkan: ${mime || 'unknown'}. Hanya png/jpeg/webp/gif` };
+  }
+  const b64 = dataUri.split(',')[1] || '';
+  if (Math.floor(b64.length * 0.75) > 5 * 1024 * 1024) {
+    return { ok: false, alasan: 'Berkas terlalu besar, maksimal 5MB' };
+  }
+  const bytes = b64Decode(b64);
+  const hash = await sha256Buf(bytes);
+
+  const duplikat = await cariDuplikat(env, hash);
+  if (duplikat) {
+    return { ok: true, url: duplikat.url, id: duplikat.id, format: duplikat.format, bytes: duplikat.bytes, duplikat: true };
   }
 
-  // Batch E: semua gambar dikonversi ke WebP + kualitas otomatis di sisi
-  // Cloudinary supaya jauh lebih ringan & cepat dimuat. GIF dibiarkan apa
-  // adanya agar animasinya tidak rusak.
-  const isGif = typeof dataUri === 'string' && dataUri.startsWith('data:image/gif');
-  const mauWebp = !isGif;
-
+  // GIF dibiarkan apa adanya agar animasi tetap; selainnya diubah ke WebP
+  // + kualitas otomatis di sisi Cloudinary supaya ringan & cepat.
+  const isGif = mime === 'image/gif';
   const timestamp = Math.floor(Date.now() / 1000);
-  // parameter yang ikut ditandatangani harus urut abjad
-  const dasar = `folder=${folder}` + (mauWebp ? '&format=webp&quality=auto' : '') + `&timestamp=${timestamp}`;
-  const tandaTangan = await sha1(`${dasar}${env.CLOUDINARY_SECRET}`);
-
-  const form = new FormData();
-  form.append('file', dataUri);
-  form.append('api_key', env.CLOUDINARY_KEY);
-  form.append('timestamp', String(timestamp));
-  form.append('folder', folder);
-  if (mauWebp) {
-    form.append('format', 'webp');
-    form.append('quality', 'auto');
+  const signParams = { folder };
+  if (!isGif) {
+    signParams.format = 'webp';
+    signParams.quality = 'auto';
+  } else {
+    // Ekstensi eksplisit agar jalur /img/ mengenalinya sebagai animasi.
+    let rid = crypto.randomUUID().replace(/-/g, '');
+    signParams.public_id = `${folder}/${rid}.gif`;
   }
-  form.append('signature', tandaTangan);
 
   try {
-    const r = await fetch(`https://api.cloudinary.com/v1_1/${env.CLOUDINARY_CLOUD}/image/upload`, {
-      method: 'POST',
-      body: form,
+    const r = await kirimUnggah(env, `https://api.cloudinary.com/v1_1/${env.CLOUDINARY_CLOUD}/image/upload`, {
+      folder, timestamp, signParams, file: dataUri,
     });
     const j = await r.json();
     if (!r.ok || j.error) return { ok: false, alasan: j.error?.message || `HTTP ${r.status}` };
-    try { await env.DB.prepare(`INSERT INTO media_assets(id,url,folder,format,width,height,bytes,animated) VALUES(?,?,?,?,?,?,?,?)
-      ON CONFLICT(id) DO UPDATE SET url=excluded.url,format=excluded.format,width=excluded.width,height=excluded.height,bytes=excluded.bytes,animated=excluded.animated`)
-      .bind(j.public_id,j.secure_url,folder,j.format||null,j.width||null,j.height||null,j.bytes||null,j.pages>1||j.format==='gif'?1:0).run(); } catch (_) {}
-    return { ok: true, url: j.secure_url, id: j.public_id, lebar: j.width, tinggi: j.height, format:j.format, bytes:j.bytes };
+    await catatMedia(env, {
+      id: j.public_id, url: j.secure_url, folder, format: j.format || null,
+      width: j.width || null, height: j.height || null, bytes: j.bytes || null,
+      animated: j.pages > 1 || j.format === 'gif' ? 1 : 0, hash,
+    });
+    return { ok: true, url: j.secure_url, id: j.public_id, lebar: j.width, tinggi: j.height, format: j.format, bytes: j.bytes, hash };
   } catch (e) {
     return { ok: false, alasan: String(e) };
   }
@@ -80,14 +161,12 @@ export async function unggahGambar(env, { dataUri, folder = 'xycloudstore' }) {
  * "video"; endpoint video/upload menerima data:audio/*.base64.
  */
 export async function unggahAudio(env, { dataUri, folder = 'xycloudstore/chat' }) {
-  if (!env.CLOUDINARY_CLOUD || !env.CLOUDINARY_KEY || !env.CLOUDINARY_SECRET) {
-    return { ok: false, alasan: 'Kredensial Cloudinary belum diatur' };
-  }
-  if (!dataUri) return { ok: false, alasan: 'Tidak ada berkas' };
+  if (!cloudOk(env)) return { ok: false, alasan: 'Kredensial Cloudinary belum diatur' };
   if (typeof dataUri !== 'string' || !dataUri.startsWith('data:')) {
     return { ok: false, alasan: 'Format berkas tidak dikenal' };
   }
   const m = dataUri.match(/^data:([^;]+);base64,/i);
+  if (!m) return { ok: false, alasan: 'Format data URI tidak valid' };
   const mime = (m ? m[1] : '').toLowerCase();
   const allowed = ['audio/mp4', 'audio/x-m4a', 'audio/m4a', 'audio/aac',
     'audio/mpeg', 'audio/wav', 'audio/webm', 'audio/ogg'];
@@ -95,25 +174,13 @@ export async function unggahAudio(env, { dataUri, folder = 'xycloudstore/chat' }
     return { ok: false, alasan: `Tipe suara tidak didukung: ${mime || 'unknown'}` };
   }
   const b64 = dataUri.split(',')[1] || '';
-  const approxBytes = Math.floor(b64.length * 0.75);
-  if (approxBytes > 3 * 1024 * 1024) {
+  if (Math.floor(b64.length * 0.75) > 3 * 1024 * 1024) {
     return { ok: false, alasan: 'Pesan suara terlalu besar, maksimal 3MB' };
   }
-
   const timestamp = Math.floor(Date.now() / 1000);
-  const tandaTangan = await sha1(`folder=${folder}&timestamp=${timestamp}${env.CLOUDINARY_SECRET}`);
-  const form = new FormData();
-  form.append('file', dataUri);
-  form.append('api_key', env.CLOUDINARY_KEY);
-  form.append('timestamp', String(timestamp));
-  form.append('folder', folder);
-  form.append('signature', tandaTangan);
-  form.append('resource_type', 'video');
-
   try {
-    const r = await fetch(`https://api.cloudinary.com/v1_1/${env.CLOUDINARY_CLOUD}/video/upload`, {
-      method: 'POST',
-      body: form,
+    const r = await kirimUnggah(env, `https://api.cloudinary.com/v1_1/${env.CLOUDINARY_CLOUD}/video/upload`, {
+      folder, timestamp, signParams: { folder }, file: dataUri, resourceType: 'video',
     });
     const j = await r.json();
     if (!r.ok || j.error) return { ok: false, alasan: j.error?.message || `HTTP ${r.status}` };
@@ -123,54 +190,125 @@ export async function unggahAudio(env, { dataUri, folder = 'xycloudstore/chat' }
   }
 }
 
+/** Hapus aset Cloudinary (resource_type image atau video) dengan tanda tangan server. */
+export async function hapusCloudinary(env, publicId, resourceType = 'image') {
+  if (!cloudOk(env) || !publicId) return false;
+  const timestamp = Math.floor(Date.now() / 1000);
+  const signature = await tandaTangan({ public_id: publicId, timestamp: String(timestamp) }, env.CLOUDINARY_SECRET);
+  const form = new FormData();
+  form.set('public_id', publicId);
+  form.set('timestamp', String(timestamp));
+  form.set('signature', signature);
+  form.set('api_key', env.CLOUDINARY_KEY);
+  if (resourceType === 'video') form.set('resource_type', 'video');
+  try {
+    const r = await fetch(`https://api.cloudinary.com/v1_1/${env.CLOUDINARY_CLOUD}/${resourceType === 'video' ? 'video' : 'image'}/destroy`, {
+      method: 'POST',
+      body: form,
+    });
+    const j = await r.json().catch(() => ({}));
+    return r.ok && ['ok', 'not found'].includes(j.result);
+  } catch (_) { return false; }
+}
+
 /**
- * Unggah video banner profil (Batch I). Cloudinary menyimpan video sebagai
- * resource "video"; URL GIF animasi diturunkan lewat transformasi `f_gif`
- * sehingga MP4 otomatis disajikan sebagai GIF tanpa penyimpanan kedua.
- * Khusus pelanggan Pro/VIP (gate di pemanggil).
+ * Unggah banner video (Batch N, v2): MP4 diunggah, GIF mandiri dibuat
+ * (transform lalu diunggah ulang sebagai aset image/gif), kemudian MP4
+ * DIHAPUS dari Cloudinary — tidak ada penyimpanan dobel.
  */
 export async function unggahVideoBanner(env, { dataUri, folder = 'xycloudstore/banner-profil' }) {
-  if (!env.CLOUDINARY_CLOUD || !env.CLOUDINARY_KEY || !env.CLOUDINARY_SECRET) {
-    return { ok: false, alasan: 'Kredensial Cloudinary belum diatur' };
-  }
+  if (!cloudOk(env)) return { ok: false, alasan: 'Kredensial Cloudinary belum diatur' };
   if (typeof dataUri !== 'string' || !dataUri.startsWith('data:')) {
     return { ok: false, alasan: 'Format berkas tidak dikenal' };
   }
   const m = dataUri.match(/^data:([^;]+);base64,/i);
+  if (!m) return { ok: false, alasan: 'Format data URI tidak valid' };
   const mime = (m ? m[1] : '').toLowerCase();
   const allowed = ['video/mp4', 'video/quicktime', 'video/webm'];
   if (!allowed.includes(mime)) {
     return { ok: false, alasan: `Tipe video tidak didukung: ${mime || 'unknown'}. Pakai MP4.` };
   }
   const b64 = dataUri.split(',')[1] || '';
-  const approxBytes = Math.floor(b64.length * 0.75);
-  if (approxBytes > 15 * 1024 * 1024) {
+  if (Math.floor(b64.length * 0.75) > 15 * 1024 * 1024) {
     return { ok: false, alasan: 'Video terlalu besar, maksimal 15MB' };
+  }
+  const bytes = b64Decode(b64);
+  const hash = await sha256Buf(bytes);
+
+  const duplikat = await cariDuplikat(env, hash);
+  if (duplikat) {
+    // Aset lama yang tersimpan sudah berupa GIF jadi langsung dipakai.
+    return { ok: true, url: duplikat.url, gif: duplikat.url, id: duplikat.id, format: 'gif', duplikat: true };
   }
 
   const timestamp = Math.floor(Date.now() / 1000);
-  const tandaTangan = await sha1(`folder=${folder}&timestamp=${timestamp}${env.CLOUDINARY_SECRET}`);
-  const form = new FormData();
-  form.append('file', dataUri);
-  form.append('api_key', env.CLOUDINARY_KEY);
-  form.append('timestamp', String(timestamp));
-  form.append('folder', folder);
-  form.append('signature', tandaTangan);
-  form.append('resource_type', 'video');
-
+  let mp4Id = null;
   try {
-    const r = await fetch(`https://api.cloudinary.com/v1_1/${env.CLOUDINARY_CLOUD}/video/upload`, {
-      method: 'POST',
-      body: form,
+    // 1) Unggah video (resource video; format asli dipertahankan).
+    const r = await kirimUnggah(env, `https://api.cloudinary.com/v1_1/${env.CLOUDINARY_CLOUD}/video/upload`, {
+      folder, timestamp, signParams: { folder }, file: dataUri, resourceType: 'video',
     });
     const j = await r.json();
     if (!r.ok || j.error) return { ok: false, alasan: j.error?.message || `HTTP ${r.status}` };
-    // secure_url: https://res.cloudinary.com/{cloud}/video/upload/v{n}/{folder}/{id}.mp4
-    // GIF animasi: sisipkan transformasi f_gif (fps & lebar dibatasi agar ringan).
-    const gif = String(j.secure_url).replace('/video/upload/', '/video/upload/f_gif,fps_12,w_480,c_limit/');
-    try { await env.DB.prepare(`INSERT INTO media_assets(id,url,folder,format,width,height,bytes,animated) VALUES(?,?,?,?,?,?,?,1)
-      ON CONFLICT(id) DO UPDATE SET url=excluded.url`).bind(j.public_id, j.secure_url, folder, j.format || 'mp4', j.width || null, j.height || null, j.bytes || null).run(); } catch (_) {}
-    return { ok: true, url: j.secure_url, gif, id: j.public_id, format: j.format, bytes: j.bytes };
+    mp4Id = j.public_id;
+
+    // 2) Verifikasi MP4 bisa diakses.
+    try {
+      const cek = await fetch(j.secure_url, { method: 'HEAD' });
+      if (!cek.ok) return { ok: false, alasan: 'Video gagal tersimpan di cloud (verifikasi gagal).' };
+    } catch (_) {
+      return { ok: false, alasan: 'Video gagal tersimpan di cloud.' };
+    }
+
+    // 3) Ambil byte GIF hasil transformasi f_gif, lalu unggah ulang sebagai
+    //    aset image/gif mandiri (public_id berakhiran .gif).
+    const gifSumber = String(j.secure_url).replace('/video/upload/', '/video/upload/f_gif,fps_12,w_480,c_limit/');
+    let gifBytes = null;
+    try {
+      const rg = await fetch(gifSumber);
+      if (rg.ok) gifBytes = new Uint8Array(await rg.arrayBuffer());
+    } catch (_) {}
+    if (!gifBytes || gifBytes.length < 12) {
+      // Fallback: pakai GIF turunan (transform) dan biarkan MP4 tersimpan.
+      await catatMedia(env, { id: j.public_id, url: j.secure_url, folder, format: j.format || 'mp4', width: j.width, height: j.height, bytes: j.bytes, animated: 1, hash });
+      return { ok: true, url: j.secure_url, gif: gifSumber, id: j.public_id, format: j.format, sisaMp4: true };
+    }
+
+    const gifBase64 = btoa(String.fromCharCode.apply(null, gifBytes));
+    const ts2 = Math.floor(Date.now() / 1000);
+    let rid = crypto.randomUUID().replace(/-/g, '');
+    const r2 = await kirimUnggah(env, `https://api.cloudinary.com/v1_1/${env.CLOUDINARY_CLOUD}/image/upload`, {
+      folder, timestamp: ts2,
+      signParams: { folder, public_id: `${folder}/${rid}.gif` },
+      file: `data:image/gif;base64,${gifBase64}`,
+    });
+    const jg = await r2.json();
+    if (!r2.ok || jg.error) {
+      // Fallback: GIF turunan tetap dipakai, MP4 dibiarkan.
+      await catatMedia(env, { id: j.public_id, url: j.secure_url, folder, format: j.format || 'mp4', width: j.width, height: j.height, bytes: j.bytes, animated: 1, hash });
+      return { ok: true, url: j.secure_url, gif: gifSumber, id: j.public_id, format: j.format, sisaMp4: true };
+    }
+
+    // 4) Hapus MP4 asli — GIF mandiri sudah tersimpan.
+    const terhapus = await hapusCloudinary(env, mp4Id, 'video');
+
+    // 5) Catat aset akhir (GIF).
+    await catatMedia(env, {
+      id: jg.public_id, url: jg.secure_url, folder, format: 'gif',
+      width: jg.width || null, height: jg.height || null, bytes: jg.bytes || null,
+      animated: 1, hash,
+    });
+
+    return {
+      ok: true,
+      url: jg.secure_url,
+      gif: jg.secure_url,
+      id: jg.public_id,
+      format: 'gif',
+      bytes: jg.bytes,
+      hash,
+      mp4Terhapus: terhapus,
+    };
   } catch (e) {
     return { ok: false, alasan: String(e) };
   }
@@ -204,6 +342,44 @@ export function samarkanGambar(env, url, ukuran = 'm') {
   }catch{return url;}
 }
 
+/**
+ * Samarkan media APAPUN (gambar ATAU video/audio): jalur `image/upload`
+ * ke /img/, jalur `video/upload` ke /media/. URL non-Cloudinary dibiarkan.
+ */
+export function samarkanKMedia(env, url, ukuran = 'm') {
+  if (!url || typeof url !== 'string') return url;
+  try {
+    const u = new URL(url);
+    const base = env.PUBLIC_URL || 'https://api.xycloud.my.id';
+    if (u.origin === new URL(base).origin && (u.pathname.startsWith('/img/') || u.pathname.startsWith('/media/'))) return url;
+    if (u.hostname !== 'res.cloudinary.com') return url;
+    if (u.pathname.includes('/image/upload/')) return samarkanGambar(env, url, ukuran);
+    const idx = u.pathname.indexOf('/video/upload/');
+    if (idx < 0) return url;
+    const rest = u.pathname.slice(idx + '/video/upload/'.length); // transform?/v123/xycloudstore/.../x.mp4
+    if (!rest.includes('xycloudstore/')) return url;
+    if (!/^[A-Za-z0-9_,.%+=\/-]+$/.test(rest)) return url;
+    return `${base}/media/${rest}`;
+  } catch { return url; }
+}
+
+/**
+ * Samarkan JSON `users.banner_media` ({tipe,url,gif}) supaya
+ * tidak ada URL Cloudinary yang bocor ke aplikasi.
+ */
+export function samarkanBannerMedia(env, raw) {
+  if (!raw) return raw;
+  try {
+    const obj = JSON.parse(raw);
+    if (!obj || typeof obj !== 'object') return raw;
+    if (obj.url) obj.url = samarkanKMedia(env, obj.url);
+    if (obj.gif) obj.gif = samarkanKMedia(env, obj.gif);
+    return JSON.stringify(obj);
+  } catch (_) {
+    return raw;
+  }
+}
+
 /** Pixel-sized variants, not doubled by device-pixel-ratio on the server. */
 export const UKURAN_GAMBAR={s:160,t:360,m:800,l:1280,o:2048,blur:420};
 export function imageVariant(env,path,accept='',animated=false){
@@ -220,16 +396,16 @@ export function imageVariant(env,path,accept='',animated=false){
 export async function layaniGambar(env,jalur,req,ctx){
   if(!env.CLOUDINARY_CLOUD)return new Response('Media belum tersedia',{status:503});
   const accept=req?.headers.get('accept')||'';
-  const first=imageVariant(env,jalur,accept,/\.(gif|webp)$/i.test(jalur));
+  const first=imageVariant(env,jalur,accept,/\\.(gif|webp)$/i.test(jalur));
   if(!first)return new Response('Not found',{status:404});
   const key=new URL(req.url);key.search='v=26&format='+(accept.includes('image/avif')?'avif':'webp');
   const cache=typeof caches!=='undefined'?caches.default:null;
   const cacheKey=new Request(key.toString(),{method:'GET'});
   const hit=cache?await cache.match(cacheKey):null;
   if(hit)return hit;
-  let animated=/\.gif$/i.test(jalur);
-  if(/\.webp$/i.test(jalur)){
-    const id=first.id.replace(/^v\d+\//,'').replace(/\.[^.]+$/,'');
+  let animated=/\\.gif$/i.test(jalur);
+  if(/\\.webp$/i.test(jalur)){
+    const id=first.id.replace(/^v\d+\//,'').replace(/\\.[^.]+$/,'');
     try{const item=await env.DB.prepare('SELECT animated FROM media_assets WHERE id=?').bind(id).first();animated=item?!!item.animated:true;}catch{animated=true;}
   }
   const variant=imageVariant(env,jalur,accept,animated);
@@ -242,6 +418,42 @@ export async function layaniGambar(env,jalur,req,ctx){
   headers.set('Access-Control-Allow-Origin','*');
   const result=new Response(response.body,{status:200,headers});
   if(cache){const save=cache.put(cacheKey,result.clone()).catch(()=>{});if(ctx)ctx.waitUntil(save);else await save;}
+  return result;
+}
+
+/**
+ * Sajikan media video/audio melalui domain sendiri (`/media/...`).
+ * `rest` = sisa jalur setelah `/video/upload/` di Cloudinary
+ * (opsional transform, lalu v123, lalu folder xycloudstore).
+ */
+export async function layaniMedia(env, rest, req, ctx) {
+  if (!env.CLOUDINARY_CLOUD) return new Response('Media belum tersedia', { status: 503 });
+  // Keamanan: hanya jalur dalam folder xycloudstore, tanpa '..'.
+  if (!/^(?:[A-Za-z0-9_,.-]+\/)?v\d+\/xycloudstore\/[A-Za-z0-9_.\/%-]+$/.test(rest) ||
+      rest.split('/').some((x) => x === '..' || x === '.') || /%2e/i.test(rest)) {
+    return new Response('Not found', { status: 404 });
+  }
+  const url = `https://res.cloudinary.com/${env.CLOUDINARY_CLOUD}/video/upload/${rest}`;
+  const cache = typeof caches !== 'undefined' ? caches.default : null;
+  const key = new URL((req && req.url) ? req.url : 'https://api.xycloud.my.id/media/' + rest);
+  key.search = 'v=26';
+  const cacheKey = new Request(key.toString(), { method: 'GET' });
+  if (cache) {
+    const hit = await cache.match(cacheKey);
+    if (hit) return hit;
+  }
+  const response = await fetch(url, { headers: { Range: req.headers.get('range') || '' }, cf: { cacheTtl: 604800, cacheEverything: true } });
+  if (!response.ok) return new Response('Media tidak tersedia', { status: response.status === 404 ? 404 : 502 });
+  const headers = new Headers();
+  headers.set('Content-Type', response.headers.get('Content-Type') || 'application/octet-stream');
+  headers.set('Cache-Control', 'public, max-age=604800, immutable');
+  headers.set('X-Content-Type-Options', 'nosniff');
+  headers.set('Access-Control-Allow-Origin', '*');
+  if (response.headers.get('Content-Length')) headers.set('Content-Length', response.headers.get('Content-Length'));
+  const result = response.status === 206
+    ? new Response(response.body, { status: 206, headers })
+    : new Response(response.body, { status: 200, headers });
+  if (cache) { const save = cache.put(cacheKey, result.clone()).catch(() => {}); if (ctx) ctx.waitUntil(save); else await save; }
   return result;
 }
 

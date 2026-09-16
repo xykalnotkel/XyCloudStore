@@ -475,7 +475,8 @@ CREATE TABLE IF NOT EXISTS oauth_states (
 );
 CREATE TABLE IF NOT EXISTS media_assets (
  id TEXT PRIMARY KEY, url TEXT NOT NULL UNIQUE, folder TEXT NOT NULL, format TEXT,
- width INTEGER, height INTEGER, bytes INTEGER, animated INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now'))
+ width INTEGER, height INTEGER, bytes INTEGER, animated INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')),
+ hash TEXT
 );
 CREATE TRIGGER IF NOT EXISTS register_device_quota AFTER INSERT ON users
 WHEN NEW.registration_device IS NOT NULL BEGIN

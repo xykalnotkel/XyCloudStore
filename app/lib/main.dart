@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/date_symbol_data_local.dart';
@@ -6,6 +8,7 @@ import 'package:provider/provider.dart';
 import 'core/theme.dart';
 import 'core/pengaturan.dart';
 import 'core/keamanan.dart';
+import 'core/media_lokal.dart';
 import 'core/prefs.dart';
 import 'package:flutter/foundation.dart';
 import 'data/lapor_galat.dart';
@@ -32,6 +35,9 @@ Future<void> main() async {
     systemNavigationBarIconBrightness: Brightness.dark,
   ));
   LicenseRegistry.addLicense(() async* {yield LicenseEntryWithLineBreaks(['Moonlight Android / XyCloudStore Streaming'],await rootBundle.loadString('assets/licenses/moonlight-gpl3.txt'));});
+  // Batch N: siapkan struktur folder media lokal (Stiker/Video/Image dsb).
+  MediaLokal.siapkan().then((d) => d, onError: (Object e, StackTrace s) =>
+      Future<Directory>.value(Directory.systemTemp));
   await PushService.mulai();
   await LaporGalat.siapkan();
   // Pulihkan mode privasi (FLAG_SECURE) sebelum layar pertama tampil.

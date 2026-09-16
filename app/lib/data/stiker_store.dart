@@ -8,6 +8,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import '../core/stiker_cipher.dart';
+import '../core/media_lokal.dart';
 import '../models/stiker.dart';
 
 /// Koleksi per akun, disimpan TERENKRIPSI di direktori media privat aplikasi
@@ -43,16 +44,14 @@ class StikerStore {
   String get _namaIndex => 'index$_extIndex';
 
   /// Direktori koleksi: media privat aplikasi di Android (tidak terscan
-  /// galeri karena di bawah /Android/media), fallback application support.
+  /// galeri karena di bawah direktori app + ada .nomedia), fallback
+  /// application support. Selaras MediaLokal (`/xycloudstorage/Stiker/`).
   Future<Directory> _direktoriStiker() async {
-    if (Platform.isAndroid) {
-      try {
-        final ext = await getExternalStorageDirectory();
-        if (ext != null)
-          return Directory('${ext.path}/xycloudstore/media/stiker/$_id');
-      } catch (_) {
-        // izin/directori tidak tersedia -> pakai fallback di bawah
-      }
+    try {
+      final akar = await MediaLokal.akar();
+      return Directory('${akar.path}/Stiker/$_id');
+    } catch (_) {
+      // fallback di bawah
     }
     return Directory(
         '${(await getApplicationSupportDirectory()).path}/xy_stiker/$_id');
@@ -91,8 +90,9 @@ class StikerStore {
   }
 
   /// Pindahkan koleksi lama (application support `.xys`, dan direktori
-  /// eksternal lama `media/stiker` dengan `.byscrt`) ke lokasi baru supaya
-  /// stiker pengguna tidak hilang saat memperbarui.
+  /// eksternal lama `xycloudstore/media/stiker` & `media/stiker` dengan
+  /// `.byscrt`) ke lokasi baru supaya stiker pengguna tidak hilang saat
+  /// memperbarui.
   Future<void> _pindahkanLama() async {
     await _pindahDari(Directory(
         '${(await getApplicationSupportDirectory()).path}/xy_stiker/$_id'));
@@ -100,6 +100,7 @@ class StikerStore {
       try {
         final ext = await getExternalStorageDirectory();
         if (ext != null) {
+          await _pindahDari(Directory('${ext.path}/xycloudstore/media/stiker/$_id'));
           await _pindahDari(Directory('${ext.path}/media/stiker/$_id'));
         }
       } catch (_) {}

@@ -92,6 +92,14 @@ jobs:
         working-directory: ${{ env.APP_DIR }}
         run: python3 ../tools/siapkan_biometrik.py android
 
+      - name: Siapkan ikon push (override ikon OneSignal dengan logo XyCloudStore)
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          python3 -m pip install --quiet pillow || python3 -m pip install --user --quiet pillow
+          python3 ../tools/siapkan_ikon_push.py --android-dir android
+          ls -la android/app/src/main/res/drawable/ic_stat_onesignal_default.png
+
+
       - name: Naikkan versi Kotlin (dibutuhkan OneSignal)
         working-directory: ${{ env.APP_DIR }}
         run: |

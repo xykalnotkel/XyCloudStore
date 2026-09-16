@@ -88,7 +88,7 @@ class UserProfile {
   /// Batch L: gaya tampilan nama (font/efek). Lihat gaya_nama.dart.
   final String? gayaNama;
 
-  /// Lencana khusus dari admin, contohnya XySpace.
+  /// Lencana khusus dari admin, contohnya XyVerse.
   final String? badge;
   final bool diblokir;
   final String? alasanBlokir;
