@@ -257,9 +257,11 @@ Pendaftaran baru di situs juga melewati verifikasi kode email yang sama.
 
 ## Pengembang
 
-XyCloudStore dikembangkan oleh **XySpace**. Logo XySpace ada di
-`app/assets/brand/xyspace_wordmark.png` dan dipakai pada menu Tentang di aplikasi,
-kaki halaman situs, serta bilah samping dashboard admin.
+XyCloudStore dikembangkan oleh **XyVerse**, studio kecil Indonesia (sebelumnya XySpace).
+Logo XyVerse dipakai sebagai kredit pengembang (baris "Built by XyVerse" di splash,
+menu Tentang aplikasi, dan kaki halaman situs). Logo & ikon APLIKASI XyCloudStore
+(`app/assets/brand/logo_icon*.png` + `wordmark*.png`) terpisah dan tetap dipakai
+untuk launcher, splash, serta ikon notifikasi push.
 
 ## Pemeliharaan Sistem
 

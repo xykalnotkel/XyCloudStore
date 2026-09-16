@@ -44,7 +44,33 @@ class _SplashScreenState extends State<SplashScreen> {
           // gradMidnight #2E1065 → #100030: senada dengan splash native
           // (flutter_native_splash color #2E1065) supaya transisi mulus.
           decoration: const BoxDecoration(gradient: XyTheme.gradMidnight),
-          child: const Center(child: XyWordmark(tinggi: 40, putih: true)),
+          child: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Logo aplikasi XyCloudStore (tetap).
+                const XyWordmark(tinggi: 40, putih: true),
+                const SizedBox(height: 14),
+                // Kredit pengembang: logo studio XyVerse (bukan logo aplikasi).
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Image(
+                      image: AssetImage('assets/brand/xyverse_icon_kecil.png'),
+                      height: 17,
+                    ),
+                    const SizedBox(width: 6),
+                    Text('Built by XyVerse',
+                        style: TextStyle(
+                            color: Colors.white.withOpacity(.72),
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: .3)),
+                  ],
+                ),
+              ],
+            ),
+          ),
         )),
     );
   }

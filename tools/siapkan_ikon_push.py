@@ -1,20 +1,22 @@
 #!/usr/bin/env python3
 """
-Siapkan ikon notifikasi push (small icon Android) dari logo aplikasi.
+Siapkan ikon notifikasi push (small icon Android) dari LOGO APLIKASI
+XyCloudStore (bukan logo studio XyVerse).
 
 Ikon small-icon Android harus monokrom (siluet putih dengan alpha channel),
 persegi ~96x96dp (dirender hingga 384px aman untuk density tinggi).
 
 Alur:
-  1. Baca `app/assets/ikon_push.png` (sudah digenerate dari logo aplikasi),
+  1. Baca `app/assets/ikon_push.png` (sudah digenerate dari LOGO APLIKASI),
      fallback ke `app/assets/brand/logo_icon_putih.png` bila belum ada.
-  2. Tulis ke `api/src/ic-stat-onesignal.png` (module PNG di-bundle Worker,
-     dipakai di import index.js -> dikirim sebagai respons data URI? TIDAK:
-     berkas ini disalin ke res Android oleh tool ini juga).
+  2. Tulis ke `api/src/ic-stat-onesignal.png` (salinan module, dipakai
+     cepat bila dibutuhkan).
   3. Bila `[android_dir]` diberikan, buat
      `android/app/src/main/res/drawable/ic_stat_onesignal_default.png`
      sehingga meng-OVERRIDE ikon bawaan OneSignal (nama drawable sama,
-     resource app menang atas AAR). Hasilnya: ikon push = logo aplikasi.
+     resource app menang atas AAR). Hasilnya: ikon push = logo aplikasi
+     XyCloudStore.
+  4. Cadangan nama alias `ic_stat_xycloudstore.png` (bukan XyVerse).
 
 Idempoten: dijalankan ulang aman.
 """
@@ -86,13 +88,14 @@ def utama() -> int:
         ikon.save(dst_drawable, format="PNG")
         print(f"Tulis {dst_drawable}")
 
-    # 3) cadangan nama alias (untuk payload small_icon lain)
-    if args.android_dir:
-        drawable = os.path.join(args.android_dir, "app", "src", "main", "res", "drawable")
-        dst_alias = os.path.join(drawable, "ic_stat_xyverse.png")
-        ikon.save(dst_alias, format="PNG")
-        print(f"Tulis {dst_alias}")
-    return 0
+  # 3) cadangan nama alias (untuk payload small_icon lain) — nama konsisten
+  #    dengan logo aplikasi XyCloudStore, BUKAN logo studio XyVerse.
+  if args.android_dir:
+      drawable = os.path.join(args.android_dir, "app", "src", "main", "res", "drawable")
+      dst_alias = os.path.join(drawable, "ic_stat_xycloudstore.png")
+      ikon.save(dst_alias, format="PNG")
+      print(f"Tulis {dst_alias}")
+  return 0
 
 
 if __name__ == "__main__":
