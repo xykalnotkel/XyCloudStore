@@ -69,7 +69,7 @@ AI_MODERATION_PROVIDER = "groq"
 AI_MODERATION_MODEL = "openai/gpt-oss-20b"
 # Ini baru boleh menjadi "1" setelah Zero Data Retention di Groq Console
 # benar-benar aktif untuk organisasi pemilik key.
-GROQ_ZDR_CONFIRMED = "0"
+GROQ_ZDR_CONFIRMED = "1"
 # OAuth Android: package id.xycloud.xycloud_order + SHA-1 sertifikat APK rilis.
 # serverClientId Flutter tetap memakai OAuth client tipe Web (lihat docs/login-google.md).
 GOOGLE_CLIENT_ID_ANDROID = "495336144977-1b3k66ngo4nhjf6kuetcl5j1vosfgbg4.apps.googleusercontent.com"

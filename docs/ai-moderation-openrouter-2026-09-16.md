@@ -8,8 +8,9 @@ Tanggal: 17 September 2026
 - Dua credential Groq baru diverifikasi read-only melalui katalog model (HTTP 200); implementasi memilih credential berlabel **XyCloudStore**, bukan milik aplikasi lain.
 - Permintaan completion sintetis memverifikasi model tersebut mendukung Structured Outputs `json_schema` ketat. Tidak ada konten pengguna yang dipakai saat verifikasi.
 - Credential disimpan terenkripsi sebagai GitHub Actions secret `GROQ_API_KEY`; nilainya **belum** dipasang ke Cloudflare dan tidak disimpan ke repo/D1.
+- Pemilik mengonfirmasi Zero Data Retention telah diaktifkan di Groq pada 17 September 2026; guard source kini `GROQ_ZDR_CONFIRMED=1` dan baru efektif pada deploy berikutnya.
 - Adapter OpenRouter tetap tersedia sebagai rollback, tetapi key OpenRouter lama tidak valid.
-- Setelan awal `ai_moderation_mode=off`; filter lokal tetap aktif.
+- Setelan awal `ai_moderation_mode=off`; filter lokal tetap aktif sampai rollout `shadow` dilakukan.
 
 Jangan mengirim key melalui chat publik, query string, dashboard Setelan, atau D1.
 

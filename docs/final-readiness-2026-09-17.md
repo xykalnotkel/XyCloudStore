@@ -32,8 +32,8 @@ Flutter analyze/test/build dan Cargo build/test sengaja **belum dijalankan**, se
 ## Aktivasi eksternal yang masih memerlukan pemilik/vendor
 
 1. **Meta/Facebook** — sediakan Meta App ID dan App Secret, set exact redirect/deletion URL, ubah aplikasi ke Live, dan selesaikan App Review bila scope memerlukannya. Sampai itu tombol Facebook tetap tersembunyi; jangan mengklaim login Facebook live.
-2. **Cloudflare Stream** — token deployment saat ini tidak memiliki `Stream Edit` (API memberi 403). Dibutuhkan token terpisah untuk membuat live input; stream key tidak boleh masuk D1/log/perintah agen.
-3. **Groq ZDR** — konfirmasi Zero Data Retention pada organisasi Groq. Sampai terkonfirmasi, `GROQ_ZDR_CONFIRMED=0` dan mode moderasi D1 harus tetap `off`; lanjutkan `shadow` sebelum `enforce`.
+2. **Cloudflare Stream** — token pada berkas credential aktif (`/user/tokens/verify` HTTP 200), tetapi pemeriksaan read-only `GET /stream/live_inputs` masih ditolak HTTP 403 kode `10002` pada 17 September 2026 setelah pembaruan izin. Periksa kembali `Akun → Stream → Edit`, resource account yang tepat, dan aktivasi subscription; sebaiknya gunakan token Stream terpisah. Stream key tidak boleh masuk D1/log/perintah agen.
+3. **Groq rollout** — pemilik mengonfirmasi Zero Data Retention aktif pada 17 September 2026 dan guard source sudah `GROQ_ZDR_CONFIRMED=1`. Secret masih menunggu deploy ke Worker; mode D1 tetap `off` sampai uji `shadow` sebelum `enforce`.
 4. **Screenshot hero** — tiga screenshot harus diambil dari APK nyata setelah build, diperiksa bebas data pribadi, lalu diproses dengan `tools/siapkan_screenshot_hero.py`.
 
 ## Urutan setelah pemilik mengatakan “jalankan build”

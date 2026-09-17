@@ -52,4 +52,4 @@ Kontrak test ditulis di `api/test/ai_moderation_contract.test.mjs`, tetapi tidak
 
 ## Pembaruan credential — 17 September 2026
 
-Credential Groq baru berlabel XyCloudStore telah lolos verifikasi katalog dan completion sintetis. Provider default dipindah ke Groq `openai/gpt-oss-20b` dengan Structured Outputs `json_schema` ketat. Secret belum dipasang ke Worker dan mode tetap `off` sampai Zero Data Retention organisasi dikonfirmasi; lihat runbook operasi terbaru.
+Credential Groq baru berlabel XyCloudStore telah lolos verifikasi katalog dan completion sintetis. Provider default dipindah ke Groq `openai/gpt-oss-20b` dengan Structured Outputs `json_schema` ketat. Pemilik mengonfirmasi Zero Data Retention organisasi aktif pada 17 September 2026; secret belum dipasang ke Worker dan mode tetap `off` sampai deploy serta rollout `shadow`; lihat runbook operasi terbaru.
