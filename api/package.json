@@ -5,15 +5,18 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "db:init": "wrangler d1 execute xycloud --remote --file=./schema.sql",
     "db:local": "wrangler d1 execute xycloud --local --file=./schema.sql",
     "db:migrate": "wrangler d1 migrations apply xycloud --remote",
     "db:migrate:local": "wrangler d1 migrations apply xycloud --local",
     "db:check": "python3 ../tools/cek_skema_d1.py",
     "test": "node --test test/*.test.mjs"
   },
+  "engines": {
+    "node": ">=22"
+  },
   "devDependencies": {
-    "wrangler": "^3.90.0"
+    "esbuild": "0.28.2",
+    "wrangler": "4.133.0"
   },
   "type": "module"
 }

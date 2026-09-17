@@ -53,7 +53,7 @@ class _TentangScreenState extends State<TentangScreen> {
             ]),
           ),
 
-          ListTile(leading:const Icon(Icons.code_rounded),title:const Text('Source & lisensi streaming'),subtitle:const Text('XyCloudStore memakai engine Moonlight GPLv3'),onTap:()=>launchUrl(Uri.parse('https://github.com/xykalnotkel/XyCloudOrder/releases/tag/v2.6.0'),mode:LaunchMode.externalApplication)),
+          ListTile(leading:const Icon(Icons.code_rounded),title:const Text('Source & lisensi streaming'),subtitle:const Text('XyCloudStore memakai engine Moonlight GPLv3'),onTap:()=>launchUrl(Uri.parse('https://github.com/xykalnotkel/XyCloudStore-build/releases'),mode:LaunchMode.externalApplication)),
           // Batch K: jalur pembaruan kanonik — tabel rilis di server + unduh
           // APK langsung dari aplikasi (menggantikan tautan GitHub Batch J).
           XyBarisMenu(
@@ -100,7 +100,12 @@ class _TentangScreenState extends State<TentangScreen> {
           const SectionHeader('Pengembang'),
           XyCard(
             child: Column(children: [
-              Image.asset('assets/brand/xyverse_wordmark.png', height: 34),
+              Image.asset(
+                XyTheme.of(context).dark
+                    ? 'assets/brand/xyverse_wordmark_putih.png'
+                    : 'assets/brand/xyverse_wordmark.png',
+                height: 34,
+              ),
               const SizedBox(height: 14),
                Text(
                 'XyCloudStore dikembangkan oleh XyVerse, studio kecil asal Indonesia yang membangun '

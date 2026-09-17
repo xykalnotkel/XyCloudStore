@@ -296,6 +296,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   StreamSubscription? _rtState;
   Timer? _mockTicker;
   Timer? _clock;
+  Timer? _csTypingTimer;
 
   List<Promosi> promosi = [];
   Future<void> muatPromosi() async {
@@ -312,6 +313,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   Future<Map<String,dynamic>> infoHapusAkun() async => Map<String,dynamic>.from(await _api.get('/me/hapus/info'));
   Future<void> mintaKodeHapus() async { await _api.post('/me/hapus/kode'); }
   int forumRevisi = 0;
+  int dmRevisi = 0;
   final Map<String,Map<String,dynamic>> _identitasForum = {};
   String namaPengguna(String id, String cadangan) => id==user?.id ? user!.nama : '${_identitasForum[id]?['nama']??cadangan}';
   String? fotoPengguna(String id, String? cadangan) => id==user?.id ? user!.foto : _identitasForum[id]?['foto'] as String? ?? cadangan;
@@ -1604,7 +1606,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     _rtSub?.cancel(); _rtState?.cancel();
     _rt?.dispose(); _rtKatalog?.dispose(); _rtForum?.dispose();
     _rt = null; _rtKatalog = null; _rtForum = null;
-    _mockTicker?.cancel(); _clock?.cancel();
+    _mockTicker?.cancel(); _clock?.cancel(); _csTypingTimer?.cancel();
     await Prefs.hapusToken();
     await Cache.bersihkan();
     await PushService.keluar().timeout(const Duration(seconds: 5), onTimeout: () {});
@@ -1615,6 +1617,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     liveCatalog = const LiveCatalog(); creatorLive = null; liveGalat = null; creatorLiveGalat = null; liveMemuat = false;
     _livePayoutClientId = null; _livePayoutUserId = null;
     forum = []; forumDisukai.clear(); balasanDisukai.clear();
+    forumRevisi = 0; dmRevisi = 0;
     notifikasi = []; notifBelum = 0; notifBelumDibaca = 0;
     favorit.clear(); _ulasan.clear(); _identitasForum.clear();
     csMengetik = false; koneksi = RealtimeState.offline;
@@ -1744,23 +1747,23 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       return;
     }
 
-    _rt = RealtimeService();
+    _rt = RealtimeService(_api);
     _rtState = _rt!.state.listen((s) {
       koneksi = s;
       if(s==RealtimeState.online)unawaited(muatChat());
       notifyListeners();
     });
     _rtSub = _rt!.events.listen(_handleEvent);
-    _rt!.connect(room: 'user:${user!.id}', token: _api.token ?? '');
+    unawaited(_rt!.connect(room: 'user:${user!.id}'));
 
     // channel katalog: stok unit dan banner promo untuk semua pengguna
-    _rtKatalog = RealtimeService();
+    _rtKatalog = RealtimeService(_api);
     _rtKatalog!.events.listen(_handleEvent);
-    _rtKatalog!.connect(room: 'katalog', token: _api.token ?? '');
+    unawaited(_rtKatalog!.connect(room: 'katalog'));
 
-    _rtForum = RealtimeService();
+    _rtForum = RealtimeService(_api);
     _rtForum!.events.listen(_handleEvent);
-    _rtForum!.connect(room: 'forum', token: _api.token ?? '');
+    unawaited(_rtForum!.connect(room: 'forum'));
   }
 
   void _handleEvent(RealtimeEvent e) {
@@ -1797,7 +1800,15 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         _terimaPesan(ChatMessage.fromJson(e.payload));
         break;
       case 'cs.typing':
+        _csTypingTimer?.cancel();
         csMengetik = e.payload['typing'] == true;
+        if (csMengetik) {
+          // Jangan biarkan indikator macet bila tab admin tertutup tanpa event false.
+          _csTypingTimer = Timer(const Duration(seconds: 4), () {
+            csMengetik = false;
+            notifyListeners();
+          });
+        }
         break;
       case 'banner.update':
         try {
@@ -1827,6 +1838,11 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
           );
           unawaited(muatLive(senyap: true));
         } catch (_) {}
+        break;
+      case 'dm.baru':
+        // Layar percakapan mengamati revisi ini lalu menarik ulang riwayat.
+        // Payload tidak ditahan global agar isi DM tetap sesingkat mungkin di memori.
+        dmRevisi++;
         break;
       case 'notif.baru':
         try {
@@ -2065,6 +2081,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     _rtForum?.dispose();
     _mockTicker?.cancel();
     _clock?.cancel();
+    _csTypingTimer?.cancel();
     _api.dispose();
     super.dispose();
   }

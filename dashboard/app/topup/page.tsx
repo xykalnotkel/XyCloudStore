@@ -8,6 +8,15 @@ import {
 } from "@/components/ui/kit";
 import { konfirm } from "@/components/ui/dialog";
 
+function tautanBukti(value: unknown): string | null {
+  try {
+    const u = new URL(String(value || ""));
+    if (u.protocol !== "https:") return null;
+    if (u.hostname !== "api.xycloud.my.id" && u.hostname !== "res.cloudinary.com") return null;
+    return u.href;
+  } catch { return null; }
+}
+
 export default function TopupPage() {
   const { rows, loading, err, setErr, reload } = useAdminList("/api/admin/topup");
   const [ok, setOk] = useState("");
@@ -236,8 +245,8 @@ export default function TopupPage() {
                     {Number(r.webhook_count || 0) > 0 && <div className="text-[10px] text-[#7C738F]">{r.webhook_count} webhook</div>}
                   </td>
                   <td className="px-4 py-3">
-                    {r.bukti ? (
-                      <a href={r.bukti} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[#7C3AED] font-semibold text-[12px]">
+                    {tautanBukti(r.bukti) ? (
+                      <a href={tautanBukti(r.bukti)!} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-[#7C3AED] font-semibold text-[12px]">
                         <ExternalLink size={12} /> Bukti
                       </a>
                     ) : "—"}

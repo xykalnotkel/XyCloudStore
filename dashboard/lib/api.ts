@@ -5,7 +5,8 @@ export type AdminFetchOpts = {
   headers?: Record<string,string>;
 };
 
-const BASE = process.env.NEXT_PUBLIC_API_BASE || "https://api.xycloud.my.id";
+export const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "https://api.xycloud.my.id";
+const BASE = API_BASE;
 
 export async function adminFetch(path: string, opts: AdminFetchOpts = {}) {
   const key = opts.adminKey || (typeof window !== "undefined" ? sessionStorage.getItem("xy_admin_key") || "" : "");

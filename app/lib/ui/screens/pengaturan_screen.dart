@@ -1392,8 +1392,8 @@ class _KeamananScreenState extends State<KeamananScreen> {
   }
 
   Future<void> _simpan() async {
-    if (_baru.text.length < 6) {
-      setState(() => pesan = 'Password baru minimal 6 karakter');
+    if (_baru.text.length < 8 || _baru.text.length > 128) {
+      setState(() => pesan = 'Password baru harus 8–128 karakter');
       return;
     }
     if (_baru.text != _ulang.text) {
@@ -1569,7 +1569,7 @@ class _KeamananScreenState extends State<KeamananScreen> {
             controller: _baru,
             obscureText: !lihat,
             decoration: const InputDecoration(
-              hintText: 'Minimal 6 karakter',
+              hintText: '8–128 karakter',
               prefixIcon: Icon(Icons.lock_reset_rounded),
             ),
           ),

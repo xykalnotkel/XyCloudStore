@@ -49,3 +49,7 @@ Credential yang disediakan berformat OpenRouter, tetapi pemeriksaan read-only me
 ## Validasi yang diizinkan
 
 Kontrak test ditulis di `api/test/ai_moderation_contract.test.mjs`, tetapi tidak dijalankan. Sesuai instruksi, tidak ada test suite, compile, analyze, build, atau GitHub Actions pada batch ini. Review ringan menggunakan pemeriksaan sintaks, parse schema SQLite, audit route, scan secret, dan `git diff --check` sebelum commit.
+
+## Pembaruan credential — 17 September 2026
+
+Credential Groq baru berlabel XyCloudStore telah lolos verifikasi katalog dan completion sintetis. Provider default dipindah ke Groq `openai/gpt-oss-20b` dengan Structured Outputs `json_schema` ketat. Secret belum dipasang ke Worker dan mode tetap `off` sampai Zero Data Retention organisasi dikonfirmasi; lihat runbook operasi terbaru.

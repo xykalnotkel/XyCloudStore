@@ -692,6 +692,8 @@ class _BarInput extends StatelessWidget {
                 controller: ctrl,
                 minLines: 1,
                 maxLines: 4,
+                maxLength: 5000,
+                buildCounter: (_, {required currentLength, required isFocused, maxLength}) => null,
                 textInputAction: TextInputAction.send,
                 onSubmitted: (_) => onKirim(null),
                 onChanged: onKetik,

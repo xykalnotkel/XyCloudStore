@@ -3,12 +3,12 @@ import assert from 'node:assert/strict';
 import {webcrypto} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {build} from 'esbuild';
-import {Miniflare} from 'miniflare';
+import {Miniflare,convertV4MiniflareOptions} from 'miniflare';
 
 test('Sewa nyata: saldo/host atomik, idempotensi, ACL agen, akhir sesi dan CS 7 hari',{timeout:120000},async()=>{
  const js=await build({entryPoints:['src/index.js'],bundle:true,format:'esm',loader:{'.html':'text','.png':'binary'},write:false});
  const secret='test-signature-only';
- const mf=new Miniflare({modules:true,script:js.outputFiles[0].text,compatibilityDate:'2025-01-01',d1Databases:['DB'],durableObjects:{HUB:'RealtimeHub'},bindings:{JWT_SECRET:secret,ADMIN_KEY:'test-admin'}});
+ const mf=new Miniflare(convertV4MiniflareOptions({modules:true,script:js.outputFiles[0].text,compatibilityDate:'2025-01-01',d1Databases:['DB'],durableObjects:{HUB:'RealtimeHub'},bindings:{JWT_SECRET:secret,ADMIN_KEY:'test-admin'}}));
  try{
   const db=await mf.getD1Database('DB');
   const statements=JSON.parse(execFileSync('python3',['-c',"import json,sqlite3\na=[];b=''\nfor c in open('schema.sql').read():\n b+=c\n if c==';' and sqlite3.complete_statement(b):a.append(b);b=''\nprint(json.dumps(a))"],{encoding:'utf8'}));

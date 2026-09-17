@@ -1,25 +1,28 @@
 # Operasi Moderasi AI — OpenRouter/Grok atau GroqCloud
 
-Tanggal: 16 September 2026
+Tanggal: 17 September 2026
 
 ## Status saat coding
 
-- Provider default memakai API OpenAI-compatible OpenRouter dan model `x-ai/grok-4.3`.
-- Adapter GroqCloud juga tersedia dengan model default `llama-3.3-70b-versatile`; adapter hanya siap bila `GROQ_ZDR_CONFIRMED=1` karena ZDR Groq adalah kontrol organisasi, bukan parameter request.
-- Credential di berkas kerja dikenali sebagai format OpenRouter, tetapi pemeriksaan read-only `GET /api/v1/auth/key` mengembalikan HTTP 401.
-- Credential tersebut **tidak** dipasang ke Cloudflare dan tidak disimpan ke repo/D1.
+- Provider default sekarang memakai API OpenAI-compatible GroqCloud dan model aktif `openai/gpt-oss-20b`.
+- Dua credential Groq baru diverifikasi read-only melalui katalog model (HTTP 200); implementasi memilih credential berlabel **XyCloudStore**, bukan milik aplikasi lain.
+- Permintaan completion sintetis memverifikasi model tersebut mendukung Structured Outputs `json_schema` ketat. Tidak ada konten pengguna yang dipakai saat verifikasi.
+- Credential disimpan terenkripsi sebagai GitHub Actions secret `GROQ_API_KEY`; nilainya **belum** dipasang ke Cloudflare dan tidak disimpan ke repo/D1.
+- Adapter OpenRouter tetap tersedia sebagai rollback, tetapi key OpenRouter lama tidak valid.
 - Setelan awal `ai_moderation_mode=off`; filter lokal tetap aktif.
 
-Minta atau buat API key OpenRouter baru sebelum mengaktifkan AI. Jangan mengirim key melalui chat publik, query string, dashboard Setelan, atau D1.
+Jangan mengirim key melalui chat publik, query string, dashboard Setelan, atau D1.
 
 ## Memasang credential
 
+Aktifkan **Zero Data Retention** lebih dahulu di Groq Console → Data Controls, kemudian:
+
 ```bash
 cd api
-npx wrangler secret put OPENROUTER_API_KEY
+npx wrangler secret put GROQ_API_KEY
 ```
 
-Atau untuk GroqCloud, aktifkan **Zero Data Retention** lebih dahulu di Groq Console → Data Controls, lalu pasang `AI_MODERATION_PROVIDER=groq`, model yang disetujui, secret `GROQ_API_KEY`, dan `GROQ_ZDR_CONFIRMED=1`. Nilai konfirmasi adalah guard operasional; aplikasi tidak dapat mengaktifkan ZDR provider dari request.
+Set `GROQ_ZDR_CONFIRMED="1"` hanya setelah kontrol organisasi itu benar-benar aktif. Nilai konfirmasi adalah guard operasional; aplikasi tidak dapat mengaktifkan ZDR provider dari request. Untuk rollback ke OpenRouter, ubah provider/model dan pasang `OPENROUTER_API_KEY` yang valid.
 
 Setelah deploy, masuk sebagai pemilik dan buka **Moderasi → AI Safety → Verifikasi koneksi**. Endpoint internal hanya memanggil metadata credential tanpa mengirim teks pengguna dan hanya mengembalikan `OK`, `AUTH`, `QUOTA`, `RATE_LIMIT`, `TIMEOUT`, atau `NETWORK`.
 
@@ -49,7 +52,7 @@ AI tidak menerima:
 - email, nomor telepon, token, kredensial akun, atau payload pembayaran yang disimpan terpisah;
 - ID pengguna sebagai parameter model.
 
-Teks publik tetap dapat berisi data yang ditulis sendiri oleh pengguna. Karena itu permintaan menetapkan `provider.data_collection=deny` dan `provider.zdr=true` agar hanya endpoint upstream yang tidak mengumpulkan/menyimpan prompt yang boleh dipilih.
+Teks publik tetap dapat berisi data yang ditulis sendiri oleh pengguna. Untuk Groq, pengiriman hanya diizinkan setelah guard `GROQ_ZDR_CONFIRMED=1` menandai Zero Data Retention organisasi sudah aktif. Adapter OpenRouter menetapkan `provider.data_collection=deny` dan `provider.zdr=true` pada setiap permintaan.
 
 ## Kebijakan penegakan
 
@@ -59,7 +62,7 @@ Teks publik tetap dapat berisi data yang ditulis sendiri oleh pengguna. Karena i
 4. Hanya `block` berkeyakinan cukup pada mode `enforce` yang menolak publikasi.
 5. `review` tidak otomatis menyembunyikan konten dan harus dinilai moderator.
 6. AI tidak memblokir akun, menghapus saldo, atau menjatuhkan sanksi otomatis.
-7. Jika OpenRouter timeout/rate-limit/error, konten yang lolos filter lokal tetap berjalan (fail-open) dan error code dicatat.
+7. Jika provider timeout/rate-limit/error, konten yang lolos filter lokal tetap berjalan (fail-open) dan error code dicatat.
 
 ## Data dan retensi
 
@@ -75,7 +78,7 @@ Teks publik tetap dapat berisi data yang ditulis sendiri oleh pengguna. Karena i
 - Input dibatasi 12.000 karakter, keluaran 180 token, suhu nol, dan timeout 6,5 detik.
 - Cache 30 hari mencegah pembayaran ulang untuk konten identik dalam konteks yang sama.
 - Dashboard menampilkan jumlah prompt/completion token, bukan perkiraan rupiah yang bisa keliru ketika harga model berubah.
-- Atur spending limit/guardrail di akun OpenRouter sebelum enforce.
+- Atur spending limit/guardrail di organisasi Groq sebelum enforce.
 
 ## Rollback
 

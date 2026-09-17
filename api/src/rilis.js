@@ -70,7 +70,7 @@ export async function infoRilis(env, ctx) {
   const tersimpan = await cache.match(kunciCache);
   if (tersimpan) return tersimpan.json();
 
-  const repo = env.REPO_RILIS || 'xykalnotkel/XyCloudOrder';
+  const repo = env.REPO_RILIS || 'xykalnotkel/XyCloudStore-build';
   const r = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
     headers: { 'User-Agent': 'XyCloudStore-Worker', Accept: 'application/vnd.github+json' },
   });
@@ -119,7 +119,7 @@ export async function unduhApk(env, ctx, namaBerkas) {
   const berkas = (rilis.berkas || []).find((b) => b.nama === namaBerkas);
   if (!berkas || !rilis.versi) return new Response('Berkas tidak ditemukan', { status: 404 });
 
-  const repo = env.REPO_RILIS || 'xykalnotkel/XyCloudOrder';
+  const repo = env.REPO_RILIS || 'xykalnotkel/XyCloudStore-build';
   const asal = `https://github.com/${repo}/releases/download/${rilis.versi}/${namaBerkas}`;
 
   const kunciCache = new Request(`https://xycloud.my.id/__cache/apk/${rilis.versi}/${namaBerkas}`);

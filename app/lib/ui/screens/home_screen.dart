@@ -44,7 +44,7 @@ class HomeScreen extends StatelessWidget {
           onRefresh: s.refresh,
           child: ListView(
             physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
-            padding: const EdgeInsets.fromLTRB(XySpace.page, 6, XySpace.page, 120),
+            padding: const EdgeInsets.fromLTRB(XySpacing.page, 6, XySpacing.page, 120),
             children: [
               _Header(user: u, koneksi: s.koneksi, notif: s.notifBelum),
               const SizedBox(height: 20),
@@ -515,19 +515,19 @@ class _MenuCepat extends StatelessWidget {
   // ikon 3D glossy (aset assets/ikon/3d_<id>.png) dengan fallback ikon gradien
   // bila asetnya belum ada. 8 item = 2 baris rapi.
   static const _menu = [
-    ('topup', 'Top Up', Icons.account_balance_wallet_rounded, WalletScreen()),
-    ('voucher', 'Voucher', Icons.confirmation_number_rounded, VoucherScreen()),
-    ('referral', 'Referral', Icons.share_rounded, ReferralScreen()),
-    ('favorit', 'Favorit', Icons.favorite_rounded, FavoritScreen()),
-    ('statistik', 'Statistik', Icons.bar_chart_rounded, StatistikScreen()),
-    ('peringkat', 'Peringkat', Icons.leaderboard_rounded, LeaderboardScreen()),
-    ('tier', 'Tier Saya', Icons.workspace_premium_rounded, TierScreen()),
-    ('live', 'Xy Live', Icons.live_tv_rounded, XyLiveScreen()),
+    ('Top Up', Icons.account_balance_wallet_rounded, WalletScreen()),
+    ('Voucher', Icons.confirmation_number_rounded, VoucherScreen()),
+    ('Referral', Icons.share_rounded, ReferralScreen()),
+    ('Favorit', Icons.favorite_rounded, FavoritScreen()),
+    ('Statistik', Icons.bar_chart_rounded, StatistikScreen()),
+    ('Peringkat', Icons.leaderboard_rounded, LeaderboardScreen()),
+    ('Tier Saya', Icons.workspace_premium_rounded, TierScreen()),
+    ('Xy Live', Icons.live_tv_rounded, XyLiveScreen()),
   ];
 
   @override
   Widget build(BuildContext context) {
-    Widget item(String ikon, String label, IconData iconData, Widget layar) {
+    Widget item(String label, IconData iconData, Widget layar) {
       return Pressable(
         onTap: () => Navigator.push(context, xyRoute(layar)),
         scale: .94,
@@ -536,24 +536,17 @@ class _MenuCepat extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 2),
           child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          // Ikon 3D glossy-clay: aset AI transparan (lihat assets/ikon/3d_*.png).
-          // Item tanpa aset memakai fallback pil gradien + ikon material.
-          Image.asset(
-            'assets/ikon/3d_$ikon.png',
+          // Ikon Material konsisten, tajam pada semua DPI, dan tidak memicu
+          // decode PNG terpisah pada setiap item menu cepat.
+          Container(
             width: 46,
             height: 46,
-            fit: BoxFit.contain,
-            filterQuality: FilterQuality.medium,
-            errorBuilder: (_, __, ___) => Container(
-              width: 46,
-              height: 46,
-              decoration: BoxDecoration(
-                gradient: XyTheme.gradPrimary,
-                borderRadius: BorderRadius.circular(15),
-                boxShadow: XyTheme.glow(XyTheme.primary, .22),
-              ),
-              child: Icon(iconData, color: Colors.white, size: 24),
+            decoration: BoxDecoration(
+              gradient: XyTheme.gradPrimary,
+              borderRadius: BorderRadius.circular(15),
+              boxShadow: XyTheme.glow(XyTheme.primary, .22),
             ),
+            child: Icon(iconData, color: Colors.white, size: 24),
           ),
           const SizedBox(height: 6),
           Text(
@@ -594,8 +587,8 @@ class _MenuCepat extends StatelessWidget {
         ),
         itemCount: _menu.length,
         itemBuilder: (_, i) {
-          final (ikon, label, iconData, layar) = _menu[i];
-          return item(ikon, label, iconData, layar);
+          final (label, iconData, layar) = _menu[i];
+          return item(label, iconData, layar);
         },
       ),
     );

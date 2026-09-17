@@ -388,23 +388,70 @@ async function pulihkanBlokirKadaluarsa(env, userId) {
 
 // ---------- password ----------
 const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+const PW_ITERATIONS = 210_000;
+const PW_PREFIX = 'pbkdf2-sha256';
+const encoderPw = new TextEncoder();
 
-async function hashPw(password, salt) {
-  const data = new TextEncoder().encode(`${salt}:${password}`);
-  return hex(await crypto.subtle.digest('SHA-256', data));
+function bytesHexPw(value) {
+  const s = String(value || '').toLowerCase();
+  if (!/^[a-f0-9]+$/.test(s) || s.length % 2 !== 0) return null;
+  const out = new Uint8Array(s.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(s.slice(i * 2, i * 2 + 2), 16);
+  return out;
 }
 
-/** Format tersimpan: `salt$hash`. Password lama (plaintext seed) tetap diterima. */
+function samaKonstanPw(a, b) {
+  if (!(a instanceof Uint8Array) || !(b instanceof Uint8Array) || a.length !== b.length) return false;
+  let beda = 0;
+  for (let i = 0; i < a.length; i++) beda |= a[i] ^ b[i];
+  return beda === 0;
+}
+
+async function pbkdf2Pw(password, salt, iterations) {
+  const key = await crypto.subtle.importKey('raw', encoderPw.encode(String(password)), 'PBKDF2', false, ['deriveBits']);
+  return new Uint8Array(await crypto.subtle.deriveBits({
+    name: 'PBKDF2', hash: 'SHA-256', salt, iterations,
+  }, key, 256));
+}
+
+// Hash SHA-256 satu putaran hanya dipertahankan untuk migrasi transparan akun
+// lama. Semua simpanan baru memakai PBKDF2 dan salt acak 128-bit.
+async function hashPwLama(password, salt) {
+  return new Uint8Array(await crypto.subtle.digest('SHA-256', encoderPw.encode(`${salt}:${password}`)));
+}
+
+/** Format tersimpan: `pbkdf2-sha256$iterasi$saltHex$hashHex`. */
 async function buatPw(password) {
-  const salt = hex(crypto.getRandomValues(new Uint8Array(8)));
-  return `${salt}$${await hashPw(password, salt)}`;
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const hash = await pbkdf2Pw(password, salt, PW_ITERATIONS);
+  return `${PW_PREFIX}$${PW_ITERATIONS}$${hex(salt)}$${hex(hash)}`;
+}
+
+function pwPerluUpgrade(tersimpan) {
+  const bagian = String(tersimpan || '').split('$');
+  return bagian.length !== 4 || bagian[0] !== PW_PREFIX || Number(bagian[1]) < PW_ITERATIONS;
 }
 
 async function cocokPw(password, tersimpan) {
-  if (!tersimpan || String(tersimpan).startsWith('sosial:')) return false;
-  if (!tersimpan.includes('$')) return tersimpan === password; // data lama
-  const [salt, h] = tersimpan.split('$');
-  return (await hashPw(password, salt)) === h;
+  const nilai = String(tersimpan || '');
+  if (!nilai || nilai.startsWith('sosial:')) return false;
+  const bagian = nilai.split('$');
+  if (bagian.length === 4 && bagian[0] === PW_PREFIX) {
+    const iterations = Number(bagian[1]);
+    const salt = bytesHexPw(bagian[2]);
+    const harapan = bytesHexPw(bagian[3]);
+    if (!Number.isSafeInteger(iterations) || iterations < 100_000 || iterations > 1_000_000
+        || !salt || salt.length < 16 || !harapan || harapan.length !== 32) return false;
+    return samaKonstanPw(await pbkdf2Pw(password, salt, iterations), harapan);
+  }
+  if (bagian.length === 2) {
+    const salt = bagian[0];
+    const harapan = bytesHexPw(bagian[1]);
+    if (!/^[a-f0-9]{16,64}$/i.test(salt) || !harapan || harapan.length !== 32) return false;
+    return samaKonstanPw(await hashPwLama(password, salt), harapan);
+  }
+  // Seed/plaintext warisan hanya untuk migrasi satu kali saat login berhasil.
+  return bagian.length === 1 && nilai === String(password);
 }
 
 /** Kode OTP 6 digit. */
@@ -796,7 +843,14 @@ function halamanStatusPenghapusan(status, note = '') {
   return `<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>Penghapusan Data XyCloudStore</title></head><body style="margin:0;background:#f6f3ff;color:#201936;font-family:Arial,sans-serif"><main style="max-width:620px;margin:64px auto;padding:28px;background:#fff;border:1px solid #e5dcff;border-radius:20px"><div style="color:#6c2be2;font-weight:800">XYCLOUDSTORE</div><h1 style="font-size:25px">${label}</h1><p>${aman || 'Simpan kode konfirmasi Anda. Status halaman ini diperbarui otomatis saat penghapusan selesai.'}</p><p style="color:#625b72;font-size:14px">Jika masih menunggu, selesaikan pesanan aktif/saldo atau hubungi dukungan melalui aplikasi.</p></main></body></html>`;
 }
 
-const emailValid = (v) => /^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(String(v || '').trim());
+const emailValid = (v) => {
+  const s = String(v || '').trim();
+  return s.length <= 254 && /^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(s);
+};
+const passwordBaruValid = (v) => {
+  const panjang = String(v || '').length;
+  return panjang >= 8 && panjang <= 128;
+};
 
 // Domain email sekali pakai (disposable) yang umum dipakai untuk mendaftar
 // massal/mabuk-mabukan. Pendaftaran dengan domain ini ditolak di server;
@@ -1884,16 +1938,34 @@ export default {
       const room = decodeURIComponent(path.slice(4));
       if (!['forum','katalog'].includes(room)) {
         let admin = null;
+        let userTicket = null;
         const wsTicket = await verify(url.searchParams.get('ticket') || '', env.JWT_SECRET);
         if (wsTicket?.typ === 'admin-ws' && wsTicket.room === room
             && ['pemilik','cs'].includes(wsTicket.peran)) {
           admin = { nama: wsTicket.nama || 'Admin', peran: wsTicket.peran };
+        } else if (wsTicket?.typ === 'user-ws' && wsTicket.room === room
+            && room === `user:${wsTicket.sub}`) {
+          const u = await env.DB.prepare(
+            'SELECT id,session_version,deleted_at FROM users WHERE id=?',
+          ).bind(wsTicket.sub).first();
+          if (u && !u.deleted_at && Number(u.session_version || 0) === Number(wsTicket.sv || 0)) {
+            userTicket = wsTicket;
+          }
         }
-        const wsHeaders=new Headers(req.headers);wsHeaders.set('Authorization','Bearer '+(url.searchParams.get('token')||''));
-        const user = await auth(new Request(req.url,{headers:wsHeaders}),env);
-        const exists = user && await env.DB.prepare('SELECT id FROM users WHERE id=?').bind(user.sub).first();
+
+        // Kompatibilitas sementara untuk APK lama. Klien baru selalu memakai
+        // ticket satu menit sehingga bearer sesi tidak masuk query string.
+        let legacyUser = null;
+        if (!admin && !userTicket && url.searchParams.get('token')) {
+          const wsHeaders = new Headers(req.headers);
+          wsHeaders.set('Authorization', `Bearer ${url.searchParams.get('token') || ''}`);
+          legacyUser = await auth(new Request(req.url, { headers: wsHeaders }), env);
+        }
+        const user = userTicket || legacyUser;
+        const exists = user && await env.DB.prepare(
+          'SELECT id FROM users WHERE id=? AND deleted_at IS NULL',
+        ).bind(user.sub).first();
         if (!admin && (!exists || room !== `user:${user.sub}`)) return err('Unauthorized room',401,env);
-        if (admin && !['pemilik','cs'].includes(admin.peran)) return err('Akses chat ditolak',403,env);
       }
       const id = env.HUB.idFromName(room);
       return env.HUB.get(id).fetch(req);
@@ -2279,6 +2351,39 @@ ${halaman.map(([u, p2, f]) => `  <url>
 
     if (path.startsWith('/img/')) return layaniGambar(env, path, req,ctx);
     if (path.startsWith('/media/')) return layaniMedia(env, path.slice('/media/'.length), req, ctx);
+
+    // Screenshot hero berasal dari APK rilis dan ditempatkan oleh tool final di
+    // dashboard publik. Worker memproksi hanya tiga nama tetap lewat domain
+    // sendiri; HTML tidak bergantung pada URL penyimpanan pihak ketiga.
+    if (path.startsWith('/brand/screens/')) {
+      const nama = path.slice('/brand/screens/'.length);
+      if (!['home.webp', 'stream.webp', 'community.webp'].includes(nama)) {
+        return err('Screenshot tidak ditemukan', 404, env);
+      }
+      try {
+        const sumber = await fetch(`https://admin.xycloud.my.id/brand/screens/${nama}`, {
+          redirect: 'error',
+          cf: { cacheEverything: true, cacheTtl: 3600 },
+        });
+        const panjang = Number(sumber.headers.get('content-length') || 0);
+        if (!sumber.ok || !String(sumber.headers.get('content-type') || '').toLowerCase().startsWith('image/webp')
+            || panjang > 4_000_000) {
+          try { await sumber.body?.cancel(); } catch (_) { /* noop */ }
+          return err('Screenshot belum tersedia', 404, env);
+        }
+        const bytes = await sumber.arrayBuffer();
+        if (bytes.byteLength > 4_000_000) return err('Screenshot terlalu besar', 413, env);
+        return new Response(bytes, {
+          headers: {
+            'Content-Type': 'image/webp',
+            'Cache-Control': 'public, max-age=3600, stale-while-revalidate=86400',
+            'X-Content-Type-Options': 'nosniff',
+          },
+        });
+      } catch (_) {
+        return err('Screenshot belum tersedia', 404, env);
+      }
+    }
 
     if (path === '/brand/og.png') {
       return new Response(OG_PNG, {
@@ -3125,6 +3230,7 @@ async function statistikPublik(env) {
         const email = String(body.email || '').trim().toLowerCase();
         const password = String(body.password || '');
         if (!email || !password) return err('Email dan password wajib diisi', 400, env);
+        if (email.length > 254 || password.length > 256) return err('Email atau password belum sesuai.', 401, env);
         await requireRate(env,'login-email',email,10,900);
 
         const u = await env.DB.prepare('SELECT * FROM users WHERE lower(email) = ?').bind(email).first();
@@ -3140,8 +3246,8 @@ async function statistikPublik(env) {
             pesan: 'Email belum diverifikasi. Periksa kode terakhir atau gunakan Kirim Ulang setelah jeda.' }, 200, env);
         }
 
-        // upgrade otomatis password lama ke bentuk hash
-        if (!String(u.password).includes('$')) {
+        // Upgrade transparan plaintext, SHA-256 lama, atau iterasi PBKDF2 lama.
+        if (pwPerluUpgrade(u.password)) {
           const baru = await buatPw(password);
           ctx.waitUntil(env.DB.prepare('UPDATE users SET password=? WHERE id=?').bind(baru, u.id).run());
         }
@@ -3161,7 +3267,10 @@ async function statistikPublik(env) {
         const password = String(body.password || '');
         const phone = String(body.phone || '').trim() || null;
 
-        if (nama.length < 3) return err('Nama minimal 3 karakter', 400, env);
+        if (nama.length < 3 || nama.length > 80) return err('Nama harus 3–80 karakter', 400, env);
+        if (phone && (phone.length > 24 || !/^\+?[0-9\s().-]{8,24}$/.test(phone))) {
+          return err('Nomor WhatsApp tidak valid', 400, env);
+        }
         const kasarDaftar = kataTerlarangDalam(nama);
         if (kasarDaftar) return err(`Nama mengandung kata terlarang (${kasarDaftar.jenis}). Ganti dengan nama lain.`, 422, env);
         if (!emailValid(email)) return err('Format email tidak valid', 400, env);
@@ -3169,7 +3278,7 @@ async function statistikPublik(env) {
           ctx.waitUntil(catatLog(env, 'keamanan', `Pendaftaran ditolak: email disposable ${email} (IP ${ip})`));
           return err('Email sementara/disposable tidak bisa dipakai untuk mendaftar. Gunakan email utama kamu.', 403, env);
         }
-        if (password.length < 6) return err('Password minimal 6 karakter', 400, env);
+        if (!passwordBaruValid(password)) return err('Password harus 8–128 karakter', 400, env);
 
         const ada = await env.DB.prepare('SELECT id, email_verified FROM users WHERE lower(email) = ?')
           .bind(email).first();
@@ -3269,7 +3378,7 @@ async function statistikPublik(env) {
         const email = String(body.email || '').trim().toLowerCase();
         const kode = String(body.kode || '').trim();
         const password = String(body.password || '');
-        if (password.length < 6) return err('Password minimal 6 karakter', 400, env);
+        if (!passwordBaruValid(password)) return err('Password harus 8–128 karakter', 400, env);
 
         const u = await env.DB.prepare('SELECT * FROM users WHERE lower(email) = ?').bind(email).first();
         if (!u) return err('Akun tidak ditemukan',404,env);
@@ -3988,16 +4097,20 @@ async function statistikPublik(env) {
           return json(results, 200, env);
         }
         if (a === 'cs/reply' && req.method === 'POST') {
-          const b = await req.json();
+          const b = await req.json().catch(() => ({}));
           const room = b.room, teks = String(b.teks ?? '');
           if(!/^user:[A-Za-z0-9_-]+$/.test(String(room||''))||!teks.trim())return err('Room dan pesan diperlukan',400,env);
+          if(teks.length>5000)return err('Pesan maksimal 5.000 karakter',400,env);
           const reply_to = String(b.reply_to ?? '').slice(0,64) || null;
           const reply_teks = String(b.reply_teks ?? '').slice(0,300) || null;
           const reply_tipe = ['teks','gambar','audio'].includes(b.reply_tipe) ? b.reply_tipe : 'teks';
           const msg = { id: uid('m_'), room, dari: 'cs', tipe:'teks', teks, reply_to, reply_teks, reply_tipe, waktu: new Date().toISOString() };
           await env.DB.prepare('INSERT INTO cs_messages (id,room,user_id,dari,tipe,teks,reply_to,reply_teks,reply_tipe,waktu) VALUES (?,?,?,?,?,?,?,?,?,?)')
             .bind(msg.id, room, room.split(':')[1] || '', 'cs', 'teks', teks, reply_to, reply_teks, reply_tipe, msg.waktu).run();
-          ctx.waitUntil(push(env, room, 'chat.message', msg));
+          ctx.waitUntil(Promise.all([
+            push(env, room, 'chat.message', msg),
+            push(env, 'cs:inbox', 'chat.message', { ...msg, user_id: room.split(':')[1] || '' }),
+          ]));
           ctx.waitUntil(kirimPush(env, {
             userId: room.split(':')[1],
             judul: 'Kirana membalas pesanmu',
@@ -4005,11 +4118,11 @@ async function statistikPublik(env) {
             data: { tipe: 'cs' },
             tombol: [{ id: 'balas', text: 'Balas' }, { id: 'buka', text: 'Buka Chat' }],
           }));
-          ctx.waitUntil(kirimPush(env,{userId:room.slice(5),judul:'Tim CS membalas pesanmu',pesan:String(teks).slice(0,120),data:{tipe:'cs'},tombol:[{id:'balas',text:'Balas'}]}));
           return json(msg, 201, env);
         }
         if (a === 'cs/typing' && req.method === 'POST') {
-          const { room, typing } = await req.json();
+          const { room, typing } = await req.json().catch(() => ({}));
+          if (!/^user:[A-Za-z0-9_-]+$/.test(String(room || ''))) return err('Room tidak valid', 400, env);
           ctx.waitUntil(push(env, room, 'cs.typing', { typing: !!typing }));
           return json({ ok: true }, 200, env);
         }
@@ -5465,7 +5578,7 @@ async function statistikPublik(env) {
         .bind(me.sub).first();
       if (!statusAkun || statusAkun.deleted_at) return err('Sesi berakhir. Silakan masuk kembali.', 401, env);
       if (statusAkun?.diblokir === 1 && !p.startsWith('cs/') && !p.startsWith('notifikasi')
-          && p !== 'me' && p !== 'me/blokir' && p !== 'me/banding') {
+          && p !== 'me' && p !== 'me/blokir' && p !== 'me/banding' && p !== 'ws/ticket') {
         return err(
           statusAkun.alasan_blokir
             ? `Akunmu sedang dibekukan. Alasan: ${statusAkun.alasan_blokir}`
@@ -6158,13 +6271,20 @@ async function statistikPublik(env) {
         if (idU === me.sub) return err('Tidak bisa mengirim ke diri sendiri.', 422, env);
         if (!(await bolehLanjut(env, `dm:${me.sub}`, 20, 60))) return err('Terlalu banyak pesan. Pelan-pelan.', 429, env);
         const b = await req.json().catch(() => ({}));
-        const target = await env.DB.prepare('SELECT id,nama,diblokir,deleted_at FROM users WHERE id=?').bind(idU).first();
+        const target = await env.DB.prepare('SELECT id,nama,diblokir,deleted_at,notif_dm FROM users WHERE id=?').bind(idU).first();
         if (!target || target.deleted_at || target.diblokir === 1) return err('Akun tidak tersedia.', 404, env);
-        const teks = String(b.teks ?? '').slice(0, 4000);
+        const teks = String(b.teks ?? '');
+        if (teks.length > 4000) return err('Pesan maksimal 4.000 karakter', 400, env);
         const audio = b.audio, gambarM = b.gambar;
         const tipe = ['teks', 'audio', 'gambar'].includes(b.tipe) ? b.tipe : (audio ? 'audio' : (gambarM ? 'gambar' : 'teks'));
         const durasi = Number.isFinite(Number(b.durasi)) ? Number(b.durasi) : null;
         if (!teks.trim() && !audio && !gambarM) return err('Pesan kosong', 400, env);
+        if (teks.trim()) {
+          // DM tetap privat dan tidak dikirim ke AI, tetapi filter deterministik
+          // menahan phishing/link spam serta pelecehan yang sudah dikenal.
+          const cek = periksaTeks(teks, { maksUrl: 2 });
+          if (!cek.ok) return err(cek.alasan, 400, env);
+        }
         if (tipe === 'audio' && (!audio || !durasi || durasi > 600)) return err('Pesan suara tidak valid', 400, env);
         let urlAudio = null, urlGambar = null;
         if (tipe === 'audio') {
@@ -6217,6 +6337,27 @@ async function statistikPublik(env) {
       if (p === 'me/simpan' && req.method === 'GET') {
         const r = await env.DB.prepare('SELECT post_id FROM simpan_post WHERE user_id=? ORDER BY waktu DESC LIMIT 200').bind(me.sub).all();
         return json(r.results.map((x) => x.post_id), 200, env);
+      }
+
+      // Tukar bearer token dengan capability WebSocket berumur 60 detik.
+      // Browser WebSocket tidak bisa mengirim header Authorization; bearer jangka
+      // panjang tidak boleh diletakkan di URL, riwayat, maupun access log.
+      if (p === 'ws/ticket' && req.method === 'POST') {
+        if (!(await bolehLanjut(env, `ws-ticket:${me.sub}`, 30, 60))) {
+          return err('Terlalu banyak permintaan koneksi realtime.', 429, env);
+        }
+        const b = await req.json().catch(() => ({}));
+        const roomTiket = String(b.room || '');
+        if (roomTiket !== `user:${me.sub}`) return err('Room realtime tidak diizinkan.', 403, env);
+        const token = await sign({
+          v: 2,
+          sub: me.sub,
+          typ: 'user-ws',
+          room: roomTiket,
+          sv: Number(me.sv || 0),
+          exp: Date.now() + 60_000,
+        }, env.JWT_SECRET);
+        return json({ ticket: token, room: roomTiket, expires_in: 60 }, 201, env);
       }
 
       if (p === 'me' && req.method === 'GET') {
@@ -7045,7 +7186,8 @@ async function statistikPublik(env) {
       // ---- ganti password ----
       if (p === 'me/password' && req.method === 'POST') {
         const { lama, baru } = await req.json().catch(() => ({}));
-        if (String(baru || '').length < 6) return err('Password baru minimal 6 karakter', 400, env);
+        if (!passwordBaruValid(baru)) return err('Password baru harus 8–128 karakter', 400, env);
+        if (String(lama || '').length > 256) return err('Password lama salah', 401, env);
 
         const u = await env.DB.prepare('SELECT email,password FROM users WHERE id = ?').bind(me.sub).first();
         const akunSosialSaja = String(u.password || '').startsWith('sosial:');

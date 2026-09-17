@@ -5,7 +5,7 @@ const OPENROUTER_KEY_URL = 'https://openrouter.ai/api/v1/auth/key';
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const GROQ_MODELS_URL = 'https://api.groq.com/openai/v1/models';
 const MODEL_BAWAAN = 'x-ai/grok-4.3';
-const MODEL_GROQ_BAWAAN = 'llama-3.3-70b-versatile';
+const MODEL_GROQ_BAWAAN = 'openai/gpt-oss-20b';
 const VERSI_KEBIJAKAN = 'xy-safe-v1';
 const MODE_VALID = new Set(['off', 'shadow', 'enforce']);
 const KONTEKS_VALID = new Set([
@@ -137,6 +137,32 @@ Gunakan review bila konteks/rasa percaya tidak cukup. Percakapan game, kritik so
 Kembalikan hanya JSON sesuai schema. Jangan ulangi teks, nama, URL, atau data pribadi pada keluaran.`;
 }
 
+function schemaModerasi() {
+  return {
+    type: 'object',
+    additionalProperties: false,
+    required: ['verdict', 'category', 'severity', 'confidence', 'reason_code'],
+    properties: {
+      verdict: { type: 'string', enum: ['allow', 'review', 'block'] },
+      category: { type: 'string', enum: [...KATEGORI_VALID] },
+      severity: { type: 'integer', minimum: 0, maximum: 4 },
+      confidence: { type: 'number', minimum: 0, maximum: 1 },
+      reason_code: { type: 'string', enum: [...ALASAN_VALID] },
+    },
+  };
+}
+
+function formatJsonKetat() {
+  return {
+    type: 'json_schema',
+    json_schema: {
+      name: 'xycloud_moderation',
+      strict: true,
+      schema: schemaModerasi(),
+    },
+  };
+}
+
 async function panggilOpenRouter(env, teks, konteks) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 6500);
@@ -168,25 +194,7 @@ async function panggilOpenRouter(env, teks, konteks) {
           allow_fallbacks: true,
         },
         reasoning: { effort: 'minimal', exclude: true },
-        response_format: {
-          type: 'json_schema',
-          json_schema: {
-            name: 'xycloud_moderation',
-            strict: true,
-            schema: {
-              type: 'object',
-              additionalProperties: false,
-              required: ['verdict', 'category', 'severity', 'confidence', 'reason_code'],
-              properties: {
-                verdict: { type: 'string', enum: ['allow', 'review', 'block'] },
-                category: { type: 'string', enum: [...KATEGORI_VALID] },
-                severity: { type: 'integer', minimum: 0, maximum: 4 },
-                confidence: { type: 'number', minimum: 0, maximum: 1 },
-                reason_code: { type: 'string', enum: [...ALASAN_VALID] },
-              },
-            },
-          },
-        },
+        response_format: formatJsonKetat(),
       }),
     });
     const latencyMs = Date.now() - mulai;
@@ -250,12 +258,11 @@ async function panggilGroq(env, teks, konteks) {
       },
       body: JSON.stringify({
         model, temperature: 0, max_completion_tokens: 180, stream: false,
-        response_format: { type: 'json_object' },
+        // Structured Outputs ketat didukung model Groq aktif dan mencegah
+        // hasil semi-JSON/markdown masuk ke jalur penegakan.
+        response_format: formatJsonKetat(),
         messages: [
-          {
-            role: 'system',
-            content: `${promptSistem()}\nSchema wajib: {"verdict":"allow|review|block","category":"safe|spam|harassment|hate|sexual|minor_safety|violence|self_harm|illegal|scam|personal_data|other","severity":0,"confidence":0.0,"reason_code":"NONE|PROFANITY|SPAM|HARASSMENT|HATE|SEXUAL|MINOR_SAFETY|VIOLENCE|SELF_HARM|ILLEGAL|SCAM|PERSONAL_DATA|OTHER"}`,
-          },
+          { role: 'system', content: promptSistem() },
           { role: 'user', content: JSON.stringify({ konteks, teks: String(teks).slice(0, 12_000) }) },
         ],
       }),

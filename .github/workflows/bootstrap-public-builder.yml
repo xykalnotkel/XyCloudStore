@@ -1,0 +1,63 @@
+name: Bootstrap Public Build Secrets
+
+# Jalankan satu kali secara manual setelah repo build publik dibuat. Workflow
+# memindahkan secret melalui API GitHub; nilainya tidak pernah masuk log/artifact.
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: "Ketik SIAPKAN BUILDER untuk menyalin secret build"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  transfer:
+    if: github.ref == 'refs/heads/main' && github.event.inputs.confirmation == 'SIAPKAN BUILDER'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ secrets.BUILDER_ADMIN_TOKEN }}
+      TARGET_REPO: xykalnotkel/XyCloudStore-build
+      KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+      KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+      STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+      KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+      ADMIN_KEY: ${{ secrets.ADMIN_KEY }}
+
+    steps:
+      - name: Pastikan seluruh sumber secret tersedia
+        shell: bash
+        run: |
+          set -euo pipefail
+          for nama in GH_TOKEN KEYSTORE_BASE64 KEY_ALIAS STORE_PASSWORD KEY_PASSWORD ADMIN_KEY; do
+            test -n "${!nama:-}" || { echo "$nama belum tersedia"; exit 1; }
+          done
+
+      - name: Salin terenkripsi ke public builder
+        shell: bash
+        run: |
+          set -euo pipefail
+          for nama in KEYSTORE_BASE64 KEY_ALIAS STORE_PASSWORD KEY_PASSWORD ADMIN_KEY; do
+            printf '%s' "${!nama}" | gh secret set "$nama" --repo "$TARGET_REPO"
+          done
+          echo "Lima secret builder tersimpan. Nilainya tidak dicetak."
+
+      - name: Verifikasi nama secret saja
+        shell: bash
+        run: |
+          set -euo pipefail
+          daftar="$(gh secret list --repo "$TARGET_REPO" --json name --jq '.[].name')"
+          for nama in SOURCE_DEPLOY_KEY KEYSTORE_BASE64 KEY_ALIAS STORE_PASSWORD KEY_PASSWORD ADMIN_KEY; do
+            grep -Fxq "$nama" <<<"$daftar" || { echo "$nama belum ada di target"; exit 1; }
+          done
+
+      - name: Hapus token bootstrap setelah transfer sukses
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --method DELETE \
+            repos/xykalnotkel/XyCloudStore/actions/secrets/BUILDER_ADMIN_TOKEN
+          echo "Token bootstrap sudah dihapus dari source repo."

@@ -14,6 +14,7 @@ import 'package:record/record.dart';
 import '../../core/kompres.dart';
 import '../../core/motion.dart';
 import '../../core/theme.dart';
+import '../../data/realtime_service.dart';
 import '../../models/models.dart';
 import '../../providers/app_state.dart';
 import '../widgets/common.dart';
@@ -44,6 +45,10 @@ class _DmChatScreenState extends State<DmChatScreen> {
   bool _kirim = false;
   String? _galat;
   Timer? _poll;
+  late final AppState _appState;
+  int _dmRevisi = 0;
+  bool _sedangSinkron = false;
+  bool _sinkronUlang = false;
 
   // rekam suara
   bool _rekam = false;
@@ -59,12 +64,24 @@ class _DmChatScreenState extends State<DmChatScreen> {
   @override
   void initState() {
     super.initState();
+    _appState = context.read<AppState>();
+    _dmRevisi = _appState.dmRevisi;
+    _appState.addListener(_saatRealtime);
     _muat();
-    _poll = Timer.periodic(const Duration(seconds: 6), (_) => _muat(sunyi: true));
+    // WebSocket adalah jalur utama; polling jarang ini hanya menutup celah saat
+    // koneksi perangkat/proxy tidak mendukung upgrade.
+    _poll = Timer.periodic(const Duration(seconds: 30), (_) => _muat(sunyi: true));
+  }
+
+  void _saatRealtime() {
+    if (!mounted || _dmRevisi == _appState.dmRevisi) return;
+    _dmRevisi = _appState.dmRevisi;
+    unawaited(_muat(sunyi: true));
   }
 
   @override
   void dispose() {
+    _appState.removeListener(_saatRealtime);
     _poll?.cancel();
     _stopwatch?.cancel();
     _kunciTimer?.cancel();
@@ -75,6 +92,11 @@ class _DmChatScreenState extends State<DmChatScreen> {
   }
 
   Future<void> _muat({bool sunyi = false}) async {
+    if (_sedangSinkron) {
+      _sinkronUlang = true;
+      return;
+    }
+    _sedangSinkron = true;
     try {
       final s = context.read<AppState>();
       final daftar = await s.repo.dmAmbil(widget.userId);
@@ -97,6 +119,12 @@ class _DmChatScreenState extends State<DmChatScreen> {
         _memuat = false;
         _galat = 'Tidak bisa memuat percakapan.';
       });
+    } finally {
+      _sedangSinkron = false;
+      if (_sinkronUlang && mounted) {
+        _sinkronUlang = false;
+        unawaited(_muat(sunyi: true));
+      }
     }
   }
 
@@ -240,7 +268,8 @@ class _DmChatScreenState extends State<DmChatScreen> {
   @override
   Widget build(BuildContext context) {
     final t = XyTheme.of(context);
-    final sayaId = context.watch<AppState>().user?.id ?? '';
+    final appState = context.watch<AppState>();
+    final sayaId = appState.user?.id ?? '';
     final namaLawan = _pesan.isNotEmpty
         ? (_pesan.firstWhere((m) => !m.dariSaya(sayaId),
                 orElse: () => _pesan.first).dariNama ??
@@ -271,7 +300,11 @@ class _DmChatScreenState extends State<DmChatScreen> {
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
                               fontSize: 14.5, fontWeight: FontWeight.w700)),
-                      Text('Pesan langsung',
+                      Text(appState.koneksi == RealtimeState.online
+                              ? 'Pesan langsung · realtime'
+                              : appState.koneksi == RealtimeState.connecting
+                                  ? 'Pesan langsung · menyambung…'
+                                  : 'Pesan langsung · fallback aktif',
                           style: TextStyle(fontSize: 11, color: t.muted)),
                     ]),
               ),
@@ -380,8 +413,11 @@ class _DmChatScreenState extends State<DmChatScreen> {
                   controller: _ctrl,
                   minLines: 1,
                   maxLines: 4,
+                  maxLength: 4000,
+                  buildCounter: (_, {required currentLength, required isFocused, maxLength}) => null,
                   textCapitalization: TextCapitalization.sentences,
                   enabled: !_rekam,
+                  onChanged: (_) => setState(() {}),
                   decoration: InputDecoration(
                     hintText: 'Tulis pesan…',
                     contentPadding:

@@ -46,7 +46,7 @@ fallthrough = true
 ALLOWED_ORIGINS = "https://xycloud.my.id,https://www.xycloud.my.id,https://admin.xycloud.my.id,https://api.xycloud.my.id,https://xycloud-dashboard.pages.dev,https://dashboard-iota-ten-70.vercel.app"
 PUBLIC_URL = "https://api.xycloud.my.id"
 WEB_URL = "https://xycloud.my.id"
-REPO_RILIS = "xykalnotkel/XyCloudOrder"
+REPO_RILIS = "xykalnotkel/XyCloudStore-build"
 MAIL_FROM = "XyCloudStore <noreply@xyc.my.id>"
 ONESIGNAL_APP_ID = "f4843c35-cc1d-4772-9f70-1c4349397ffb"
 CLOUDINARY_CLOUD = "jxjvz3qi"
@@ -63,11 +63,13 @@ BONUS_REFERRAL = "10000"
 BONUS_DIUNDANG = "5000"
 # Versi Graph dipin agar upgrade Meta disengaja dan dapat diaudit.
 FACEBOOK_GRAPH_VERSION = "v26.0"
-# Klasifikasi AI. Pilihan: openrouter (default) atau groq. Mode awal tetap off
-# di D1 sampai credential valid diverifikasi. Untuk Groq, aktifkan ZDR di
-# Console lalu set GROQ_ZDR_CONFIRMED="1" dan ganti model ke model Groq.
-AI_MODERATION_PROVIDER = "openrouter"
-AI_MODERATION_MODEL = "x-ai/grok-4.3"
+# Klasifikasi AI memakai key Groq khusus XyCloudStore. Mode awal tetap off di
+# D1 sampai ZDR organisasi dikonfirmasi dan tahap shadow selesai diaudit.
+AI_MODERATION_PROVIDER = "groq"
+AI_MODERATION_MODEL = "openai/gpt-oss-20b"
+# Ini baru boleh menjadi "1" setelah Zero Data Retention di Groq Console
+# benar-benar aktif untuk organisasi pemilik key.
+GROQ_ZDR_CONFIRMED = "0"
 # OAuth Android: package id.xycloud.xycloud_order + SHA-1 sertifikat APK rilis.
 # serverClientId Flutter tetap memakai OAuth client tipe Web (lihat docs/login-google.md).
 GOOGLE_CLIENT_ID_ANDROID = "495336144977-1b3k66ngo4nhjf6kuetcl5j1vosfgbg4.apps.googleusercontent.com"

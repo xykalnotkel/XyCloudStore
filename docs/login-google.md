@@ -4,7 +4,7 @@ Aplikasi mencoba pemilih akun Google bawaan Android terlebih dahulu. Browser han
 
 ## Identitas APK rilis
 
-Nilai berikut dibaca dari sertifikat dan manifest `XyCloudStore-arm64-v8a.apk` pada [rilis v2.3.0](https://github.com/xykalnotkel/XyCloudOrder/releases/tag/v2.3.0).
+Nilai berikut dibaca dari sertifikat dan manifest artifact `XyCloudStore-arm64-v8a.apk` rilis v2.3.0. Rilis publik baru diterbitkan di [`XyCloudStore-build`](https://github.com/xykalnotkel/XyCloudStore-build/releases).
 
 - Package name: `id.xycloud.xycloud_order`
 - SHA-1 sertifikat penandatanganan: `BF:E5:D3:9B:7F:2F:BD:ED:68:8B:45:8F:4B:9C:9A:98:73:0B:1F:22`

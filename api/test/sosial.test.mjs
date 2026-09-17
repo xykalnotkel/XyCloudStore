@@ -49,8 +49,9 @@ test('Sosial: profil publik, follow dua arah, DM, dan simpan posting', async () 
     assert.equal(r.json.data[0].dibaca, 0);
     r = await B('/dm/a/dibaca', 'POST');
     assert.equal(r.json.data.baru, 1);
-    // DM suara tanpa durasi ditolak
+    // DM suara tanpa durasi dan teks pelecehan/phishing yang dikenal ditolak
     assert.equal((await A('/dm/b', 'POST', { tipe: 'audio', audio: 'data:audio/mp4;base64,AAAA' })).status, 400);
+    assert.equal((await A('/dm/b', 'POST', { teks: 'dasar anjing' })).status, 400);
     // DM ke diri sendiri ditolak
     assert.equal((await A('/dm/a', 'POST', { teks: 'tes' })).status, 422);
 

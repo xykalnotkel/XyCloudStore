@@ -28,9 +28,18 @@ for name,url in sources.items():
    while chunk:=r.read(1024*1024):f.write(chunk)
  manifest[name]={'url':url,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()}
 tracked=subprocess.check_output(['git','ls-files','-z'],cwd=root).decode().split('\0')
+# Corresponding source hanya berisi program GPL yang masuk APK dan tool yang
+# benar-benar dibutuhkan untuk merekonstruksinya. Backend Worker, dashboard,
+# agent host, runbook operasi, serta workflow deployment bukan bagian APK dan
+# sengaja tidak boleh bocor lewat bundle publik.
+build_tools={
+ 'tools/buat_sumber_streaming.py','tools/patch_manifest.py','tools/patch_signing.py',
+ 'tools/siapkan_biometrik.py','tools/siapkan_ikon_push.py','tools/siapkan_keamanan.py',
+ 'tools/siapkan_pembaruan.py','tools/siapkan_streaming.py',
+}
 with zipfile.ZipFile(out,'w',zipfile.ZIP_DEFLATED) as z:
  for name in tracked:
-  if not name or not name.startswith(('app/','native/','tools/','.github/workflows/','docs/')):continue
+  if not name or not (name.startswith(('app/','native/')) or name in build_tools):continue
   p=root/name
   if p.is_file():z.write(p,name)
  if (root/'app/pubspec.lock').exists():z.write(root/'app/pubspec.lock','app/pubspec.lock')
@@ -38,5 +47,14 @@ with zipfile.ZipFile(out,'w',zipfile.ZIP_DEFLATED) as z:
   if p.is_file() and not any(x in {'.git','.gradle','build','__pycache__'} for x in p.relative_to(up).parts):z.write(p,Path('third_party/moonlight')/p.relative_to(up))
  for name in sources:z.write(cache/name,Path('third_party/library-sources')/name)
  z.writestr('third_party/SOURCES.json',json.dumps(manifest,indent=2))
- z.writestr('BUILD-SOURCE.txt','XyCloudStore application is GPL-3.0. See app/LICENSE and native/README.md.\nPinned engine and submodule sources, integration patches, dependencies, build workflow and lockfile are included.\nUse Flutter 3.24.5, Java 17 and Android NDK 23.2.8568313. Private release signing keys are deliberately excluded; sign your rebuilt APK with your own key.\nTo build offline from the included engine source, copy third_party/moonlight to .cache/moonlight, then follow native/README.md (fetch step can be skipped with --offline).\n')
+ z.writestr('BUILD-SOURCE.txt','XyCloudStore application is GPL-3.0. See app/LICENSE and native/README.md.\nPinned engine and submodule sources, integration patches, required build tools, dependencies, and lockfile are included.\nUse Flutter 3.24.5, Java 17 and Android NDK 23.2.8568313. Private release signing keys are deliberately excluded; sign your rebuilt APK with your own key.\nTo build offline from the included engine source, copy third_party/moonlight to .cache/moonlight, then follow native/README.md (fetch step can be skipped with --offline).\n')
+with zipfile.ZipFile(out) as z:
+ names=z.namelist()
+ forbidden=('api/','dashboard/','agent-gui/','docs/','.github/')
+ bocor=sorted(n for n in names if n.startswith(forbidden))
+ wajib={'app/LICENSE','app/pubspec.yaml','app/pubspec.lock','native/README.md','BUILD-SOURCE.txt'}
+ kurang=sorted(wajib-set(names))
+ if bocor or kurang:
+  out.unlink(missing_ok=True)
+  raise SystemExit(f'Bundle source tidak aman/lengkap: forbidden={len(bocor)}, missing={kurang}')
 print('Corresponding source bundle:',out.name,out.stat().st_size)

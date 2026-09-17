@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
 import {harness} from './harness.mjs';
 import {securitySlot,newOAuthState,consumeOAuthState} from '../src/security.js';
 
@@ -54,7 +55,30 @@ test('Batas permintaan atomik, OAuth state satu kali, dan token lama dicabut',{t
   const old=await h.token('u',{v:1}),fresh=await h.token('u');
   assert.equal((await h.call('/me','GET',null,{Authorization:'Bearer '+old})).status,401);
   assert.equal((await h.call('/me','GET',null,{Authorization:'Bearer '+fresh})).status,200);
+  const ws=await h.call('/ws/ticket','POST',{room:'user:u'},{Authorization:'Bearer '+fresh});
+  assert.equal(ws.status,201,JSON.stringify(ws.json));
+  assert.equal(ws.json.data.room,'user:u');
+  assert.equal(ws.json.data.expires_in,60);
+  assert.match(ws.json.data.ticket,/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
+  assert.equal(ws.json.data.ticket.includes(fresh),false);
+  assert.equal((await h.call('/ws/ticket','POST',{room:'user:lain'},{Authorization:'Bearer '+fresh})).status,403);
   await h.db.prepare("UPDATE users SET session_version=1 WHERE id='u'").run();
   assert.equal((await h.call('/me','GET',null,{Authorization:'Bearer '+fresh})).status,401);
  }finally{await h.mf.dispose();}
+});
+
+test('Klien baru tidak menaruh bearer sesi di URL WebSocket atau localStorage web',()=>{
+ const web=readFileSync('src/web.html','utf8');
+ const config=readFileSync('../app/lib/core/config.dart','utf8');
+ const realtime=readFileSync('../app/lib/data/realtime_service.dart','utf8');
+ assert.doesNotMatch(web,/new WebSocket\([^\n]*[?&]token=/);
+ assert.match(web,/sessionStorage\.setItem\(KUNCI_TOKEN/);
+ assert.doesNotMatch(web,/localStorage\.setItem\(KUNCI_TOKEN/);
+ assert.doesNotMatch(config,/\?token=/);
+ assert.match(config,/queryParameters:.*ticket/s);
+ assert.match(realtime,/post\('\/ws\/ticket'/);
+ assert.doesNotMatch(realtime,/required String token/);
+ assert.match(web,/const argJsHtml = \(v\) => esc\(JSON\.stringify/);
+ assert.doesNotMatch(web,/onclick=\\?"[^\n>]*'\$\{esc\(/);
+ assert.match(web,/client_id: clientId/);
 });

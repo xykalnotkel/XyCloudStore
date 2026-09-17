@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { adminFetch } from "@/lib/api";
+import { adminFetch, API_BASE } from "@/lib/api";
 import { CheckCheck, Loader2, MessageCircle, Search, Send } from "lucide-react";
 import { ErrBox, jam, Load } from "@/components/ui/kit";
 import VoiceNote from "@/components/ui/voice-note";
@@ -23,7 +23,11 @@ export default function CsPage() {
   const [teks, setTeks] = useState("");
   const [kirimBusy, setKirimBusy] = useState(false);
   const bawahRef = useRef<HTMLDivElement>(null);
+  const aktifRef = useRef<string | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const typingRef = useRef({ room: "", at: 0 });
   const [sekarang, setSekarang] = useState(Date.now());
+  const [realtime, setRealtime] = useState<"menghubungkan" | "online" | "offline">("menghubungkan");
 
   const ruangAktif = useMemo(() => rooms.find((r) => r.room === aktif) || null, [rooms, aktif]);
 
@@ -44,6 +48,75 @@ export default function CsPage() {
   }
 
   useEffect(() => {
+    aktifRef.current = aktif;
+  }, [aktif]);
+
+  // Dashboard menukar admin key dengan ticket WebSocket 60 detik. Secret admin
+  // tidak pernah masuk URL; polling 30 detik di bawah hanya menjadi fallback.
+  useEffect(() => {
+    let selesai = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let jeda = 1000;
+
+    const jadwalkan = () => {
+      if (selesai || timer) return;
+      setRealtime("offline");
+      timer = setTimeout(() => {
+        timer = null;
+        void sambung();
+      }, jeda);
+      jeda = Math.min(30_000, jeda * 2);
+    };
+
+    const sambung = async () => {
+      if (selesai || wsRef.current) return;
+      setRealtime("menghubungkan");
+      try {
+        const t = await adminFetch("/api/admin/ws-ticket", {
+          method: "POST", body: { room: "cs:inbox" },
+        });
+        if (selesai) return;
+        if (!t?.ticket) throw new Error("Ticket realtime tidak tersedia");
+        const wsBase = API_BASE.replace(/^https:/, "wss:").replace(/^http:/, "ws:").replace(/\/+$/, "");
+        const ws = new WebSocket(`${wsBase}/ws/${encodeURIComponent("cs:inbox")}?ticket=${encodeURIComponent(t.ticket)}`);
+        wsRef.current = ws;
+        ws.onopen = () => { jeda = 1000; setRealtime("online"); };
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(String(event.data || "{}"));
+            if (data.type !== "chat.message" || !data.payload?.id) return;
+            const m = data.payload;
+            if (m.room === aktifRef.current) {
+              setPesan((lama) => lama.some((x) => x.id === m.id) ? lama : [...lama, m]);
+              setSekarang(Date.now());
+            }
+            void muatRooms();
+          } catch { /* frame asing tidak mengganggu fallback polling */ }
+        };
+        ws.onerror = () => ws.close();
+        ws.onclose = () => {
+          if (wsRef.current === ws) wsRef.current = null;
+          jadwalkan();
+        };
+      } catch {
+        wsRef.current = null;
+        jadwalkan();
+      }
+    };
+
+    void sambung();
+    return () => {
+      selesai = true;
+      if (timer) clearTimeout(timer);
+      const ws = wsRef.current;
+      wsRef.current = null;
+      ws?.close();
+    };
+    // Ticket dan adminFetch membaca key sesi terbaru saat setiap reconnect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
     muatRooms();
     const t = setInterval(() => {
       muatRooms();
@@ -52,7 +125,7 @@ export default function CsPage() {
           .then((d) => { if (Array.isArray(d)) { setPesan(d); setSekarang(Date.now()); } })
           .catch(() => {});
       }
-    }, 5000);
+    }, 30000);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aktif]);
@@ -77,10 +150,24 @@ export default function CsPage() {
     try {
       const m = await adminFetch("/api/admin/cs/reply", { method: "POST", body: { room: aktif, teks: txt } });
       setTeks("");
-      setPesan((p) => [...p, m]);
+      void kirimTyping(false);
+      setPesan((p) => p.some((x) => x.id === m.id) ? p : [...p, m]);
       setSekarang(Date.now());
     } catch (e: any) { setErr(e.message); }
     finally { setKirimBusy(false); }
+  }
+
+  async function kirimTyping(on: boolean) {
+    if (!aktif) return;
+    const now = Date.now();
+    // Satu indikator per 1,5 detik cukup; status berhenti tetap dikirim segera.
+    if (on && typingRef.current.room === aktif && now - typingRef.current.at < 1500) return;
+    typingRef.current = { room: aktif, at: now };
+    try {
+      await adminFetch("/api/admin/cs/typing", {
+        method: "POST", body: { room: aktif, typing: on },
+      });
+    } catch { /* indikator typing tidak boleh menggagalkan chat */ }
   }
 
   const daftarRoom = rooms.filter((r) => !q || ((r.nama || "") + " " + (r.email || "") + " " + (r.room || "")).toLowerCase().includes(q.toLowerCase()));
@@ -95,10 +182,13 @@ export default function CsPage() {
           </div>
           <div>
             <h1 className="text-xl font-semibold text-[#1E1B2E] tracking-tight">CS Realtime</h1>
-            <p className="text-sm text-[#7C738F] font-medium">Balas chat pengguna langsung • refresh 5 detik</p>
+            <p className="text-sm text-[#7C738F] font-medium">Balas chat pengguna langsung • fallback sinkron 30 detik</p>
           </div>
         </div>
         <div className="flex gap-2">
+          <span className={`text-xs px-3 py-1.5 rounded-full border font-semibold ${realtime === "online" ? "bg-emerald-500/15 border-emerald-500/25 text-emerald-700" : realtime === "menghubungkan" ? "bg-amber-500/15 border-amber-500/25 text-amber-700" : "bg-red-500/10 border-red-500/20 text-red-700"}`}>
+            Realtime {realtime}
+          </span>
           <span className="text-xs px-3 py-1.5 rounded-full bg-violet-500/15 border border-violet-500/25 text-violet-700 font-semibold">{rooms.length} room</span>
           <span className="text-xs px-3 py-1.5 rounded-full bg-[#F3F0FF] border border-[#E9E3F5] font-medium">{totalPesan} pesan</span>
         </div>
@@ -221,7 +311,9 @@ export default function CsPage() {
                   ))}
                 </div>
                 <div className="flex items-center gap-2 pb-3">
-                  <textarea value={teks} onChange={(e) => setTeks(e.target.value)} rows={1}
+                  <textarea value={teks}
+                    onChange={(e) => { setTeks(e.target.value); void kirimTyping(e.target.value.trim().length > 0); }}
+                    onBlur={() => { if (teks.trim()) void kirimTyping(false); }} rows={1} maxLength={5000}
                     onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); kirim(); } }}
                     placeholder="Tulis balasan sebagai Kirana - XyCloudStore…" className="flex-1 px-3.5 py-2.5 rounded-2xl bg-white border border-[#E9E3F5] focus:border-[#7C3AED] outline-none text-[13px] resize-none max-h-28" />
                   <button onClick={() => kirim()} disabled={kirimBusy || !teks.trim()}

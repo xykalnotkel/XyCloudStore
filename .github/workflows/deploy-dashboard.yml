@@ -1,13 +1,13 @@
 name: Deploy Dashboard Next.js
 
+# Build/deploy produksi hanya boleh dipicu manual setelah verifikasi pemilik.
 on:
-  push:
-    branches: [main]
-    paths:
-      - "dashboard/**"
-      - "api/src/**"
-      - ".github/workflows/deploy-dashboard.yml"
   workflow_dispatch:
+    inputs:
+      confirmation:
+        description: "Ketik DEPLOY DASHBOARD untuk mengizinkan build/deploy produksi"
+        required: true
+        type: string
 
 concurrency:
   group: deploy-dash-${{ github.ref }}
@@ -16,13 +16,14 @@ concurrency:
 jobs:
   build:
     name: Build static export
+    if: github.ref == 'refs/heads/main' && github.event.inputs.confirmation == 'DEPLOY DASHBOARD'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: dashboard/package-lock.json
 
@@ -37,7 +38,7 @@ jobs:
         run: npm run build
 
       - name: Upload out artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: dashboard-out
           path: dashboard/out
@@ -48,13 +49,14 @@ jobs:
     name: Cloudflare Pages
     needs: build
     runs-on: ubuntu-latest
+    environment: production
     if: ${{ vars.ENABLE_CF_PAGES == 'true' }}
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: dashboard-out
           path: dashboard/out
-      - uses: cloudflare/wrangler-action@v3
+      - uses: cloudflare/wrangler-action@9acf94ace14e7dc412b076f2c5c20b8ce93c79cd # v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -69,37 +71,19 @@ jobs:
     name: Vercel production
     needs: build
     runs-on: ubuntu-latest
+    environment: production
     if: ${{ vars.ENABLE_VERCEL == 'true' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 20
+          node-version: 22
       - name: Deploy from monorepo root
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
         run: |
-          npx vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
-          npx vercel build --prod --token="$VERCEL_TOKEN"
-          npx vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN"
-
-  # Set repo variable ENABLE_WORKER_DEPLOY=true + secrets CLOUDFLARE_*
-  deploy-worker:
-    name: Cloudflare Worker API
-    runs-on: ubuntu-latest
-    if: ${{ vars.ENABLE_WORKER_DEPLOY == 'true' }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-      - name: Deploy Worker
-        working-directory: api
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          npm ci --no-audit --no-fund
-          npx wrangler deploy
+          npx --yes vercel@54.17.3 pull --yes --environment=production --token="$VERCEL_TOKEN"
+          npx --yes vercel@54.17.3 build --prod --token="$VERCEL_TOKEN"
+          npx --yes vercel@54.17.3 deploy --prebuilt --prod --token="$VERCEL_TOKEN"

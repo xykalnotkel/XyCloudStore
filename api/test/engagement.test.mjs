@@ -4,7 +4,7 @@ import { webcrypto } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { build } from 'esbuild';
-import { Miniflare } from 'miniflare';
+import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 import { httpsAman, urlStikerAman, tipeBerkasStiker } from '../src/engagement.js';
 
 const cloud = { CLOUDINARY_CLOUD:'jxjvz3qi' };
@@ -23,8 +23,8 @@ test('URL dan format stiker dibatasi, tidak menerima SVG/file/host lain',()=>{
 test('Integrasi D1: rename, thread, stiker+teks, promo, GIPHY belum aktif, hapus akun', {timeout:120000}, async()=>{
   const out=await build({entryPoints:['src/index.js'],bundle:true,format:'esm',target:'es2022',platform:'browser',loader:{'.html':'text','.png':'binary'},write:false});
   const secret='test-only-signing-key-never-production';
-  const mf=new Miniflare({modules:true,script:out.outputFiles[0].text,compatibilityDate:'2025-01-01',
-    d1Databases:['DB'],durableObjects:{HUB:'RealtimeHub'},bindings:{...cloud,JWT_SECRET:secret,ADMIN_KEY:'test-only-admin',PUBLIC_URL:'https://api.example.test'}});
+  const mf=new Miniflare(convertV4MiniflareOptions({modules:true,script:out.outputFiles[0].text,compatibilityDate:'2025-01-01',
+    d1Databases:['DB'],durableObjects:{HUB:'RealtimeHub'},bindings:{...cloud,JWT_SECRET:secret,ADMIN_KEY:'test-only-admin',PUBLIC_URL:'https://api.example.test'}}));
   try{
     const db=await mf.getD1Database('DB');
     const sql=JSON.parse(execFileSync('python3',['-c',`import sqlite3,json\ns=open('schema.sql').read();a=[];b=''\nfor c in s:\n b+=c\n if c==';' and sqlite3.complete_statement(b):a.append(b);b=''\nprint(json.dumps(a))`],{encoding:'utf8'}));

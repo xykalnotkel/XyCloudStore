@@ -1,6 +1,6 @@
 ## Unduh siap pakai
 
-- **Permanent:** https://github.com/xykalnotkel/XyCloudOrder/releases/download/agent-windows/XyCloudStore-Agent-Windows.zip
+- **Permanent:** https://github.com/xykalnotkel/XyCloudStore-build/releases/download/agent-windows/XyCloudStore-Agent-Windows.zip
 - Actions artifact: workflow **Build Agen Windows**
 
 > EXE lama yang error `localhost refused to connect` = build Tauri tanpa UI embed.

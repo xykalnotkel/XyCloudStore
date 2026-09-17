@@ -4,7 +4,7 @@ import '../core/waktu.dart';
 import 'stiker.dart';
 import 'dart:convert';
 // ============================================================
-// XyCloudOrder — Model data (mirror dari tabel D1 Cloudflare)
+// XyCloudStore — Model data (mirror dari tabel D1 Cloudflare)
 // ============================================================
 
 /// Media banner profil kustom (Batch I): GIF langsung, atau MP4 yang

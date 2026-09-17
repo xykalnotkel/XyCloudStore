@@ -46,11 +46,13 @@ public final class ReferralActivity extends Activity {
         code = code == null ? "" : code.trim().toUpperCase(Locale.US);
         if (!CODE.matcher(code).matches()) code = "";
 
+        // Activity trampoline dapat dihentikan segera setelah finish(); commit()
+        // memastikan capability sudah durable sebelum MainActivity membacanya.
         getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
                 .putString(KEY_TICKET, ticket)
                 .putString(KEY_CODE, code)
                 .putLong(KEY_CAPTURED_AT, System.currentTimeMillis())
-                .apply();
+                .commit();
     }
 
     private void openApplication() {

@@ -248,7 +248,12 @@ class _LoginScreenState extends State<LoginScreen> {
                         child: TextFormField(
                           controller: _nama,
                           textCapitalization: TextCapitalization.words,
-                          validator: (v) => (v == null || v.trim().length < 3) ? 'Nama minimal 3 karakter' : null,
+                          validator: (v) {
+                            final n = (v ?? '').trim().length;
+                            if (n < 3) return 'Nama minimal 3 karakter';
+                            if (n > 80) return 'Nama maksimal 80 karakter';
+                            return null;
+                          },
                           decoration: const InputDecoration(
                             hintText: 'Nama kamu',
                             prefixIcon: Icon(Icons.person_outline_rounded),
@@ -266,6 +271,9 @@ class _LoginScreenState extends State<LoginScreen> {
                             final t = (v ?? '').trim();
                             if (t.isEmpty) return 'Nomor WhatsApp wajib diisi';
                             if (t.length < 9) return 'Nomor belum lengkap';
+                            if (t.length > 24 || !RegExp(r'^\+?[0-9\s().-]+$').hasMatch(t)) {
+                              return 'Format nomor belum benar';
+                            }
                             return null;
                           },
                           decoration: const InputDecoration(
@@ -299,7 +307,13 @@ class _LoginScreenState extends State<LoginScreen> {
                       child: TextFormField(
                         controller: _pass,
                         obscureText: !lihat,
-                        validator: (v) => (v == null || v.length < 6) ? 'Password minimal 6 karakter' : null,
+                        validator: (v) {
+                          final p = v ?? '';
+                          if (p.isEmpty) return 'Password wajib diisi';
+                          if (daftar && p.length < 8) return 'Password minimal 8 karakter';
+                          if (p.length > (daftar ? 128 : 256)) return 'Password terlalu panjang';
+                          return null;
+                        },
                         decoration: InputDecoration(
                           hintText: 'Masukkan password',
                           prefixIcon: const Icon(Icons.lock_outline_rounded),

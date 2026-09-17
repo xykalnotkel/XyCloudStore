@@ -91,8 +91,8 @@ class _OtpScreenState extends State<OtpScreen> {
       setState(() => _galat = 'Kode belum lengkap');
       return;
     }
-    if (_reset && _pass.text.length < 6) {
-      setState(() => _galat = 'Password baru minimal 6 karakter');
+    if (_reset && (_pass.text.length < 8 || _pass.text.length > 128)) {
+      setState(() => _galat = 'Password baru harus 8–128 karakter');
       return;
     }
 
@@ -211,7 +211,7 @@ class _OtpScreenState extends State<OtpScreen> {
                   controller: _pass,
                   obscureText: !_lihatPass,
                   decoration: InputDecoration(
-                    hintText: 'Minimal 6 karakter',
+                    hintText: '8–128 karakter',
                     prefixIcon: const Icon(Icons.lock_outline_rounded),
                     suffixIcon: IconButton(
                       icon: Icon(_lihatPass ? Icons.visibility_off_outlined : Icons.visibility_outlined, size: 20),

@@ -8,6 +8,12 @@ Desain: modern, clean, quick. Tanpa satu pun emoji — seluruh ikon memakai sist
 
 ---
 
+## Pembaruan v3.8.0 (menunggu build final)
+
+Streaming game end-to-end dengan reconnect adaptif dan diagnostik, editor HUD/preset komunitas, atribusi instalasi referral anti-fraud, Facebook OAuth bertiket, Pakasir terverifikasi, moderasi Groq privacy-gated, direct message realtime, serta control-plane livestream kreator PC rental. Seluruh workflow build/deploy bersifat manual.
+
+APK dan Agen Windows dipublikasikan melalui repo source-free [`XyCloudStore-build`](https://github.com/xykalnotkel/XyCloudStore-build); source utama akan diprivatkan setelah rilis publik pengganti terverifikasi.
+
 ## Pembaruan v2.6.0
 
 Quiet Surface (tanpa neon/glow), batas 2 pendaftaran per identitas perangkat, OTP/email atomik, sesi akun yang dapat dicabut, pengelolaan pengguna/Sampah/permanen, menu audit/media/perangkat, sajian gambar WebP/AVIF dan cache stiker terenkripsi di folder internal aplikasi.
@@ -52,7 +58,7 @@ xycloud/
 │  ├─ schema.sql                     tabel D1 + seed
 │  └─ wrangler.toml
 ├─ preview/xycloudorder-preview.html
-└─ .github/workflows/build-apk.yml   CI build APK
+└─ .github/workflows/                deploy/bootstrap manual (build berada di repo publik)
 ```
 
 ---
@@ -64,7 +70,7 @@ xycloud/
 | **Splash** | Logo beranimasi, orbit partikel, progress bar, label PREMIUM EDITION. Native splash (`flutter_native_splash`) tampil lebih dulu supaya tidak ada layar putih. |
 | **Onboarding** | 3 slide dengan ilustrasi digambar sendiri (rig PC dengan meter GPU/CPU/RAM, kartu akun bertumpuk, gelombang realtime). Indikator dinamis, tombol Lewati, status disimpan di `SharedPreferences` sehingga hanya muncul sekali. |
 | **Welcome** | Latar midnight + konstelasi animatif, headline, statistik sosial, CTA Masuk / Daftar. |
-| **Login / Daftar** | Satu layar dua mode, validasi form, toggle password, ingat email, opsi Google & Apple. |
+| **Login / Daftar** | Satu layar dua mode, validasi form, toggle password, ingat email, serta OAuth Google/Facebook dengan handoff bertiket. |
 | **Aplikasi** | Bottom nav 5 tab dengan pill indikator beranimasi. |
 
 ## Fitur Aplikasi
@@ -81,7 +87,7 @@ xycloud/
 
 ## Realtime
 
-`RealtimeService` membuka WebSocket ke Durable Object dengan **reconnect exponential backoff + jitter** dan **ping/pong** tiap 25 detik. Indikator status (Realtime / Menyambung / Offline) tampil di setiap layar utama.
+`RealtimeService` menukar bearer HTTPS dengan capability WebSocket room-bound berumur 60 detik, lalu membuka Durable Object dengan **reconnect exponential backoff + jitter** dan **ping/pong** tiap 25 detik. Bearer sesi tidak masuk URL. Reconnect selalu mengambil ticket baru dan layar DM memakai event realtime dengan polling 30 detik hanya sebagai fallback.
 
 Event dari server:
 
@@ -97,7 +103,7 @@ Event dari server:
 
 ## Build via GitHub Actions
 
-Workflow `.github/workflows/build-apk.yml` berjalan otomatis pada setiap push ke `main`, atau bisa dijalankan manual dari tab **Actions → Build Android APK → Run workflow**.
+Tidak ada build otomatis. Workflow dijalankan **manual hanya setelah izin eksplisit pemilik** melalui repo publik source-free [`XyCloudStore-build`](https://github.com/xykalnotkel/XyCloudStore-build). Repo itu checkout source privat memakai deploy key read-only; secret penandatangan tidak pernah dipersist ke Git.
 
 Yang dilakukan CI:
 
@@ -109,7 +115,7 @@ Yang dilakukan CI:
 6. Set label aplikasi jadi **XyCloudStore** dan pastikan izin `INTERNET`
 7. `flutter analyze` + `flutter test`
 8. Build APK **universal** dan **split-per-ABI**
-9. Upload semua APK sebagai artifact `XyCloudStore-APK`
+9. Upload APK universal/per-ABI sebagai artifact terpisah serta corresponding-source bundle GPL
 
 Input opsional saat run manual:
 
@@ -117,8 +123,9 @@ Input opsional saat run manual:
 |---|---|---|
 | `mock` | `false` | `true` = jalan dengan data demo tanpa server |
 | `base_url` | `https://api.xycloud.my.id` | Base URL API XyCloud |
+| `source_ref` | `main` | Branch/tag/commit source privat yang harus dibangun |
 
-Push tag `v1.0.0` untuk sekaligus membuat GitHub Release berisi APK.
+Jalankan workflow pada tag versi di repo build untuk sekaligus membuat GitHub Release publik. Input `source_ref` mengunci branch/tag/commit source yang dibangun. Urutan operasi lengkap ada di [arsitektur dua repositori](docs/repository-build-architecture-2026-09-17.md).
 
 ### Build lokal
 
@@ -144,13 +151,16 @@ flutter build apk --release \
 
 ## Deploy Backend Cloudflare
 
+Produksi tidak boleh diinisialisasi ulang dari `schema.sql`. Gunakan workflow manual **Deploy API Worker + D1**, ketik frasa `DEPLOY API`, lalu workflow akan menjalankan install terkunci, seluruh test, migrasi D1 yang belum tercatat, pemasangan secret Groq, deploy Worker, dan smoke test.
+
+Untuk pengembangan lokal saja:
+
 ```bash
 cd api
-npm install
-npx wrangler login
-npx wrangler d1 create xycloud        # salin database_id ke wrangler.toml
-npm run db:init                       # buat tabel + seed
-npm run deploy
+npm ci
+npm test
+npm run db:migrate:local
+npm run dev
 ```
 
 ### Endpoint
@@ -168,7 +178,7 @@ npm run deploy
 | POST | `/api/wallet/topup` | top up saldo |
 | GET, POST | `/api/cs/messages` | riwayat dan kirim chat |
 | POST | `/api/cs/reply` | balasan dari dashboard admin |
-| WS | `/ws/user:<id>` | channel realtime user |
+| POST / WS | `/api/ws/ticket` → `/ws/user:<id>?ticket=…` | capability room-bound dan channel realtime user |
 | WS | `/ws/katalog` | channel stok unit dan banner |
 | WS | `/ws/cs:inbox` | channel dashboard CS |
 | GET | `/admin` | dashboard admin dan CS (butuh admin key) |
@@ -216,12 +226,14 @@ unik 3 digit, rekening, unggah bukti, dan persetujuan admin. Variabel non-rahasi
 
 ### Moderasi AI yang dapat diaudit
 Filter deterministik tetap menjadi lapisan pertama untuk forum, komentar, ulasan, profil publik, dan
-preset HUD. Pemilik dapat menambahkan Grok melalui OpenRouter memakai Worker Secret
-`OPENROUTER_API_KEY`, lalu memilih mode `shadow` sebelum `enforce` pada menu **Moderasi → AI Safety**.
-Permintaan AI memaksa `data_collection=deny` dan zero-data-retention; pesan privat/Chat Admin tidak
-pernah dikirim. D1 hanya menyimpan HMAC konten, verdict, kategori, latency, dan token—bukan teks,
-prompt, atau respons mentah. Gangguan provider bersifat fail-open setelah filter lokal dan AI tidak
-pernah menjatuhkan sanksi akun otomatis. Lihat [runbook moderasi AI](docs/ai-moderation-openrouter-2026-09-16.md).
+preset HUD. Provider utama adalah Groq `openai/gpt-oss-20b` dengan Structured Outputs JSON Schema
+ketat. Secret khusus XyCloudStore sudah disimpan terenkripsi untuk workflow, tetapi Worker hanya
+boleh mengirim konten setelah Zero Data Retention organisasi dikonfirmasi dan rollout dimulai dalam
+mode `shadow` sebelum `enforce` pada menu **Moderasi → AI Safety**.
+
+Pesan privat/Chat Admin tidak pernah dikirim ke AI. D1 hanya menyimpan HMAC konten, verdict,
+kategori, latency, dan jumlah token—bukan teks, prompt, atau respons mentah. Gangguan provider
+bersifat fail-open setelah filter lokal dan AI tidak pernah menjatuhkan sanksi akun otomatis. Lihat [runbook moderasi AI](docs/ai-moderation-openrouter-2026-09-16.md).
 
 ### Produk akun lengkap
 Kolom baru: `gambar`, `deskripsi`, `detail` (peta spesifikasi), `jumlah_ulasan`. Dashboard bisa
@@ -280,7 +292,7 @@ Pendaftaran baru di situs juga melewati verifikasi kode email yang sama.
 
 ## Pengembang
 
-XyCloudStore dikembangkan oleh **XyVerse**, studio kecil Indonesia (sebelumnya XySpace).
+XyCloudStore dikembangkan oleh **XyVerse**, studio kecil Indonesia.
 Logo XyVerse dipakai sebagai kredit pengembang (baris "Built by XyVerse" di splash,
 menu Tentang aplikasi, dan kaki halaman situs). Logo & ikon APLIKASI XyCloudStore
 (`app/assets/brand/logo_icon*.png` + `wordmark*.png`) terpisah dan tetap dipakai
@@ -333,9 +345,9 @@ Pemilihan berkas dilakukan dua lapis:
 2. **Sisi peramban** memakai `navigator.userAgentData.getHighEntropyValues` untuk memastikan
    arsitektur dan lebar bit, lalu memilih berkas yang paling pas.
 
-Aturannya: petunjuk Intel memilih `x86_64`, petunjuk `armv7` memilih `armeabi-v7a`,
-Android 6 ke atas dianggap `arm64-v8a`, sisanya memakai berkas universal.
-Pengguna tetap bisa memilih sendiri dari daftar semua versi.
+Aturannya: petunjuk Intel memilih `x86_64`, petunjuk `armv7` memilih `armeabi-v7a`, dan
+petunjuk ARM 64-bit memilih `arm64-v8a`. Jika arsitektur tidak pasti, sistem tidak menebak dan
+menawarkan berkas universal. Pengguna tetap bisa memilih sendiri dari daftar semua versi.
 
 ### Referral teratribusi instalasi
 
@@ -378,8 +390,8 @@ waktu, adaptive anti-lag berdasarkan respons awal, dan reconnect bertingkat 2/4/
 Dashboard → Sesi PC. Audio host dan gamepad/touch diproses native. Uplink mikrofon HP bukan
 bagian protokol GameStream; gunakan Discord di HP atau mikrofon yang terhubung ke PC host.
 
-Program agen untuk PC/VM host ada di folder `agent-gui/` (ditulis ulang penuh dalam
-**Rust + Tauri**, tanpa runtime Python), dengan README berisi panduan pemasangan Sunshine,
+Program agen untuk PC/VM host ada di folder `agent-gui/` (GUI native
+**Rust + egui/eframe**, tanpa Tauri/WebView dan tanpa runtime Python), dengan README berisi panduan pemasangan Sunshine,
 daftar port, layanan otomatis, dan alur pembersihan antar penyewa.
 
 Teknologi streaming yang dipakai: **Sunshine** (host) dan **Moonlight/Artemis** (klien),
@@ -401,8 +413,7 @@ mampu melayani game.
 | Pengumuman admin | semua pengguna yang memasang aplikasi |
 | Banner promo baru | semua pengguna, kalau opsi kirim push dicentang |
 
-Pengguna bisa mematikan pemberitahuan komunitas lewat Profil (kolom `users.notif_forum`).
-Pemberitahuan pesanan, chat, dan saldo selalu aktif karena bersifat transaksional.
+Pengguna dapat mematikan notifikasi komunitas, DM, dan livestream serta membisukan thread tertentu. Pemberitahuan pesanan, Chat Admin, dan saldo tetap aktif karena bersifat transaksional.
 
 ---
 
@@ -410,11 +421,11 @@ Pemberitahuan pesanan, chat, dan saldo selalu aktif karena bersifat transaksiona
 
 | Lapisan | Penerapan |
 |---|---|
-| Password | SHA-256 dengan garam acak per pengguna, format `salt$hash` |
-| Token | HMAC-SHA256, berlaku 30 hari, diperiksa tanda tangan dan masa berlakunya |
+| Password | PBKDF2-HMAC-SHA256 210.000 iterasi, salt acak 128-bit, hash 256-bit; akun plaintext/SHA-256 lama dimigrasikan saat login |
+| Token | HMAC-SHA256, berlaku 30 hari, terikat `session_version`; WebSocket privat memakai ticket 60 detik |
 | Penyimpanan di perangkat | `flutter_secure_storage` (EncryptedSharedPreferences Android) |
 | Pembatas laju | Tabel `batas` di D1, per IP untuk login, daftar, kirim kode, reset, dan admin |
-| Dashboard | Semua teks pengguna di-escape, header anti-framing dan anti-sniff |
+| Dashboard | Admin key hanya per-tab, key tambahan disimpan sebagai HMAC, RBAC per peran, CSP/anti-framing/anti-sniff, dan output pengguna di-escape |
 | Login Google native | ID token diverifikasi ke Google: penerbit, audiens, masa berlaku, status email |
 | Rahasia | Semua kunci hanya sebagai secret Worker atau GitHub Secrets, tidak pernah masuk repo |
 

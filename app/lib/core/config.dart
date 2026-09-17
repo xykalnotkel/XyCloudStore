@@ -35,9 +35,16 @@ class XyConfig {
   static String get apiUrl => '$aktif/api';
 
   /// WebSocket realtime (Cloudflare Durable Object).
-  static String wsUrl(String room, String token) {
-    final ws = aktif.replaceFirst('https://', 'wss://').replaceFirst('http://', 'ws://');
-    return '$ws/ws/$room?token=$token';
+  ///
+  /// Room privat memakai capability satu menit dari `/api/ws/ticket`; bearer
+  /// sesi jangka panjang tidak pernah diletakkan di URL atau access log.
+  static String wsUrl(String room, {String? ticket}) {
+    final dasar = Uri.parse(aktif);
+    return dasar.replace(
+      scheme: dasar.scheme == 'https' ? 'wss' : 'ws',
+      path: '/ws/${Uri.encodeComponent(room)}',
+      queryParameters: ticket == null || ticket.isEmpty ? null : {'ticket': ticket},
+    ).toString();
   }
 
   static const String appName = 'XyCloudStore';

@@ -157,6 +157,16 @@
   .hp .grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:16px 14px 0}
   .hp .grid4 i{display:block;height:52px;border-radius:14px;background:var(--putih);border:1px solid var(--line)}
   .hp .baris{margin:14px;height:64px;border-radius:16px;background:var(--putih);border:1px solid var(--line)}
+  .hp .hero-shot{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:top;
+    z-index:4;background:var(--bg)}
+  .hp .hero-shot[hidden]{display:none}
+  .shot-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:22px;align-items:start}
+  .shot-card{text-align:center}
+  .shot-phone{width:min(100%,250px);aspect-ratio:9/20;margin:0 auto;border-radius:30px;padding:8px;
+    background:#16052F;box-shadow:0 24px 55px rgba(16,0,48,.22);overflow:hidden}
+  .shot-phone img{width:100%;height:100%;object-fit:cover;object-position:top;border-radius:23px;background:var(--bg)}
+  .shot-card h3{font-size:15px;margin-top:15px}.shot-card p{font-size:12.5px;margin-top:6px;color:var(--muted)}
+  @media(max-width:760px){.shot-grid{grid-template-columns:1fr;gap:30px}.shot-phone{width:230px}}
 
   /* ---------- bagian ---------- */
   section{padding:64px 0}
@@ -325,8 +335,9 @@ input,select,textarea{border-color:#DCE2E9!important;border-radius:10px!importan
     <div>
       <span class="tag">Cloud PC dan akun digital</span>
       <h1 style="margin-top:18px">Sewa PC cloud,<br>beli akun digital,<br><span style="background:linear-gradient(120deg,#6C2BE2,#8B5CF6);-webkit-background-clip:text;background-clip:text;color:transparent">langsung dari HP.</span></h1>
-      <p class="lead">Kelola sewa PC, pembelian akun, dan percakapan CS di satu tempat.
-        Ketersediaan paket dan status pesanan mengikuti data layanan.</p>
+      <p class="lead">Kelola sewa PC, pembelian akun, komunitas, dan percakapan CS di satu tempat.
+        Kreator gamer juga dapat menyiarkan permainan dari PC rental, menerima dukungan penonton,
+        dan mencairkan penghasilan setelah verifikasi. Ketersediaan fitur mengikuti data layanan.</p>
       <div class="cta">
         <a class="btn" href="/unduh" data-rute>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
@@ -348,6 +359,10 @@ input,select,textarea{border-color:#DCE2E9!important;border-radius:10px!importan
           <b>Saldo akunmu</b></div>
         <div class="grid4"><i></i><i></i><i></i><i></i></div>
         <div class="baris"></div><div class="baris"></div><div class="baris"></div>
+        <!-- Berkas ini diisi dari APK nyata sesudah build manual. Selama belum
+             tersedia, ilustrasi ringan di atas tetap tampil tanpa broken image. -->
+        <img class="hero-shot" src="/brand/screens/home.webp" alt="Tampilan beranda aplikasi XyCloudStore"
+          width="1080" height="2400" hidden onload="this.hidden=false">
       </div>
     </div>
   </div>
@@ -389,6 +404,73 @@ input,select,textarea{border-color:#DCE2E9!important;border-radius:10px!importan
     <div class="grid g3" id="daftarForum"><div class="memuat">Memuat diskusi...</div></div>
     <div style="text-align:center;margin-top:30px">
       <a class="btn ghost" href="/unduh" data-rute>Ikut berdiskusi lewat aplikasi</a>
+    </div>
+  </div>
+</section>
+
+<!-- ================= KREATOR & PENGHASILAN ================= -->
+<section class="halaman" data-hal="beranda" id="kreator">
+  <div class="wrap">
+    <div class="judulBagian">
+      <span class="tag">Untuk gamer dan kreator</span>
+      <h2 style="margin-top:14px">Main, siaran, dan tumbuh bersama komunitas</h2>
+      <p>XyCloudStore menyatukan akses PC rental, livestream, dukungan penonton, dan referral
+        terverifikasi. Fitur kreator diluncurkan bertahap per akun agar kualitas siaran dan pembayaran tetap aman.</p>
+    </div>
+    <div class="grid g3">
+      <div class="kartu fitur">
+        <div class="ikon" aria-hidden="true">
+          <svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#6C2BE2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="13" rx="2"/><path d="m10 9 5 2.5-5 2.5V9ZM8 21h8"/></svg>
+        </div>
+        <div><h3>Livestream dari PC rental</h3>
+          <p class="muted" style="font-size:14px;margin-top:7px">Agen menyiapkan OBS dan input privat tanpa membocorkan stream key. Penonton mendapat pemutar adaptif yang menurunkan kualitas saat jaringan melemah.</p></div>
+      </div>
+      <div class="kartu fitur">
+        <div class="ikon" aria-hidden="true">
+          <svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#6C2BE2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 5.5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+        </div>
+        <div><h3>Penghasilan yang transparan</h3>
+          <p class="muted" style="font-size:14px;margin-top:7px">Tip masuk ke ledger kreator, biaya ditampilkan sebelum konfirmasi, dan pencairan hanya diproses ke profil yang sudah diverifikasi. Penghasilan bergantung pada dukungan nyata penonton.</p></div>
+      </div>
+      <div class="kartu fitur">
+        <div class="ikon" aria-hidden="true">
+          <svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#6C2BE2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8M19 8v6M22 11h-6"/></svg>
+        </div>
+        <div><h3>Undangan yang benar-benar memasang</h3>
+          <p class="muted" style="font-size:14px;margin-top:7px">Bonus referral memerlukan klik, unduhan APK, pemasangan baru, perangkat yang sama, akun baru, dan verifikasi email. Kode saja tidak cukup untuk memperoleh bonus.</p></div>
+      </div>
+    </div>
+    <div style="text-align:center;margin-top:26px">
+      <a class="btn" href="/unduh" data-rute>Mulai lewat aplikasi</a>
+      <p class="muted" style="font-size:11.5px;margin-top:10px">Tip dan referral bukan jaminan pendapatan; syarat, batas anti-fraud, dan ketersediaan akun berlaku.</p>
+    </div>
+  </div>
+</section>
+
+<!-- Diaktifkan otomatis saat hasil tangkapan APK nyata sudah tersedia. -->
+<section class="halaman" data-hal="beranda" id="app-showcase" hidden style="background:var(--putih)">
+  <div class="wrap">
+    <div class="judulBagian">
+      <span class="tag">Tampilan aplikasi nyata</span>
+      <h2 style="margin-top:14px">Dirancang untuk dipahami sekali lihat</h2>
+      <p>Tangkapan ini berasal dari APK rilis, bukan mockup pemasaran.</p>
+    </div>
+    <div class="shot-grid">
+      <article class="shot-card" hidden>
+        <div class="shot-phone"><img src="/brand/screens/home.webp" alt="Beranda XyCloudStore"
+          width="1080" height="2400" onload="this.closest('article').hidden=false;document.getElementById('app-showcase').hidden=false"></div>
+        <h3>Beranda dan saldo</h3><p>Akses layanan utama tanpa menu yang berputar-putar.</p>
+      </article>
+      <article class="shot-card" hidden>
+        <div class="shot-phone"><img src="/brand/screens/stream.webp" alt="Streaming PC XyCloudStore"
+          width="1080" height="2400" onload="this.closest('article').hidden=false;document.getElementById('app-showcase').hidden=false"></div>
+        <h3>Streaming dan HUD</h3><p>Kualitas adaptif, diagnosis jaringan, dan kontrol yang dapat disesuaikan.</p>
+      </article>
+      <article class="shot-card" hidden>
+        <div class="shot-phone"><img src="/brand/screens/community.webp" alt="Komunitas XyCloudStore"
+          width="1080" height="2400" onload="this.closest('article').hidden=false;document.getElementById('app-showcase').hidden=false"></div>
+        <h3>Komunitas dan profil</h3><p>Diskusi, DM, badge, bingkai animasi, dan identitas kreator.</p>
+      </article>
     </div>
   </div>
 </section>
@@ -446,6 +528,15 @@ input,select,textarea{border-color:#DCE2E9!important;border-radius:10px!importan
         <li>Di aplikasi, buat akun baru dengan email lalu masukkan kode verifikasi yang kami kirim.</li>
       </ol>
     </div>
+
+    <div class="kartu" style="margin-top:18px" id="agen-pc">
+      <div style="font-weight:600;font-size:15px;margin-bottom:6px">Agen PC Host (Windows)</div>
+      <p style="color:var(--muted);font-size:13px;line-height:1.55;margin:0 0 12px">Khusus pengelola PC rental: pasang agen di komputer host, lalu gunakan wizard penyiapan Sunshine dan OBS tanpa memasukkan stream key secara manual.</p>
+      <div style="display:flex;flex-wrap:wrap;gap:8px">
+        <a class="btn sm" href="https://github.com/xykalnotkel/XyCloudStore/releases/download/agent-windows/XyCloudStore-Agent-Windows.zip">Unduh Agen Windows</a>
+        <a class="btn sm ghost" href="https://admin.xycloud.my.id/unit">Kelola unit (admin)</a>
+      </div>
+    </div>
   </div>
 </section>
 
@@ -490,7 +581,7 @@ input,select,textarea{border-color:#DCE2E9!important;border-radius:10px!importan
     <div class="garisFooter">
       <span>© 2026 XyCloudStore. Semua hak dilindungi.</span>
       <span style="display:flex;align-items:center;gap:9px">Dikembangkan oleh
-        <img src="data:image/webp;base64,UklGRogFAABXRUJQVlA4WAoAAAAQAAAAcAAAJwAAQUxQSBcFAAABoEXbtilJ2uecG5Fl21bbtm3btm3btm3btm3bmXHvPfsj4kXHqHz1HxETgOlSLISgmIEaGqrMMAyy0E77bTIB0FJSq5emFKu8TJL/XTkMWiBqFkzKoVClyHAomWOM5BdToXVi6NTSnGDqymuuusz8wwBpZNiBMZGkd/D9HiqAAF1mXnL1dRavdpLmDQtl1v9x40honcqk9pTZuMa9ECDSduSnTpLHIHQ6xei/azFlJz/opwrAcBMjC5O/IiIa7iGZU7sfUQIw7MVIurfzYhhgMmvKXuT8YxAq2I3t2en53zHQzgfTR5lIekqzisJwJSObqU2AdPksZ5KR58JQgiojf8qZZOStCCYT27M39ecQYBFmJ3P+fbhoGcCwGqOTnnwhdMVVjCSZopNMfFMD9vVIMvIAGMox4CxGksnf7os1PDnJzIaRJ6MLLmEkk3/aXaWTyP8S6/IOE8nMty6r0UkmPrb3P3TPPicqeLABN0VAScAwX0pOMrNx4gtteJkp8SEY8DoTk78ZVDpLKwNOZiTJFJ1kzn9NxIAfmBNXRUC3r5mZuB4CCtWAIAgCCYIgAIIghBAMGkIICg0hBIGFEEIrRLt/7InFiTtDVmHK/K4HDONq9Mz3KyJFgKKhoFAwvRtWYvKCxJe0gqsYE5+AVmRtJkbuhYDGio02AI6YZIcNBQ4d2eWQbiLYbRbsc/55F+6GhU4797xTxmP8qRdccPoorHf2+Ree3RIYHmJsYhVol8+ZMz8AgEeZnH8PhxbJnH8tcfqzPXHYm3rOI21y78mQZb/qV/18zw02XwfHPrX5lrdegitu3GDD8zfCwxdtsOmOrQmyTlHmt90EYzvozNw/dDmGmZF3QVGsmKnjaYHhypdf6QYM+HY83lsJXV479/hDFIdcNsvoY27AaY8dfcKBg3H97UefOFRaopgY6Q0Sn4VhfKS7k+9/Sicjt5TQ1LI/vdQXJpVvF4EZDrh2hwcg1Vd223htYK8v7/aPZpfhG226/qOH45Yz19+0R6umJLo3eg0iXT7PyemZzKTzv9HQIpWl/5l6wIcDVPDqNFGYvcLRiurnp+1/+E445XQs/+lMOPimAw54eR88dPsBh56AlgZsztjI/b9xUsW+7IjunjPJxOchaAIrLQxsPh4iq/WDQDHLChDIevsfcND6mGd+w0pLYPieBx64XXcssfcBB+0rrRDTl5ncnSQjT0XQcBXJxIaRJyM0Ua+CZgUQNK2YDg3bMrHQ87+TYcD6D2fmBolr/w8zIAgAkzqoAYCFEAyqgCkkhBAEFkIIrVAZ9mvOdU6SiY/CRIC5nmQm6YwToU2VYMCtTCQ9M5Nk5PYIMEPPLz07Mz8KkFIxbMhI0skOOklPf02AAVVcwUhG3ghDmaoM+zln0jN3GXc/E8nEF6qoaBW3NtoJoVQC7mQkGXkl0OebnElG3tEDwNQ/3emepkDLJGAHRic9/zNau2I7RpJMfHfbBbf+iplM/rwoStQw838pk4w8Fyba9qEnkkysd5KR2yOUiGj1ZSaSOf07WhQBmzLWMUdPmWTO3/UWKRHDoYx0z+08EgaIVt5gqiuucTsYOrc0pRjdHmN2kvdWTAAYlmLNm6nxETWUqGK2v0gyfnhwBYJ6w7ns8AKv8eMhomUCYMSiyy4+36QKIGgo1vYIY3Kn5+h8bQwU5WyCQkG3a1gYz+wBRdmqmZkKmhVg1Tu+jfmvN0+bFVDMCEWB/rPPM84AE5QgAFZQOCBKAAAAMAQAnQEqcQAoAD4lDoVCIYZ9AAYAkS0gABNQILZgVqRIKyT5+Xl8WUd0AP7+3Xx1i3///SEAFNZ///o4wsf//b+xG//agAAAAAA=" alt="XyVerse" style="height:18px;opacity:.85"></span>
+        <img src="data:image/webp;base64,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" alt="XyVerse" style="height:18px;opacity:.85"></span>
     </div>
   </div>
 </footer>
@@ -522,6 +613,9 @@ const API = location.origin + '/api';
 const rp = (n) => 'Rp' + Number(n || 0).toLocaleString('id-ID');
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+// Argumen handler inline memerlukan encoding konteks JavaScript DAN HTML.
+// HTML-escape saja akan didekode browser sebelum handler dijalankan.
+const argJsHtml = (v) => esc(JSON.stringify(String(v ?? '')));
 
 async function ambil(jalur) {
   const r = await fetch(API + jalur);
@@ -532,6 +626,14 @@ async function ambil(jalur) {
 
 function tutupModal() {
   document.getElementById('modal').classList.remove('on');
+  if (document.getElementById('chatIsi')) {
+    if (CHAT_TIMER) clearTimeout(CHAT_TIMER);
+    CHAT_TIMER = null;
+    CHAT_RETRY = 0;
+    const ws = CHAT_WS;
+    CHAT_WS = null;
+    ws?.close();
+  }
   // kembalikan alamat ke halaman daftar supaya tombol kembali terasa wajar
   const bagian = location.pathname.replace(/\/+$/, '').split('/');
   if ((bagian[1] === 'akun' || bagian[1] === 'komunitas') && bagian[2]) {
@@ -570,7 +672,7 @@ async function muatPaket() {
             ${p.unit_tersedia > 0 ? p.unit_tersedia + ' unit siap' : 'Sedang penuh'}</span>
         </div>
         <button class="btn sm" style="width:100%;margin-top:16px"
-          onclick="bukaSewa('${esc(p.id)}')" ${p.unit_tersedia > 0 ? '' : 'disabled'}>
+          onclick="bukaSewa(${argJsHtml(p.id)})" ${p.unit_tersedia > 0 ? '' : 'disabled'}>
           ${p.unit_tersedia > 0 ? 'Sewa Sekarang' : 'Sedang Penuh'}</button>
       </div>`).join('');
   } catch (e) {
@@ -607,7 +709,7 @@ function gambarProduk(daftar) {
   const el = document.getElementById('daftarProduk');
   if (!daftar.length) { el.innerHTML = '<div class="kosongKotak">Belum ada produk di kategori ini.</div>'; return }
   el.innerHTML = daftar.map((p) => `
-    <div class="kartu produk" onclick="keHalaman('/akun/${esc(p.id)}')">
+    <div class="kartu produk" onclick="keHalaman(${argJsHtml('/akun/' + p.id)})">
       <div class="gbr">${p.gambar ? `<img src="${esc(p.gambar)}" alt="${esc(p.nama)}" loading="lazy">` : ''}</div>
       <div class="isi">
         <span class="tag">${esc(p.kategori)}</span>
@@ -638,7 +740,7 @@ async function bukaProduk(id) {
     ${(p.fitur || []).length ? `<ul style="margin-top:14px;padding-left:20px;font-size:14px;line-height:1.9">
       ${p.fitur.map((f) => `<li>${esc(f)}</li>`).join('')}</ul>` : ''}
     <div id="ulasanProduk" class="memuat">Memuat ulasan...</div>
-    <button class="btn" style="width:100%;margin-top:8px" onclick="beliProduk('${esc(p.id)}')"
+    <button class="btn" style="width:100%;margin-top:8px" onclick="beliProduk(${argJsHtml(p.id)})"
       ${p.stok > 0 ? '' : 'disabled'}>${p.stok > 0 ? 'Beli Sekarang' : 'Stok Habis'}</button>`);
 
   try {
@@ -676,7 +778,7 @@ async function muatForum() {
     const d = await ambil('/forum');
     if (!d.length) { el.innerHTML = '<div class="kosongKotak" style="grid-column:1/-1">Belum ada diskusi. Jadilah yang pertama lewat aplikasi.</div>'; return }
     el.innerHTML = d.slice(0, 6).map((f) => `
-      <div class="kartu diskusi" onclick="keHalaman('/komunitas/${esc(f.id)}')">
+      <div class="kartu diskusi" onclick="keHalaman(${argJsHtml('/komunitas/' + f.id)})">
         <div style="display:flex;gap:11px;align-items:center">
           <div class="avatar">${esc((f.nama || 'X')[0].toUpperCase())}</div>
           <div style="min-width:0">
@@ -1091,7 +1193,10 @@ async function muatUnduh() {
    AKUN DAN PEMESANAN LEWAT SITUS
    ============================================================ */
 const KUNCI_TOKEN = 'xy_token_web';
-let TOKEN = localStorage.getItem(KUNCI_TOKEN) || '';
+// Sesi web sengaja hanya hidup di tab ini. Token lama di localStorage dibuang
+// agar XSS atau perangkat bersama tidak memperoleh sesi persisten.
+localStorage.removeItem(KUNCI_TOKEN);
+let TOKEN = sessionStorage.getItem(KUNCI_TOKEN) || '';
 let SAYA = null;
 
 let DEVICE_WEB_PROMISE;
@@ -1122,14 +1227,19 @@ async function apiAuth(jalur, opsi = {}) {
 function simpanSesi(token, pengguna) {
   TOKEN = token;
   SAYA = pengguna;
-  localStorage.setItem(KUNCI_TOKEN, token);
+  sessionStorage.setItem(KUNCI_TOKEN, token);
   gambarKepala();
 }
 
 function keluarAkun() {
   TOKEN = '';
   SAYA = null;
-  localStorage.removeItem(KUNCI_TOKEN);
+  sessionStorage.removeItem(KUNCI_TOKEN);
+  if (CHAT_TIMER) clearTimeout(CHAT_TIMER);
+  CHAT_TIMER = null;
+  CHAT_RETRY = 0;
+  CHAT_WS?.close();
+  CHAT_WS = null;
   gambarKepala();
   keHalaman('/');
 }
@@ -1157,7 +1267,7 @@ async function muatSaya() {
     return SAYA;
   } catch (_) {
     TOKEN = '';
-    localStorage.removeItem(KUNCI_TOKEN);
+    sessionStorage.removeItem(KUNCI_TOKEN);
     gambarKepala();
     return null;
   }
@@ -1174,13 +1284,13 @@ function bukaMasuk(mode = 'masuk') {
     <div id="galatMasuk" style="display:none;background:#DC262614;border:1px solid #DC262633;color:#DC2626;
       border-radius:12px;padding:11px 14px;font-size:12.8px;margin-top:16px"></div>
     <div style="margin-top:16px;display:grid;gap:12px">
-      ${daftar ? `<input id="m_nama" placeholder="Nama lengkap" style="padding:14px 16px;border:1px solid var(--line);
+      ${daftar ? `<input id="m_nama" placeholder="Nama lengkap" minlength="3" maxlength="80" style="padding:14px 16px;border:1px solid var(--line);
         border-radius:14px;font-family:inherit;font-size:14px">
-        <input id="m_phone" placeholder="Nomor WhatsApp" style="padding:14px 16px;border:1px solid var(--line);
+        <input id="m_phone" placeholder="Nomor WhatsApp" inputmode="tel" maxlength="24" style="padding:14px 16px;border:1px solid var(--line);
         border-radius:14px;font-family:inherit;font-size:14px">` : ''}
       <input id="m_email" type="email" placeholder="Email" style="padding:14px 16px;border:1px solid var(--line);
         border-radius:14px;font-family:inherit;font-size:14px">
-      <input id="m_pass" type="password" placeholder="Password" style="padding:14px 16px;border:1px solid var(--line);
+      <input id="m_pass" type="password" placeholder="Password" ${daftar ? 'minlength="8" maxlength="128"' : 'maxlength="256"'} style="padding:14px 16px;border:1px solid var(--line);
         border-radius:14px;font-family:inherit;font-size:14px">
     </div>
     <button class="btn" style="width:100%;margin-top:18px" id="m_kirim"
@@ -1248,8 +1358,8 @@ function bukaVerifikasi(email, pesan) {
     <input id="m_kode" inputmode="numeric" maxlength="6" placeholder="000000"
       style="width:100%;margin-top:18px;padding:16px;border:1px solid var(--line);border-radius:14px;
       font-family:inherit;font-size:26px;font-weight:700;text-align:center;letter-spacing:10px">
-    <button class="btn" style="width:100%;margin-top:16px" id="m_kirim" onclick="kirimKode('${esc(email)}')">Verifikasi</button>
-    <button class="btn ghost" style="width:100%;margin-top:10px" onclick="kirimUlangKode('${esc(email)}')">Kirim ulang kode</button>`);
+    <button class="btn" style="width:100%;margin-top:16px" id="m_kirim" onclick="kirimKode(${argJsHtml(email)})">Verifikasi</button>
+    <button class="btn ghost" style="width:100%;margin-top:10px" onclick="kirimUlangKode(${argJsHtml(email)})">Kirim ulang kode</button>`);
 }
 
 async function kirimKode(email) {
@@ -1311,7 +1421,7 @@ async function bukaSewa(id) {
       </div>
     </div>
     <button class="btn" style="width:100%;margin-top:18px" id="tombolPesan"
-      onclick="kirimSewa('${esc(p.id)}')">Bayar dengan Saldo</button>
+      onclick="kirimSewa(${argJsHtml(p.id)})">Bayar dengan Saldo</button>
     <button class="btn ghost" style="width:100%;margin-top:10px" onclick="bukaTopup()">Isi Saldo Dulu</button>`);
   await hitungSewaWeb();
 }
@@ -1379,7 +1489,7 @@ async function beliProduk(id) {
         <span class="muted">Garansi</span><b>${esc(p.garansi)}</b></div>
     </div>
     <button class="btn" style="width:100%;margin-top:18px" id="tombolPesan"
-      onclick="kirimBeli('${esc(p.id)}')">Bayar dengan Saldo</button>
+      onclick="kirimBeli(${argJsHtml(p.id)})">Bayar dengan Saldo</button>
     <button class="btn ghost" style="width:100%;margin-top:10px" onclick="bukaTopup()">Isi Saldo Dulu</button>`);
 }
 
@@ -1564,6 +1674,17 @@ async function muatAkunSaya() {
 /* ---------------- chat dengan admin ---------------- */
 let CHAT_WS = null;
 let CHAT_ISI = [];
+let CHAT_RETRY = 0;
+let CHAT_TIMER = null;
+
+function jadwalkanChat(userId) {
+  if (CHAT_TIMER || !SAYA || SAYA.id !== userId || !TOKEN
+      || !document.getElementById('modal')?.classList.contains('on')
+      || !document.getElementById('chatIsi')) return;
+  const dasar = Math.min(30000, 1000 * (2 ** Math.min(CHAT_RETRY++, 5)));
+  const jeda = Math.round(dasar * (0.85 + Math.random() * 0.3));
+  CHAT_TIMER = setTimeout(() => { CHAT_TIMER = null; sambungChat(); }, jeda);
+}
 
 async function bukaChat() {
   if (!SAYA) {
@@ -1576,7 +1697,7 @@ async function bukaChat() {
     <p class="muted" style="font-size:12.8px;margin-top:6px">Admin XyCloudStore, biasanya membalas kurang dari dua menit.</p>
     <div class="chatIsi" id="chatIsi" style="margin-top:16px"><div class="memuat">Memuat percakapan...</div></div>
     <div style="display:flex;gap:10px;margin-top:14px">
-      <input id="chatTeks" placeholder="Tulis pesan..." onkeydown="if(event.key==='Enter')kirimChat()"
+      <input id="chatTeks" placeholder="Tulis pesan..." maxlength="5000" onkeydown="if(event.key==='Enter')kirimChat()"
         style="flex:1;padding:14px 16px;border:1px solid var(--line);border-radius:99px;font-family:inherit;font-size:14px">
       <button class="btn" onclick="kirimChat()" id="chatKirim" style="padding:14px 22px">Kirim</button>
     </div>`);
@@ -1600,7 +1721,7 @@ function gambarChat() {
         <div class="gelembung ${m.dari === 'user' ? 'aku' : 'dia'}">
           ${m.gambar ? `<img src="${esc(m.gambar)}" style="max-width:200px;border-radius:12px;display:block;margin-bottom:6px">` : ''}
           ${esc(m.teks || '')}
-          <time>${String(m.waktu || '').slice(11, 16)}</time>
+          <time>${String(m.waktu || '').slice(11, 16)}${m._status === 'mengirim' ? ' · mengirim…' : m._status === 'gagal' ? ` · gagal: ${esc(m._error || 'coba lagi')}` : ''}</time>
         </div>`).join('')
     : '<div class="memuat">Belum ada percakapan. Sapa Kirana duluan.</div>';
   el.scrollTop = el.scrollHeight;
@@ -1610,36 +1731,71 @@ async function kirimChat() {
   const input = document.getElementById('chatTeks');
   const teks = input.value.trim();
   if (!teks) return;
+  if (teks.length > 5000) {
+    bukaModal('<div class="kosongKotak">Pesan maksimal 5.000 karakter.</div>');
+    return;
+  }
   input.value = '';
 
-  CHAT_ISI.push({ dari: 'user', teks, waktu: new Date().toISOString() });
+  const clientId = 'web_' + crypto.randomUUID().replace(/-/g, '');
+  const sementara = { id: clientId, client_id: clientId, dari: 'user', teks,
+    waktu: new Date().toISOString(), _status: 'mengirim' };
+  CHAT_ISI.push(sementara);
   gambarChat();
 
   try {
-    await apiAuth('/cs/messages', { method: 'POST', body: JSON.stringify({ teks }) });
+    const tersimpan = await apiAuth('/cs/messages', {
+      method: 'POST', body: JSON.stringify({ teks, client_id: clientId }),
+    });
+    const i = CHAT_ISI.findIndex((m) => m.id === clientId);
+    if (i >= 0) CHAT_ISI[i] = tersimpan;
+    else if (!CHAT_ISI.some((m) => m.id === tersimpan.id)) CHAT_ISI.push(tersimpan);
   } catch (e) {
-    CHAT_ISI.push({ dari: 'cs', teks: 'Pesan gagal terkirim: ' + e.message, waktu: new Date().toISOString() });
-    gambarChat();
+    sementara._status = 'gagal';
+    sementara._error = String(e?.message || 'Tidak dapat mengirim');
   }
+  gambarChat();
 }
 
 /** Dengarkan balasan admin secara langsung lewat WebSocket. */
-function sambungChat() {
+async function sambungChat() {
   if (CHAT_WS || !SAYA || !TOKEN) return;
+  const userId = SAYA.id;
   try {
+    // Pulihkan pesan yang mungkin lewat saat socket terputus. Pesan optimistis
+    // lokal dipertahankan hanya bila server belum mengenali client_id-nya.
+    const terbaru = await apiAuth('/cs/messages');
+    const lokal = CHAT_ISI.filter((m) => m._status &&
+      !terbaru.some((x) => x.id === m.id || (m.client_id && x.client_id === m.client_id)));
+    CHAT_ISI = [...terbaru, ...lokal];
+    gambarChat();
+    const tiket = await apiAuth('/ws/ticket', {
+      method: 'POST', body: JSON.stringify({ room: `user:${userId}` }),
+    });
+    if (CHAT_WS || !SAYA || SAYA.id !== userId || !TOKEN
+        || !document.getElementById('modal')?.classList.contains('on')
+        || !document.getElementById('chatIsi')) return;
     const dasar = location.origin.replace('https://', 'wss://').replace('http://', 'ws://');
-    CHAT_WS = new WebSocket(`${dasar}/ws/user:${SAYA.id}?token=${encodeURIComponent(TOKEN)}`);
+    CHAT_WS = new WebSocket(`${dasar}/ws/user:${encodeURIComponent(userId)}?ticket=${encodeURIComponent(tiket.ticket)}`);
+    CHAT_WS.onopen = () => { CHAT_RETRY = 0; };
     CHAT_WS.onmessage = (ev) => {
       try {
         const p = JSON.parse(ev.data);
-        if (p.type === 'chat.message' && p.payload?.dari === 'cs') {
+        if (p.type === 'chat.message' && p.payload?.dari === 'cs'
+            && !CHAT_ISI.some((m) => m.id === p.payload.id)) {
           CHAT_ISI.push(p.payload);
           gambarChat();
         }
       } catch (_) { /* diabaikan */ }
     };
-    CHAT_WS.onclose = () => { CHAT_WS = null };
-  } catch (_) { /* diabaikan */ }
+    CHAT_WS.onclose = () => {
+      CHAT_WS = null;
+      jadwalkanChat(userId);
+    };
+  } catch (_) {
+    CHAT_WS = null;
+    jadwalkanChat(userId);
+  }
 }
 
 /* ---------------- analitik ringan tanpa kuki ---------------- */
@@ -1775,15 +1931,6 @@ muatForum();
 muatUnduh();
 muatKontak();
 </script>
-
-  <div class="kartu" style="margin-top:18px" id="agen-pc">
-    <div style="font-weight:600;font-size:15px;margin-bottom:6px">Agen PC Host (Windows)</div>
-    <p style="color:var(--muted);font-size:13px;line-height:1.55;margin:0 0 12px">Pasang di PC sewa. Wizard 3 langkah + Sunshine otomatis — tanpa login web UI manual.</p>
-    <div style="display:flex;flex-wrap:wrap;gap:8px">
-      <a class="btn sm" href="https://github.com/xykalnotkel/XyCloudOrder/releases/download/agent-windows/XyCloudStore-Agent-Windows.zip">Unduh Agent Windows</a>
-      <a class="btn sm ghost" href="https://admin.xycloud.my.id/unit">Daftar unit (admin)</a>
-    </div>
-  </div>
 
 </body>
 </html>

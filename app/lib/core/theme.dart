@@ -10,7 +10,7 @@ import 'package:google_fonts/google_fonts.dart';
 /// - BG indigo tua: #100030 / #200050 / #100040
 /// - Aksen violet glossy: #7830C0 / #8B5CF6 / #A855F7
 /// Tema ini diterapkan ke SELURUH UI/UX (app + web + console).
-class XySpace {
+class XySpacing {
   static const double xs = 4;
   static const double sm = 8;
   static const double md = 12;

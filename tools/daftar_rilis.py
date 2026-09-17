@@ -35,16 +35,19 @@ def main() -> int:
     alamat = os.getenv('API_URL', 'https://api.xycloud.my.id')
 
     if not kunci:
-        print('ADMIN_KEY belum diatur, pendaftaran rilis dilewati.')
-        return 0
-    if not versi:
-        print('Versi tidak diketahui, pendaftaran rilis dilewati.')
-        return 0
+        print('ADMIN_KEY belum diatur; pendaftaran rilis ditolak.', file=sys.stderr)
+        return 1
+    if not versi or not versi.startswith('v') or len(versi) > 40:
+        print('Tag versi tidak valid; pendaftaran rilis ditolak.', file=sys.stderr)
+        return 1
+    if alamat != 'https://api.xycloud.my.id':
+        print('API_URL rilis harus memakai origin produksi kanonik.', file=sys.stderr)
+        return 1
 
     berkas = cari_apk()
     if not berkas:
-        print('Tidak ada berkas APK yang ditemukan.')
-        return 0
+        print('Tidak ada berkas APK yang ditemukan.', file=sys.stderr)
+        return 1
 
     muatan = json.dumps({'versi': versi, 'berkas': berkas}).encode()
     permintaan = urllib.request.Request(
