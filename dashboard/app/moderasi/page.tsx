@@ -250,7 +250,7 @@ function TabAi() {
     setBusy("verify"); setErr(""); setOk("");
     try {
       await adminFetch("/api/admin/moderasi/ai/verifikasi", { method: "POST" });
-      setOk("Credential OpenRouter valid dan endpoint dapat dijangkau tanpa mengirim konten.");
+      setOk(`Credential ${data?.provider === "groq" ? "GroqCloud" : "OpenRouter"} valid dan endpoint dapat dijangkau tanpa mengirim konten.`);
     } catch (e: any) { setErr(`Verifikasi gagal: ${e.message}`); }
     finally { setBusy(""); }
   }
@@ -270,15 +270,15 @@ function TabAi() {
             <div>
               <div className="flex items-center gap-2">
                 <BrainCircuit size={18} className="text-[#6D5AE0]" />
-                <h3 className="font-bold text-[#241E37]">Grok via OpenRouter</h3>
+                <h3 className="font-bold text-[#241E37]">{data?.provider === "groq" ? "Safety via GroqCloud" : "Grok via OpenRouter"}</h3>
                 <Chip tone={modeTone as any}>{data?.mode || "off"}</Chip>
               </div>
               <p className="text-[12px] text-[#746B86] mt-1">
                 Filter lokal selalu aktif. AI hanya membaca teks publik saat mode shadow/enforce.
               </p>
             </div>
-            <Chip tone={data?.key_configured ? "ok" : "warn"}>
-              {data?.key_configured ? "Secret tersedia" : "Secret belum ada"}
+            <Chip tone={data?.provider_ready ? "ok" : "warn"}>
+              {data?.provider_ready ? "Provider + ZDR siap" : data?.key_configured ? "Secret ada, guard ZDR belum siap" : "Secret belum ada"}
             </Chip>
           </div>
 
@@ -286,19 +286,19 @@ function TabAi() {
             <InfoAi icon={BrainCircuit} label="Model" value={data?.model || "—"} />
             <InfoAi icon={ShieldCheck} label="Kebijakan gagal" value="Filter lokal lalu fail-open AI" />
             <InfoAi icon={Database} label="Penyimpanan" value="Hash HMAC + metadata; tanpa teks mentah" />
-            <InfoAi icon={Wifi} label="Privasi upstream" value="Data collection deny + ZDR" />
+            <InfoAi icon={Wifi} label="Privasi upstream" value={data?.provider === "groq" ? "ZDR organisasi wajib dikonfirmasi" : "Data collection deny + ZDR per request"} />
           </div>
 
           <div className="flex flex-wrap gap-2">
             {(["off", "shadow", "enforce"] as const).map((m) => (
               <Btn key={m} tone={m === "enforce" ? "bahaya" : m === "shadow" ? "utama" : "ghost"}
-                disabled={!data?.boleh_mengubah || Boolean(busy) || (m !== "off" && !data?.key_configured)}
+                disabled={!data?.boleh_mengubah || Boolean(busy) || (m !== "off" && !data?.provider_ready)}
                 onClick={() => ubahMode(m)}>
                 {busy === m ? <RefreshCw size={13} className="animate-spin" /> : null}
                 {m === "off" ? "Matikan AI" : m === "shadow" ? "Mode bayangan" : "Terapkan verdict"}
               </Btn>
             ))}
-            <Btn tone="ghost" disabled={!data?.boleh_mengubah || !data?.key_configured || Boolean(busy)} onClick={verifikasi}>
+            <Btn tone="ghost" disabled={!data?.boleh_mengubah || !data?.provider_ready || Boolean(busy)} onClick={verifikasi}>
               <Wifi size={13} /> Verifikasi koneksi
             </Btn>
             <Btn tone="ghost" disabled={loading || Boolean(busy)} onClick={muat}>

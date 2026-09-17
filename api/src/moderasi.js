@@ -88,6 +88,25 @@ export function periksaTeks(teks, opt = {}) {
   }
   if (!t) return { ok: true };
 
+  // Klasifikasikan risiko tautan sebelum token path/domain melewati kamus kata
+  // (contoh bit.ly/xxx). Operator perlu melihat sebab yang dapat ditindaklanjuti.
+  const nUrl = hitungUrl(t);
+  if (nUrl > maksUrl) {
+    return {
+      ok: false,
+      alasan: `Terlalu banyak tautan (maks ${maksUrl}).`,
+      kode: 'SPAM_LINK',
+    };
+  }
+  const curiga = domainCuriga(t);
+  if (curiga.length) {
+    return {
+      ok: false,
+      alasan: 'Tautan tidak diizinkan atau terindikasi spam.',
+      kode: 'LINK_CURIGA',
+    };
+  }
+
   const terlarang = kataTerlarangDalam(t);
   if (terlarang) {
     return {
@@ -103,24 +122,6 @@ export function periksaTeks(teks, opt = {}) {
       ok: false,
       alasan: 'Pesan mengandung kata yang tidak diperbolehkan. Mohon jaga bahasa di komunitas.',
       kode: 'KATA_KASAR',
-    };
-  }
-
-  const nUrl = hitungUrl(t);
-  if (nUrl > maksUrl) {
-    return {
-      ok: false,
-      alasan: `Terlalu banyak tautan (maks ${maksUrl}).`,
-      kode: 'SPAM_LINK',
-    };
-  }
-
-  const curiga = domainCuriga(t);
-  if (curiga.length) {
-    return {
-      ok: false,
-      alasan: 'Tautan tidak diizinkan atau terindikasi spam.',
-      kode: 'LINK_CURIGA',
     };
   }
 

@@ -29,8 +29,8 @@ void main() {
     final ada = Directory('assets/ilustrasi')
         .listSync()
         .whereType<File>()
-        .where((f) => f.path.endsWith('.png'))
-        .map((f) => f.path.split(Platform.pathSeparator).last.replaceAll('.png', ''))
+        .where((f) => f.path.endsWith('.webp'))
+        .map((f) => f.path.split(Platform.pathSeparator).last.replaceAll('.webp', ''))
         .toSet();
 
     final hilang = dipakai.keys.where((n) => !ada.contains(n)).toList()..sort();

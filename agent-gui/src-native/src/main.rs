@@ -264,7 +264,6 @@ impl Aplikasi {
             let server = cfg.server.trim_end_matches('/');
             let url = format!("{server}/api/agen/cek-port");
             let klien = reqwest::blocking::Client::builder()
-                .danger_accept_invalid_certs(true)
                 .timeout(std::time::Duration::from_secs(90))
                 .build();
             let hasil = klien

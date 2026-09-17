@@ -42,10 +42,13 @@ test('Batas permintaan atomik, OAuth state satu kali, dan token lama dicabut',{t
   const env={DB:h.db,JWT_SECRET:'local-tests-only-not-production'};
   const slots=await Promise.all(Array.from({length:12},()=>securitySlot(env,'parallel','subject',2,3600)));
   assert.equal(slots.filter(Boolean).length,2);
-  const state=await newOAuthState(env,'google',null);
+  const challenge='A'.repeat(43),oauthDevice='d'.repeat(64);
+  await assert.rejects(newOAuthState(env,'google',null,challenge),/Identitas perangkat/);
+  await assert.rejects(newOAuthState(env,'google',oauthDevice,'tidak-sah'),/Challenge/);
+  const state=await newOAuthState(env,'google',oauthDevice,challenge);
   await assert.rejects(consumeOAuthState(env,new Request('https://api.example.invalid/api/auth/google/callback?state='+state),'google'),/Sesi login/);
   const request=new Request('https://api.example.invalid/api/auth/google/callback?state='+state,{headers:{Cookie:'xy_oauth_nonce='+state}});
-  assert.equal(await consumeOAuthState(env,request,'google'),null);
+  assert.deepEqual(await consumeOAuthState(env,request,'google'),{deviceId:oauthDevice,handoffChallenge:challenge});
   await assert.rejects(consumeOAuthState(env,request,'google'),/kedaluwarsa/);
   await h.db.prepare("INSERT INTO users(id,nama,email,password,email_verified) VALUES('u','U','u@example.invalid','test-password',1)").run();
   const old=await h.token('u',{v:1}),fresh=await h.token('u');

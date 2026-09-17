@@ -7,6 +7,11 @@ import { periksaTeks } from './moderasi.js';
 import {
   periksaKontenPublik, statusModerasiAi, verifikasiOpenRouter, bersihkanModerasiAi,
 } from './ai-moderasi.js';
+import {
+  konfigurasiLivestream, buatInputLivestream, credentialInputLivestream,
+  setInputLivestream, hapusInputLivestream, statusInputLivestream, bentukLivestreamPublik,
+  responsHalamanLivestream,
+} from './livestream.js';
 import { kataTerlarangDalam, KATA_TERLARANG } from './kata.js';
 /**
  * ============================================================
@@ -51,13 +56,24 @@ function bersihkanUser(env, u) {
   return u;
 }
 import { kirimEmail } from './mail.js';
-import { kirimPush, siarkanPush } from './push.js';
+import { kirimPush, kirimPushBanyak, siarkanPush } from './push.js';
 import { unggahGambar, unggahAudio, unggahVideoBanner, imporFotoSosial, samarkanGambar, samarkanKMedia, samarkanBannerMedia, layaniGambar, layaniMedia } from './upload.js';
 import { penyediaBayar, metodeTersedia, infoKonfigurasiPembayaran, buatTagihan, bacaPemberitahuan, cekStatusPenyedia, batalkanTagihan } from './bayar.js';
 import { setelan, simpanSetelan, jalankanPemeliharaan, statistikLengkap, catatLog, pantauKesehatan } from './sistem.js';
 import { TIER, diskonTier, segarkanTier, cekVoucher, pakaiVoucher, pakaiVoucherStrict, buatCadangan } from './loyal.js';
 import { halamanLegal, isiLegal } from './legal.js';
 import { SKEMA_APLIKASI, providerSiap, urlMulai, ambilProfil, halamanKembali, verifikasiIdTokenGoogle, diagnostikFacebook, verifikasiSignedRequestFacebook } from './oauth.js';
+
+function versiMinimal(raw, minimum) {
+  const cocok = String(raw || '').trim().match(/^(\d+)\.(\d+)\.(\d+)/);
+  if (!cocok) return false;
+  const aktual = cocok.slice(1, 4).map(Number);
+  for (let i = 0; i < 3; i++) {
+    if (aktual[i] > minimum[i]) return true;
+    if (aktual[i] < minimum[i]) return false;
+  }
+  return true;
+}
 
 const _rateMem = new Map();
 function rateMem(key, max, windowSec) {
@@ -107,6 +123,7 @@ const securityHeaders = (env) => ({
   'X-Frame-Options': 'SAMEORIGIN',
   'Referrer-Policy': 'no-referrer',
   'Permissions-Policy': 'geolocation=(), microphone=(), camera=()',
+  'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
   'Content-Security-Policy': "default-src 'self'; img-src 'self' https://res.cloudinary.com https://*.giphy.com https://media.giphy.com data:; script-src 'self' 'unsafe-inline' https://*.onesignal.com; connect-src 'self' https://api.xycloud.my.id wss://*.xycloud.my.id https://*.onesignal.com; object-src 'none'; base-uri 'self'; frame-ancestors 'self'",
   'Cache-Control': 'no-store',
 });
@@ -117,8 +134,8 @@ const json = (data, status = 200, env) =>
     headers: securityHeaders(env),
   });
 
-const err = (message, status = 400, env) =>
-  new Response(JSON.stringify({ error: message }), {
+const err = (message, status = 400, env, code = null) =>
+  new Response(JSON.stringify({ error: message, ...(code ? { code } : {}) }), {
     status,
     headers: {
       ...securityHeaders(env),
@@ -501,6 +518,94 @@ async function buatNotif(env, ctx, { userId, jenis, judul, pesan, aktor, refJeni
   } catch (_) { /* jangan sampai menggagalkan permintaan utama */ }
 }
 
+/**
+ * Kirim outbox fan-out livestream dengan lease D1 dan idempotency key OneSignal.
+ * Satu HTTP response yang hilang aman dicoba lagi: provider mengembalikan hasil
+ * operasi pertama dan tidak membuat push kedua. Target sudah disnapshot tepat
+ * pada transisi starting -> live, maksimal 10.000 alias.
+ */
+async function prosesPushPengikutLive(env, outboxKhusus = null) {
+  const now = new Date().toISOString();
+  const due = await env.DB.prepare(
+    `SELECT o.*,l.user_id,l.creator_name,l.title,l.game,l.status live_status,l.created_at live_created_at
+     FROM livestream_push_outbox o JOIN livestream l ON l.id=o.livestream_id
+     WHERE (? IS NULL OR o.id=?) AND (
+       (o.status='pending' AND datetime(o.next_attempt_at)<=datetime('now')) OR
+       (o.status='sending' AND (o.lease_until IS NULL OR datetime(o.lease_until)<=datetime('now')))
+     )
+     ORDER BY o.created_at LIMIT 3`,
+  ).bind(outboxKhusus, outboxKhusus).all();
+
+  let selesai = 0;
+  for (const event of due.results || []) {
+    const leaseUntil = new Date(Date.now() + 120_000).toISOString();
+    const claim = await env.DB.prepare(
+      `UPDATE livestream_push_outbox SET status='sending',attempts=attempts+1,lease_until=?,updated_at=?
+       WHERE id=? AND (
+         (status='pending' AND datetime(next_attempt_at)<=datetime('now')) OR
+         (status='sending' AND (lease_until IS NULL OR datetime(lease_until)<=datetime('now')))
+       )`,
+    ).bind(leaseUntil, now, event.id).run();
+    if (Number(claim.meta?.changes || claim.changes || 0) !== 1) continue;
+
+    // Jangan mengirim kabar basi setelah siaran selesai atau outbox tertahan
+    // lebih dari 30 menit. Inbox tetap menjadi catatan bahwa transisi terjadi.
+    const terlaluLama = Date.now() - Date.parse(event.created_at) > 30 * 60_000;
+    if (event.live_status !== 'live' || terlaluLama) {
+      await env.DB.prepare(
+        "UPDATE livestream_push_outbox SET status='cancelled',lease_until=NULL,last_error=?,updated_at=? WHERE id=? AND status='sending'",
+      ).bind(event.live_status !== 'live' ? 'livestream tidak lagi live' : 'batas pengiriman 30 menit terlampaui', now, event.id).run();
+      continue;
+    }
+
+    const targets = await env.DB.prepare(
+      `SELECT t.user_id id FROM livestream_push_target t JOIN users u ON u.id=t.user_id
+       WHERE t.outbox_id=? AND u.notif_live=1 AND COALESCE(u.diblokir,0)=0 AND u.deleted_at IS NULL
+       ORDER BY t.user_id LIMIT 10000`,
+    ).bind(event.id).all();
+    const ids = (targets.results || []).map((x) => x.id);
+    if (!ids.length) {
+      await env.DB.prepare(
+        "UPDATE livestream_push_outbox SET status='sent',lease_until=NULL,provider_id=NULL,last_error=NULL,sent_at=?,updated_at=? WHERE id=? AND status='sending'",
+      ).bind(now, now, event.id).run();
+      selesai += 1;
+      continue;
+    }
+
+    const judul = `${event.creator_name || 'Kreator'} sedang live`;
+    const pesan = `${event.title} · ${event.game}. Ketuk untuk menonton dari aplikasi.`;
+    const hasil = await kirimPushBanyak(env, {
+      userIds: ids,
+      judul,
+      pesan,
+      data: { tipe: 'livestream', id: event.livestream_id, dari: event.creator_name || '' },
+      idempotencyKey: event.idempotency_key,
+    });
+    if (hasil.ok) {
+      const warning = hasil.peringatan
+        ? `Peringatan provider: ${JSON.stringify(hasil.peringatan)}`.slice(0, 500)
+        : null;
+      await env.DB.prepare(
+        "UPDATE livestream_push_outbox SET status='sent',lease_until=NULL,provider_id=?,last_error=?,sent_at=?,updated_at=? WHERE id=? AND status='sending'",
+      ).bind(hasil.id || null, warning, now, now, event.id).run();
+      selesai += 1;
+      continue;
+    }
+
+    const attempt = Math.max(1, Number(event.attempts || 0) + 1);
+    const headerDelay = Number(hasil.retryAfter);
+    const delaySeconds = Number.isFinite(headerDelay) && headerDelay > 0
+      ? Math.max(5, Math.min(900, Math.ceil(headerDelay)))
+      : Math.min(300, 5 * (2 ** Math.min(attempt, 6)));
+    const berikut = new Date(Date.now() + delaySeconds * 1000).toISOString();
+    await env.DB.prepare(
+      `UPDATE livestream_push_outbox SET status='pending',lease_until=NULL,next_attempt_at=?,last_error=?,updated_at=?
+       WHERE id=? AND status='sending'`,
+    ).bind(berikut, String(hasil.alasan || 'provider push gagal').slice(0, 500), now, event.id).run();
+  }
+  return selesai;
+}
+
 /// Masa berlaku token: 30 hari.
 const MASA_TOKEN = 30 * 24 * 60 * 60 * 1000;
 
@@ -612,6 +717,31 @@ async function akunSosial(env, ctx, prof, provider, deviceId, req) {
     ctx.waitUntil(kirimEmail(env, { to: prof.email, template: 'selamatDatang', data: { nama: prof.nama } }));
   }
   return u;
+}
+
+function kodeHandoffSosial() {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  return [...bytes].map((x) => x.toString(16).padStart(2, '0')).join('');
+}
+
+async function buatHandoffSosial(env, provider, userId, deviceId, handoffChallenge) {
+  if (!deviceId) throw new SecurityError('Identitas perangkat OAuth tidak tersedia.', 400, 'DEVICE_REQUIRED');
+  if (!/^[A-Za-z0-9_-]{43}$/.test(String(handoffChallenge || ''))) {
+    throw new SecurityError('Challenge OAuth tidak tersedia.', 400, 'OAUTH_CHALLENGE');
+  }
+  const code = kodeHandoffSosial();
+  const id = await securityHash(env, 'oauth-handoff', code);
+  const now = new Date().toISOString();
+  const inserted = await env.DB.prepare(
+    `INSERT INTO oauth_handoffs
+       (id,provider,user_id,device_id,handoff_challenge,session_version,created_at,expires_at)
+     SELECT ?,?,?,?,?,COALESCE(session_version,0),?,? FROM users WHERE id=?`,
+  ).bind(id, provider, userId, deviceId, handoffChallenge, now,
+    new Date(Date.now() + 120_000).toISOString(), userId).run();
+  if (Number(inserted.meta?.changes || inserted.changes || 0) !== 1) {
+    throw new SecurityError('Akun OAuth tidak tersedia.', 409, 'SOCIAL_ACCOUNT_MISSING');
+  }
+  return code;
 }
 
 function kodePenghapusanSosial() {
@@ -1287,12 +1417,300 @@ async function pollPembayaran(env) {
   await rekonsiliasiPembayaran(env, 12, 'cron');
 }
 
+const STATUS_LIVE_AKTIF = new Set(['queued', 'starting', 'live', 'ending']);
+
+function diagnostikLivestream(row) {
+  if (!row) return null;
+  const total = Math.max(0, Number(row.output_total_frames) || 0);
+  const skipped = Math.max(0, Number(row.output_skipped_frames) || 0);
+  const congestion = Number.isFinite(Number(row.output_congestion)) ? Number(row.output_congestion) : null;
+  const healthAge = row.last_health_at ? Date.now() - Date.parse(row.last_health_at) : Number.POSITIVE_INFINITY;
+  let quality = 'good';
+  if (row.cleanup_pending === 1) quality = 'cleanup_pending';
+  else if (row.output_reconnecting === 1) quality = 'reconnecting';
+  else if (healthAge > 45_000) quality = 'offline';
+  else if ((congestion !== null && congestion >= 0.2) || (total > 300 && skipped / total >= 0.03)) quality = 'degraded';
+  return {
+    quality,
+    health_code: String(row.health_code || row.failure_code || (row.status === 'starting' ? 'WAITING_AGENT' : 'UNKNOWN')).slice(0, 50),
+    checked_at: row.last_health_at || null,
+    reconnecting: row.output_reconnecting === 1,
+    cleanup_pending: row.cleanup_pending === 1,
+    congestion,
+    bytes_sent: Math.max(0, Number(row.output_bytes) || 0),
+    duration_ms: Math.max(0, Number(row.output_duration_ms) || 0),
+    skipped_frames: skipped,
+    total_frames: total,
+    failure_code: row.failure_code || null,
+    end_reason: row.end_reason || null,
+  };
+}
+
+function namaCookieLivestream(id) {
+  // ID sudah tervalidasi router; nama berbeda mencegah tab live A menimpa
+  // capability HttpOnly milik live B.
+  return `xy_live_${String(id || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 80)}`;
+}
+
+function nilaiCookie(req, nama) {
+  const semua = String(req.headers.get('cookie') || '').split(';');
+  for (const bagian of semua) {
+    const i = bagian.indexOf('=');
+    if (i > 0 && bagian.slice(0, i).trim() === nama) {
+      try { return decodeURIComponent(bagian.slice(i + 1).trim()); } catch (_) { return ''; }
+    }
+  }
+  return '';
+}
+
+async function barisLivestream(env, id) {
+  return env.DB.prepare(
+    `SELECT l.*,u.foto creator_photo,u.diblokir creator_blocked,u.deleted_at creator_deleted_at,
+            (SELECT COUNT(DISTINCT v.viewer_id) FROM livestream_view v WHERE v.livestream_id=l.id
+              AND datetime(v.last_seen)>=datetime('now','-45 seconds')) viewers
+     FROM livestream l LEFT JOIN users u ON u.id=l.user_id WHERE l.id=?`,
+  ).bind(id).first();
+}
+
+async function daftarLivestreamPublik(env, limit = 50) {
+  const { results } = await env.DB.prepare(
+    `SELECT l.*,u.foto creator_photo,
+            (SELECT COUNT(DISTINCT v.viewer_id) FROM livestream_view v WHERE v.livestream_id=l.id
+              AND datetime(v.last_seen)>=datetime('now','-45 seconds')) viewers
+     FROM livestream l LEFT JOIN users u ON u.id=l.user_id
+     WHERE l.visibility='public' AND l.status IN ('starting','live')
+       AND u.deleted_at IS NULL AND COALESCE(u.diblokir,0)=0
+     ORDER BY CASE l.status WHEN 'live' THEN 0 ELSE 1 END,l.viewer_peak DESC,l.created_at DESC LIMIT ?`,
+  ).bind(Math.max(1, Math.min(100, Number(limit) || 50))).all();
+  return (results || []).map((x) => bentukLivestreamPublik(env, x));
+}
+
+async function antreAkhirLivestream(env, live, alasan = 'Siaran diakhiri') {
+  if (!live || ['ended', 'rejected'].includes(live.status)
+      || (live.status === 'failed' && Number(live.cleanup_pending || 0) !== 1)) return live;
+  const now = new Date().toISOString();
+  await env.DB.batch([
+    env.DB.prepare(
+      `UPDATE livestream SET status=CASE WHEN status='failed' AND cleanup_pending=1 THEN 'failed' ELSE 'ending' END,
+         end_reason=?,updated_at=? WHERE id=?
+       AND (status IN ('queued','starting','live','ending') OR (status='failed' AND cleanup_pending=1))`,
+    ).bind(String(alasan).slice(0, 160), now, live.id),
+    env.DB.prepare("INSERT OR IGNORE INTO perintah(id,agen_id,jenis,muatan) VALUES(?,?,'akhiri_siaran',?)")
+      .bind(`live_end_${live.id}`, live.agen_id, JSON.stringify({ live_id: live.id })),
+  ]);
+  if (live.provider_input_uid && !live.provider_disabled_at) {
+    const blocked = await setInputLivestream(env, live.provider_input_uid, false);
+    if (blocked.ok || blocked.code === 'NOT_FOUND') {
+      await env.DB.prepare('UPDATE livestream SET provider_disabled_at=COALESCE(provider_disabled_at,?) WHERE id=?')
+        .bind(now, live.id).run();
+    }
+  }
+  return {
+    ...live,
+    status: live.status === 'failed' && Number(live.cleanup_pending) === 1 ? 'failed' : 'ending',
+    updated_at: now,
+  };
+}
+
+async function hapusProviderLivestream(env, live) {
+  if (!live?.provider_input_uid) return false;
+  const now = new Date().toISOString();
+  const disabled = live.provider_disabled_at
+    ? { ok: true }
+    : await setInputLivestream(env, live.provider_input_uid, false);
+  if (disabled.ok || disabled.code === 'NOT_FOUND') {
+    await env.DB.prepare('UPDATE livestream SET provider_disabled_at=COALESCE(provider_disabled_at,?) WHERE id=?')
+      .bind(now, live.id).run();
+  }
+  const deleted = await hapusInputLivestream(env, live.provider_input_uid);
+  if (deleted.ok || deleted.code === 'NOT_FOUND') {
+    await env.DB.prepare(
+      'UPDATE livestream SET provider_disabled_at=COALESCE(provider_disabled_at,?),provider_deleted_at=COALESCE(provider_deleted_at,?) WHERE id=?',
+    ).bind(now, now, live.id).run();
+    return true;
+  }
+  return false;
+}
+
+async function antreKompensasiProvider(env, inputUid, liveId, reason = 'Transaksi livestream gagal') {
+  const uidProvider = String(inputUid || '');
+  if (!/^[a-f0-9]{32}$/i.test(uidProvider)) return false;
+  const now = new Date().toISOString();
+  await env.DB.prepare(
+    `INSERT INTO livestream_provider_cleanup
+     (input_uid,live_id,status,reason,attempts,next_attempt_at,created_at,updated_at)
+     VALUES(?,?,'pending',?,0,?,?,?)
+     ON CONFLICT(input_uid) DO UPDATE SET reason=excluded.reason,updated_at=excluded.updated_at`,
+  ).bind(uidProvider, String(liveId || '').slice(0, 80), String(reason).slice(0, 160), now, now, now).run();
+  return true;
+}
+
+/** Kompensasi untuk Live Input yang tercipta sebelum transaksi D1 gagal. */
+async function bersihkanProviderOrphan(env, inputUid, liveId, reason = 'Transaksi livestream gagal') {
+  const uidProvider = String(inputUid || '');
+  if (!/^[a-f0-9]{32}$/i.test(uidProvider)) return false;
+  try {
+    await antreKompensasiProvider(env, uidProvider, liveId, reason);
+  } catch (_) { /* provider tetap dicoba walau audit D1 sementara gagal */ }
+
+  const disabled = await setInputLivestream(env, uidProvider, false);
+  const deleted = await hapusInputLivestream(env, uidProvider);
+  const selesai = deleted.ok || deleted.code === 'NOT_FOUND';
+  const errorCode = selesai ? null : `disable:${disabled.code || 'UNKNOWN'};delete:${deleted.code || 'UNKNOWN'}`;
+  try {
+    await env.DB.prepare(
+      `UPDATE livestream_provider_cleanup SET status=?,attempts=attempts+1,next_attempt_at=?,
+         last_error=?,updated_at=?,deleted_at=CASE WHEN ? THEN ? ELSE deleted_at END WHERE input_uid=?`,
+    ).bind(selesai ? 'deleted' : 'pending', new Date(Date.now() + 300_000).toISOString(),
+      errorCode, new Date().toISOString(), selesai ? 1 : 0, new Date().toISOString(), uidProvider).run();
+  } catch (_) { /* cron/manual Cloudflare reconciliation tetap tersedia */ }
+  return selesai;
+}
+
+async function jalankanTerbatas(pekerjaan, maksimum = 5) {
+  const jobs = Array.isArray(pekerjaan) ? pekerjaan : [];
+  let berikut = 0;
+  await Promise.all(Array.from({ length: Math.min(Math.max(1, maksimum), jobs.length) }, async () => {
+    while (berikut < jobs.length) {
+      const index = berikut++;
+      await jobs[index]();
+    }
+  }));
+}
+
+async function rawatLivestream(env) {
+  const now = new Date().toISOString();
+  await env.DB.prepare(
+    "UPDATE creator_earning SET status='available',updated_at=? WHERE status='held' AND datetime(available_at)<=datetime('now')",
+  ).bind(now).run();
+  // Empat selector keselamatan dibaca paralel lalu dideduplikasi per live. Satu
+  // putaran cron tidak boleh memanggil provider dua kali untuk baris yang sama.
+  // Hilangnya konfigurasi provider juga memicu stop OBS; membiarkan ingest tetap
+  // hidup karena token Worker hilang akan menjadi kebocoran biaya tanpa kontrol.
+  const rollout = await konfigurasiLivestream(env);
+  const [rolloutOff, expiredLease, staleStart, staleHealth] = await Promise.all([
+    rollout.effective
+      ? Promise.resolve({ results: [] })
+      : env.DB.prepare(
+          "SELECT * FROM livestream WHERE status IN ('queued','starting','live') LIMIT 20",
+        ).all(),
+    env.DB.prepare(
+      `SELECT l.* FROM livestream l LEFT JOIN sesi s ON s.id=l.sesi_id
+       WHERE l.status IN ('queued','starting','live')
+         AND (datetime(l.scheduled_end)<=datetime('now') OR s.id IS NULL OR s.status IN ('selesai','gagal','mengakhiri'))
+       LIMIT 20`,
+    ).all(),
+    env.DB.prepare(
+      "SELECT * FROM livestream WHERE status IN ('queued','starting') AND datetime(created_at)<datetime('now','-5 minutes') LIMIT 20",
+    ).all(),
+    env.DB.prepare(
+      `SELECT * FROM livestream WHERE status='live'
+         AND datetime(COALESCE(last_health_at,started_at,created_at))<=datetime('now','-90 seconds')
+       LIMIT 20`,
+    ).all(),
+  ]);
+  const claimed = new Set();
+  const safetyJobs = [];
+  for (const live of rolloutOff.results || []) {
+    claimed.add(live.id);
+    safetyJobs.push(() => antreAkhirLivestream(env, live,
+      rollout.enabled ? 'Konfigurasi provider livestream tidak tersedia' : 'Fitur livestream dinonaktifkan'));
+  }
+  for (const live of expiredLease.results || []) {
+    claimed.add(live.id);
+    safetyJobs.push(() => antreAkhirLivestream(env, live, 'Sesi rental berakhir'));
+  }
+  // Start tanpa ACK tetap harus mengantrekan cleanup agen. Jangan langsung
+  // menandainya selesai: OBS mungkin aktif sementara ACK jaringan hilang.
+  for (const live of staleStart.results || []) {
+    if (claimed.has(live.id)) continue;
+    claimed.add(live.id);
+    safetyJobs.push(async () => {
+      await antreAkhirLivestream(env, live, 'Agen tidak mengonfirmasi mulai dalam 5 menit');
+      await env.DB.prepare(
+        "UPDATE livestream SET failure_code='START_TIMEOUT',health_code='START_TIMEOUT',cleanup_pending=1 WHERE id=? AND status='ending'",
+      ).bind(live.id).run();
+    });
+  }
+  // Heartbeat yang hilang harus memutus ingress walau proses agen/OBS mati
+  // tanpa sempat mengirim safe=false. Trigger Cloudflare berjalan tiap menit.
+  for (const live of staleHealth.results || []) {
+    if (claimed.has(live.id)) continue;
+    claimed.add(live.id);
+    safetyJobs.push(async () => {
+      await antreAkhirLivestream(env, live, 'Heartbeat keselamatan OBS hilang');
+      await env.DB.prepare(
+        "UPDATE livestream SET failure_code='AGENT_HEALTH_TIMEOUT',health_code='AGENT_HEALTH_TIMEOUT',cleanup_pending=1 WHERE id=? AND status='ending'",
+      ).bind(live.id).run();
+    });
+  }
+  await jalankanTerbatas(safetyJobs, 5);
+
+  // Provider retry, kompensasi orphan, dan outbox adalah kelompok jaringan
+  // independen. Jalankan bersamaan agar worst-case wall time tidak menjadi
+  // jumlah dari seluruh timeout eksternal.
+  const [belumDiblokir, belumDihapus, orphan] = await Promise.all([
+    env.DB.prepare(
+      "SELECT id,provider_input_uid FROM livestream WHERE status='ending' AND provider_input_uid IS NOT NULL AND provider_disabled_at IS NULL LIMIT 20",
+    ).all(),
+    env.DB.prepare(
+      "SELECT id,provider_input_uid,provider_disabled_at FROM livestream WHERE status IN ('ended','failed','rejected') AND provider_input_uid IS NOT NULL AND provider_deleted_at IS NULL LIMIT 20",
+    ).all(),
+    env.DB.prepare(
+      "SELECT input_uid,live_id,reason FROM livestream_provider_cleanup WHERE status='pending' AND datetime(next_attempt_at)<=datetime('now') LIMIT 20",
+    ).all().catch(() => ({ results: [] })),
+  ]);
+  const providerJobs = (belumDiblokir.results || []).map((live) => async () => {
+    const blocked = await setInputLivestream(env, live.provider_input_uid, false);
+    if (blocked.ok || blocked.code === 'NOT_FOUND') {
+      await env.DB.prepare('UPDATE livestream SET provider_disabled_at=COALESCE(provider_disabled_at,?) WHERE id=?')
+        .bind(now, live.id).run();
+    }
+  });
+  providerJobs.push(...(belumDihapus.results || []).map((live) =>
+    () => hapusProviderLivestream(env, live)));
+  // Resource provider yang kalah race sebelum INSERT livestream tetap punya
+  // antrean kompensasi sendiri karena tidak memiliki baris induk livestream.
+  providerJobs.push(...(orphan.results || []).map((row) =>
+    () => bersihkanProviderOrphan(env, row.input_uid, row.live_id, row.reason)));
+  await Promise.all([
+    // Empat koneksi provider + satu OneSignal menjaga concurrency eksternal
+    // di bawah batas koneksi simultan Worker sambil tetap paralel.
+    jalankanTerbatas(providerJobs, 4),
+    prosesPushPengikutLive(env).catch(() => {}),
+  ]);
+
+  await env.DB.batch([
+    // Jangan pernah mengubah ending menjadi ended tanpa ACK cleanup agen.
+    // Setelah 30 menit status menjadi failed (ingress sudah diblokir), tetapi
+    // command akhir tetap tersimpan dan ACK recovery kelak boleh menjadi ended.
+    env.DB.prepare(
+      `UPDATE livestream SET cleanup_pending=1,health_code='END_ACK_TIMEOUT',
+         failure_code=COALESCE(failure_code,'END_ACK_TIMEOUT'),updated_at=?
+       WHERE status='ending' AND cleanup_pending=0 AND datetime(updated_at)<datetime('now','-5 minutes')`,
+    ).bind(now),
+    env.DB.prepare(
+      `UPDATE livestream SET status='failed',ended_at=COALESCE(ended_at,?),cleanup_pending=1,
+         health_code='END_ACK_TIMEOUT',failure_code=COALESCE(failure_code,'END_ACK_TIMEOUT'),updated_at=?
+       WHERE status='ending' AND datetime(updated_at)<datetime('now','-30 minutes')`,
+    ).bind(now, now),
+    env.DB.prepare("DELETE FROM livestream_watch_handoff WHERE datetime(expires_at)<datetime('now')"),
+    env.DB.prepare("DELETE FROM livestream_view WHERE datetime(last_seen)<datetime('now','-30 days')"),
+    env.DB.prepare("DELETE FROM livestream_push_outbox WHERE status IN ('sent','cancelled') AND datetime(updated_at)<datetime('now','-30 days')"),
+    env.DB.prepare("DELETE FROM livestream_provider_cleanup WHERE status='deleted' AND datetime(updated_at)<datetime('now','-30 days')"),
+  ]);
+}
+
 // ============================================================
 //  ROUTER
 // ============================================================
 export default {
-  /** Penjadwal Cloudflare: pemeliharaan otomatis berjalan sendiri. */
+  /** Penjadwal Cloudflare: watchdog live per menit, pemeliharaan lain per jam. */
   async scheduled(event, env, ctx) {
+    if (event?.cron === '* * * * *') {
+      ctx.waitUntil(rawatLivestream(env).catch(() => {}));
+      return;
+    }
     ctx.waitUntil(jalankanPemeliharaan(env));
     ctx.waitUntil(rawatSewa(env));
     // pantau kesehatan tiap jam
@@ -1300,6 +1718,7 @@ export default {
     // jaring pengaman pembayaran: tanya penyedia soal top up QRIS/e-wallet
     // yang masih 'menunggu' (webhook bisa telat/hilang)
     ctx.waitUntil(pollPembayaran(env));
+    // Watchdog/retensi livestream sudah ditangani trigger per menit di atas.
     // Cache verdict AI kedaluwarsa 30 hari; metadata audit tanpa konten mentah
     // disimpan maksimal 90 hari.
     ctx.waitUntil(bersihkanModerasiAi(env).catch(() => {}));
@@ -1354,6 +1773,110 @@ export default {
     // pemantau kesehatan selalu tampak hijau walau Worker sedang bermasalah
     // atau mode pemeliharaan sedang menyala.
     if (path === '/health') return json({ ok: true, at: new Date().toISOString() }, 200, env);
+
+    // Halaman player publik menukar tiket penonton berumur pendek menjadi
+    // cookie HttpOnly. Token login dan stream key tidak pernah masuk URL player.
+    const cocokLiveWatch = path.match(/^\/live\/watch\/([A-Za-z0-9_-]{8,80})$/);
+    if (cocokLiveWatch && req.method === 'GET') {
+      try {
+        const live = await barisLivestream(env, cocokLiveWatch[1]);
+        if (!live || live.visibility !== 'public' || Number(live.creator_blocked || 0) === 1
+            || live.creator_deleted_at) return err('Siaran tidak ditemukan', 404, env);
+        const tiketQuery = url.searchParams.get('t') || '';
+        const cookieName = namaCookieLivestream(live.id);
+        const tiketCookie = nilaiCookie(req, cookieName);
+
+        // URL hanya membawa handoff 2 menit. Hash D1 dihapus atomik sebelum
+        // capability player baru disimpan sebagai cookie HttpOnly. Menyalin URL
+        // dari riwayat setelah redirect tidak dapat membuka player lain.
+        if (tiketQuery) {
+          const q = await verify(tiketQuery, env.JWT_SECRET);
+          const handoffValid = q?.typ === 'live-watch-handoff' && q.live_id === live.id
+            && typeof q.view_id === 'string' && typeof q.sub === 'string'
+            && /^[a-f0-9]{64}$/.test(String(q.handoff || ''));
+          if (handoffValid) {
+            const handoffId = await securityHash(env, 'live-watch-handoff', q.handoff);
+            const consumed = await env.DB.prepare(
+              `DELETE FROM livestream_watch_handoff
+               WHERE id=? AND livestream_id=? AND viewer_id=? AND view_id=?
+                 AND datetime(expires_at)>datetime('now')
+                 AND EXISTS(SELECT 1 FROM users WHERE id=? AND deleted_at IS NULL AND COALESCE(diblokir,0)=0)
+               RETURNING view_id`,
+            ).bind(handoffId, live.id, q.sub, q.view_id, q.sub).first();
+            if (consumed) {
+              const akhir = Date.parse(String(live.scheduled_end || ''));
+              const batasLive = Number.isFinite(akhir) ? akhir + 3600_000 : Date.now() + 3600_000;
+              const exp = Math.min(Date.now() + 6 * 3600_000, Math.max(Date.now() + 600_000, batasLive));
+              const capability = await sign({
+                v: 2, typ: 'live-watch', sub: q.sub,
+                live_id: live.id, view_id: q.view_id, exp,
+              }, env.JWT_SECRET);
+              const maxAge = Math.max(1, Math.min(21_600, Math.floor((exp - Date.now()) / 1000)));
+              return new Response(null, {
+                status: 303,
+                headers: {
+                  Location: `/live/watch/${encodeURIComponent(live.id)}`,
+                  'Set-Cookie': `${cookieName}=${encodeURIComponent(capability)}; HttpOnly; Secure; SameSite=Lax; Path=/live/watch/${live.id}; Max-Age=${maxAge}`,
+                  'Cache-Control': 'no-store, private',
+                  'Referrer-Policy': 'no-referrer',
+                  'X-Content-Type-Options': 'nosniff',
+                  'X-Frame-Options': 'DENY',
+                  'Content-Security-Policy': "default-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+                  'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=()',
+                  'Cross-Origin-Opener-Policy': 'same-origin',
+                  'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
+                },
+              });
+            }
+          }
+        }
+
+        const klaim = await verify(tiketCookie, env.JWT_SECRET);
+        let tracked = Boolean(klaim?.typ === 'live-watch' && klaim.live_id === live.id
+          && typeof klaim.view_id === 'string' && typeof klaim.sub === 'string');
+        if (tracked) {
+          // Capability dicabut segera saat akun diblokir/dihapus atau view sudah
+          // dibersihkan; tanda tangan valid saja tidak cukup hingga enam jam.
+          const viewer = await env.DB.prepare(
+            `SELECT 1 ok FROM livestream_view v JOIN users u ON u.id=v.viewer_id
+             WHERE v.id=? AND v.livestream_id=? AND v.viewer_id=?
+               AND u.deleted_at IS NULL AND COALESCE(u.diblokir,0)=0`,
+          ).bind(klaim.view_id, live.id, klaim.sub).first();
+          tracked = viewer?.ok === 1;
+        }
+        const playbackAllowed = !tracked || !['starting', 'live'].includes(live.status)
+          || await bolehLanjut(env, `live-player-page:${klaim.view_id}`, 12, 3600);
+        return await responsHalamanLivestream(env, live, { tracked, playbackAllowed });
+      } catch (_) {
+        return err('Player livestream belum tersedia.', 503, env);
+      }
+    }
+    const cocokLiveHeartbeat = path.match(/^\/live\/watch\/([A-Za-z0-9_-]{8,80})\/heartbeat$/);
+    if (cocokLiveHeartbeat && req.method === 'POST') {
+      const liveId = cocokLiveHeartbeat[1];
+      const klaim = await verify(nilaiCookie(req, namaCookieLivestream(liveId)), env.JWT_SECRET);
+      if (klaim?.typ !== 'live-watch' || typeof klaim.view_id !== 'string'
+          || klaim.live_id !== liveId || typeof klaim.sub !== 'string') {
+        return err('Tiket penonton tidak valid', 401, env);
+      }
+      const now = new Date().toISOString();
+      const update = await env.DB.prepare(
+        `UPDATE livestream_view SET
+           watched_seconds=watched_seconds+MIN(30,MAX(0,CAST(strftime('%s','now') AS INTEGER)-CAST(strftime('%s',last_seen) AS INTEGER))),
+           last_seen=?
+         WHERE id=? AND livestream_id=? AND viewer_id=?
+           AND EXISTS(SELECT 1 FROM livestream WHERE id=? AND status='live')
+           AND EXISTS(SELECT 1 FROM users WHERE id=? AND deleted_at IS NULL AND COALESCE(diblokir,0)=0)`,
+      ).bind(now, klaim.view_id, liveId, klaim.sub, liveId, klaim.sub).run();
+      if (Number(update.meta?.changes || update.changes || 0) > 0) {
+        await env.DB.prepare(
+          `UPDATE livestream SET viewer_peak=MAX(viewer_peak,
+             (SELECT COUNT(DISTINCT viewer_id) FROM livestream_view WHERE livestream_id=? AND datetime(last_seen)>=datetime('now','-45 seconds'))),updated_at=?
+           WHERE id=?`,
+        ).bind(liveId, now, liveId).run();
+      }
+      return new Response(null, { status: 204, headers: { ...securityHeaders(env), 'Cache-Control': 'no-store' } });
+    }
 
     // Private rooms require a user token or a short-lived admin WebSocket ticket.
     // ADMIN_KEY tidak pernah diterima lewat query string.
@@ -1491,7 +2014,7 @@ footer{position:fixed;left:0;right:0;bottom:0;z-index:2;background:rgba(10,5,28,
 </div></main>
 <footer><div class="isi-footer">
 <div class="f-merek"><img src="/brand/logo-full.png" alt="">© 2026 XyCloudStore</div>
-<nav class="f-link"><a href="/legal/syarat">Ketentuan Layanan</a><a href="/legal/privasi">Kebijakan Privasi</a><a href="/legal/refund">Pengembalian Dana</a></nav>
+<nav class="f-link"><a href="/legal/syarat">Ketentuan Layanan</a><a href="/legal/privasi">Kebijakan Privasi</a><a href="/legal/refund">Pengembalian Dana</a><a href="/legal/live">Ketentuan XyCloud Live</a></nav>
 </div></footer>
 </body></html>`, {
           headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' },
@@ -1651,8 +2174,8 @@ footer{position:fixed;left:0;right:0;bottom:0;z-index:2;background:rgba(10,5,28,
       });
     }
 
-    if (path === '/legal/syarat' || path === '/legal/privasi' || path === '/legal/refund') {
-      const jenis = path.endsWith('privasi') ? 'privasi' : path.endsWith('refund') ? 'refund' : 'syarat';
+    if (path === '/legal/syarat' || path === '/legal/privasi' || path === '/legal/refund' || path === '/legal/live') {
+      const jenis = path.endsWith('privasi') ? 'privasi' : path.endsWith('refund') ? 'refund' : path.endsWith('live') ? 'live' : 'syarat';
       return new Response(halamanLegal(jenis), {
         headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'public, max-age=3600' },
       });
@@ -1725,6 +2248,7 @@ self.addEventListener('fetch', (e) => {
         ['/legal/syarat', '0.3', 'yearly'],
         ['/legal/privasi', '0.3', 'yearly'],
         ['/legal/refund', '0.3', 'yearly'],
+        ['/legal/live', '0.3', 'yearly'],
       ];
       const hariIni = new Date().toISOString().slice(0, 10);
 
@@ -1925,10 +2449,12 @@ ${halaman.map(([u, p2, f]) => `  <url>
         if (p === 'agen/heartbeat' && req.method === 'POST') {
           await rawatSewa(env);
           const b = await req.json().catch(() => ({}));
+          // `online` adalah status tunggal yang sah dari heartbeat. `offline`
+          // hanya ditetapkan watchdog server; nilai status dari payload agen
+          // tidak dipercaya untuk keputusan kapasitas atau mulai live.
           await env.DB.prepare(
-            "UPDATE agen SET status = ?, spec = COALESCE(?, spec), versi = COALESCE(?, versi), host = CASE WHEN ? IS NOT NULL THEN ? ELSE host END, terakhir = ? WHERE id = ?"
+            "UPDATE agen SET status = 'online', spec = COALESCE(?, spec), versi = COALESCE(?, versi), host = CASE WHEN ? IS NOT NULL THEN ? ELSE host END, terakhir = ? WHERE id = ?"
           ).bind(
-            b.status || 'online',
             b.spec ? JSON.stringify(b.spec) : null,
             b.versi || null,
             // Hotfix cek-port: bila agen tak tahu IP publiknya (ipify diblok /
@@ -1939,14 +2465,103 @@ ${halaman.map(([u, p2, f]) => `  <url>
             agen.id
           ).run();
 
+          // Watchdog OBS fail-closed. Hanya sinyal definitif false yang menutup;
+          // null berarti monitor lokal sementara tidak bisa dihubungi.
+          const health = b.live_health && typeof b.live_health === 'object' ? b.live_health : null;
+          const healthLiveId = health && /^[A-Za-z0-9_-]{8,80}$/.test(String(health.live_id || ''))
+            ? String(health.live_id) : '';
+          if (healthLiveId) {
+            const boundedInt = (value, max = Number.MAX_SAFE_INTEGER) => {
+              const n = Number(value);
+              return Number.isSafeInteger(n) && n >= 0 ? Math.min(n, max) : null;
+            };
+            const congestion = Number(health.congestion);
+            const reconnecting = typeof health.reconnecting === 'boolean' ? (health.reconnecting ? 1 : 0) : null;
+            const cleanup = typeof health.cleanup_pending === 'boolean' ? (health.cleanup_pending ? 1 : 0) : null;
+            const definitifSehat = health.safe === true && health.active === true;
+            const healthAt = new Date().toISOString();
+            await env.DB.prepare(
+              `UPDATE livestream SET
+                 last_health_at=CASE WHEN ?=1 THEN ? ELSE last_health_at END,
+                 health_code=?,
+                 output_reconnecting=CASE WHEN ? IS NULL THEN output_reconnecting ELSE ? END,
+                 cleanup_pending=CASE
+                   WHEN status='failed' AND cleanup_pending=1 THEN 1
+                   WHEN ? IS NULL THEN cleanup_pending ELSE ? END,
+                 output_congestion=COALESCE(?,output_congestion),
+                 output_bytes=COALESCE(?,output_bytes),output_duration_ms=COALESCE(?,output_duration_ms),
+                 output_skipped_frames=COALESCE(?,output_skipped_frames),output_total_frames=COALESCE(?,output_total_frames),updated_at=?
+               WHERE id=? AND agen_id=?
+                 AND (status IN ('starting','live','ending') OR (status='failed' AND cleanup_pending=1))`,
+            ).bind(
+              definitifSehat ? 1 : 0, healthAt,
+              String(health.code || 'UNKNOWN').replace(/[^A-Z0-9_-]/gi, '').slice(0, 50),
+              reconnecting, reconnecting, cleanup, cleanup,
+              Number.isFinite(congestion) ? Math.max(0, Math.min(1, congestion)) : null,
+              boundedInt(health.bytes), boundedInt(health.duration_ms),
+              boundedInt(health.skipped_frames), boundedInt(health.total_frames),
+              healthAt, healthLiveId, agen.id,
+            ).run();
+          }
+          const monitorTidakPasti = healthLiveId
+            && (health.safe == null || health.active == null);
+          if (healthLiveId && (health.safe === false || health.active === false || monitorTidakPasti)) {
+            const liveFault = await env.DB.prepare(
+              `SELECT * FROM livestream WHERE id=? AND agen_id=?
+               AND (status IN ('starting','live','ending') OR (status='failed' AND cleanup_pending=1))`,
+            ).bind(healthLiveId, agen.id).first();
+            const terakhirAman = liveFault
+              ? Date.parse(liveFault.last_health_at || liveFault.started_at || liveFault.created_at || '')
+              : Number.NaN;
+            const monitorTimeout = monitorTidakPasti && (!Number.isFinite(terakhirAman)
+              || Date.now() - terakhirAman > 30_000);
+            if (liveFault && (health.safe === false || health.active === false || monitorTimeout)) {
+              const code = monitorTimeout
+                ? 'OBS_MONITOR_TIMEOUT'
+                : String(health.code || 'OBS_STOPPED').replace(/[^A-Z0-9_-]/gi, '').slice(0, 50);
+              const perluAkhiri = liveFault.status !== 'ending'
+                && !(liveFault.status === 'failed' && Number(liveFault.cleanup_pending) === 1 && liveFault.end_reason);
+              if (perluAkhiri) {
+                await antreAkhirLivestream(env, liveFault,
+                  monitorTimeout ? 'Audit keselamatan OBS tidak tersedia' : 'OBS dihentikan fail-closed');
+              }
+              // Heartbeat adalah telemetry, bukan ACK command. Walau agen
+              // melaporkan output sudah mati, status `ended` hanya boleh lahir
+              // dari ACK akhiri_siaran setelah credential lokal dibersihkan.
+              const cleanup = liveFault.status === 'failed' && Number(liveFault.cleanup_pending) === 1
+                ? 1
+                : (typeof health.cleanup_pending === 'boolean' ? (health.cleanup_pending ? 1 : 0) : null);
+              await env.DB.prepare(
+                `UPDATE livestream SET failure_code=COALESCE(failure_code,?),health_code=?,
+                   cleanup_pending=CASE
+                     WHEN status='failed' AND cleanup_pending=1 THEN 1
+                     WHEN ? IS NULL THEN cleanup_pending ELSE ? END,
+                   updated_at=? WHERE id=? AND status IN ('ending','failed')`,
+              ).bind(code, code, cleanup, cleanup,
+                new Date().toISOString(), liveFault.id).run();
+              if (perluAkhiri) {
+                ctx.waitUntil(buatNotif(env, ctx, {
+                  userId: liveFault.user_id, jenis: 'livestream', judul: 'Siaran dihentikan otomatis',
+                  pesan: `Perlindungan privasi menghentikan siaran (${code}).`,
+                  aktor: 'Sistem', refJenis: 'livestream', refId: liveFault.id,
+                }));
+              }
+            }
+          }
+
+          // Delivery lease: ACK jaringan yang hilang tidak boleh membuat command
+          // macet selamanya. Agen wajib idempotent; command diambil ulang setelah 90 dtk.
+          await env.DB.prepare(
+            "UPDATE perintah SET status='antre' WHERE agen_id=? AND status='diambil' AND datetime(COALESCE(diproses,dibuat))<=datetime('now','-90 seconds')",
+          ).bind(agen.id).run();
           const { results } = await env.DB
             .prepare("SELECT * FROM perintah WHERE agen_id = ? AND status = 'antre' ORDER BY dibuat ASC LIMIT 5")
             .bind(agen.id).all();
 
           if (results.length) {
             await env.DB.prepare(
-              `UPDATE perintah SET status = 'diambil' WHERE id IN (${results.map(() => '?').join(',')})`
-            ).bind(...results.map((r) => r.id)).run();
+              `UPDATE perintah SET status = 'diambil',diproses=? WHERE id IN (${results.map(() => '?').join(',')})`
+            ).bind(new Date().toISOString(), ...results.map((r) => r.id)).run();
           }
 
           const lease = await env.DB.prepare("SELECT s.id,COALESCE(s.berakhir,o.berakhir) AS berakhir,s.status FROM sesi s JOIN agen a ON a.sesi_aktif=s.id LEFT JOIN orders o ON o.id=s.order_id WHERE a.id=?").bind(agen.id).first();
@@ -1977,10 +2592,113 @@ ${halaman.map(([u, p2, f]) => `  <url>
           return json({ ok: true, host, hasil }, 200, env);
         }
 
+        // Credential ingest hanya dikirim langsung ke agen pemilik unit dan
+        // diambil ulang dari provider. Stream key tidak pernah masuk D1/perintah/log.
+        const cocokKredensialLive = p.match(/^agen\/live\/([A-Za-z0-9_-]{8,80})\/credential$/);
+        if (cocokKredensialLive && req.method === 'GET') {
+          if (!(await bolehLanjut(env, `live-credential:${agen.id}`, 10, 3600))) {
+            return err('Terlalu banyak permintaan credential siaran.', 429, env);
+          }
+          const live = await env.DB.prepare(
+            `SELECT l.id,l.agen_id,l.provider_input_uid,l.mic_consent,l.status
+             FROM livestream l JOIN sesi s ON s.id=l.sesi_id
+             WHERE l.id=? AND l.agen_id=? AND l.status IN ('queued','starting')
+               AND datetime(l.scheduled_end)>datetime('now')
+               AND s.status IN ('siap','berjalan') AND datetime(s.berakhir)>datetime('now')`,
+          ).bind(cocokKredensialLive[1], agen.id).first();
+          if (!live) return err('Siaran tidak tersedia untuk agen ini.', 404, env);
+          const credential = await credentialInputLivestream(env, live.provider_input_uid);
+          if (!credential.ok) return err(`Credential siaran belum tersedia (${credential.code}).`, 503, env);
+          await env.DB.prepare('UPDATE livestream SET credential_issued_at=?,updated_at=? WHERE id=?')
+            .bind(new Date().toISOString(), new Date().toISOString(), live.id).run();
+          return json({
+            live_id: live.id,
+            ingest_url: credential.url,
+            stream_key: credential.streamKey,
+            mic_consent: live.mic_consent === 1,
+            scene: 'XyCloudLive',
+          }, 200, env);
+        }
+
         // Only the owning agent can acknowledge a persisted command/session.
         if (p.startsWith('agen/perintah/') && req.method === 'POST') {
           const b = await req.json().catch(() => ({}));
           const command = await env.DB.prepare('SELECT * FROM perintah WHERE id=? AND agen_id=?').bind(p.split('/')[2],agen.id).first();
+          if (command && ['mulai_siaran', 'akhiri_siaran'].includes(command.jenis)) {
+            const muatan = JSON.parse(command.muatan || '{}');
+            const liveId = String(muatan.live_id || '');
+            if (!liveId || String(b.live_id || '') !== liveId) return err('ID siaran tidak sesuai perintah.', 403, env);
+            const live = await env.DB.prepare('SELECT * FROM livestream WHERE id=? AND agen_id=?').bind(liveId, agen.id).first();
+            if (!live) return err('Siaran bukan milik agen ini.', 403, env);
+            if (command.status === 'selesai') return json({ ok: true }, 200, env);
+            const okAgent = b.ok === true;
+            const now = new Date().toISOString();
+            const kodeAgent = String(b.code || (okAgent ? 'OK' : 'AGENT_FAILED')).replace(/[^A-Z0-9_-]/gi, '').slice(0, 50);
+            if (command.jenis === 'mulai_siaran') {
+              if (okAgent) {
+                const outboxId = `live_followers_${live.id}`;
+                const hasilTransisi = await env.DB.batch([
+                  // Conditional state transition is the concurrency gate: only
+                  // one racing/replayed ACK can change starting into live.
+                  env.DB.prepare(
+                    `UPDATE livestream SET status='live',started_at=COALESCE(started_at,?),ended_at=NULL,
+                       failure_code=NULL,updated_at=? WHERE id=? AND agen_id=? AND status='starting'`,
+                  ).bind(now, now, live.id, agen.id),
+                  // INSERT is in the same D1 transaction. Its trigger snapshots
+                  // followers and creates deterministic inbox rows exactly once.
+                  env.DB.prepare(
+                    `INSERT OR IGNORE INTO livestream_push_outbox
+                     (id,livestream_id,idempotency_key,status,attempts,next_attempt_at,created_at,updated_at)
+                     SELECT ?,?,?, 'pending',0,?,?,? FROM livestream
+                     WHERE id=? AND agen_id=? AND status='live'`,
+                  ).bind(outboxId, live.id, crypto.randomUUID(), now, now, now, live.id, agen.id),
+                ]);
+                const baruLive = Number(hasilTransisi?.[0]?.meta?.changes || hasilTransisi?.[0]?.changes || 0) === 1;
+                if (baruLive) {
+                  ctx.waitUntil(kirimPush(env, {
+                    userId: live.user_id,
+                    judul: 'Siaranmu sudah live',
+                    pesan: `${live.title} kini dapat ditonton. Jaga data pribadi selama bermain.`,
+                    data: { tipe: 'livestream', id: live.id },
+                  }));
+                }
+                // Juga dipanggil pada replay agar outbox pending akibat respons
+                // provider/jaringan yang hilang segera dilanjutkan, tanpa duplikat.
+                ctx.waitUntil(prosesPushPengikutLive(env, outboxId));
+              } else {
+                const cleanupTertahan = /CLEANUP_PENDING/.test(kodeAgent);
+                const gagal = await env.DB.prepare(
+                  `UPDATE livestream SET status=?,ended_at=CASE WHEN ? THEN NULL ELSE ? END,
+                     cleanup_pending=?,failure_code=?,updated_at=?
+                   WHERE id=? AND agen_id=? AND status IN ('queued','starting')`,
+                ).bind(cleanupTertahan ? 'ending' : 'failed', cleanupTertahan ? 1 : 0, now,
+                  cleanupTertahan ? 1 : 0, kodeAgent, now, live.id, agen.id).run();
+                // ACK gagal yang terlambat tidak boleh mematikan siaran yang
+                // sudah live karena ACK sukses lain menang lebih dahulu.
+                if (Number(gagal.meta?.changes || gagal.changes || 0) === 1) {
+                  if (cleanupTertahan) {
+                    await antreAkhirLivestream(env, { ...live, status: 'ending', cleanup_pending: 1 }, 'Cleanup OBS setelah gagal mulai');
+                  }
+                  if (live.provider_input_uid) ctx.waitUntil(hapusProviderLivestream(env, live));
+                }
+              }
+            } else {
+              await env.DB.prepare(
+                `UPDATE livestream SET status=?,ended_at=CASE WHEN ? THEN COALESCE(ended_at,?) ELSE ended_at END,
+                   cleanup_pending=CASE WHEN ? THEN 0 ELSE 1 END,
+                   failure_code=CASE WHEN ? THEN failure_code ELSE ? END,updated_at=? WHERE id=?`,
+              ).bind(okAgent ? 'ended' : 'ending', okAgent ? 1 : 0, now, okAgent ? 1 : 0,
+                okAgent ? 1 : 0, kodeAgent, now, live.id).run();
+              if (okAgent && live.provider_input_uid) ctx.waitUntil(hapusProviderLivestream(env, live));
+            }
+            await env.DB.prepare(
+              "UPDATE perintah SET status=?,hasil=?,diproses=? WHERE id=? AND status!='selesai'",
+            ).bind(okAgent ? 'selesai' : (command.jenis === 'akhiri_siaran' ? 'antre' : 'gagal'),
+              JSON.stringify({ ok: okAgent, code: kodeAgent }), now, command.id).run();
+            const terbaru = await barisLivestream(env, live.id);
+            ctx.waitUntil(push(env, `user:${live.user_id}`, 'livestream.update', bentukLivestreamPublik(env, terbaru)));
+            return json({ ok: true }, 200, env);
+          }
           const session = await konfirmasiAgen(env,agen,command,b);
           if(session.status==='siap'&&command?.jenis==='mulai_sesi'&&command.status!=='selesai')ctx.waitUntil(kirimPush(env,{userId:session.user_id,judul:'Unit siap dimainkan',pesan:'Buka sesi PC di XyCloudStore untuk menyambung.',data:{tipe:'sesi',id:session.id},tombol:[{id:'mulai',text:'Mulai Main'}]}));
           ctx.waitUntil(push(env,`user:${session.user_id}`,'sesi.update',session));
@@ -2119,6 +2837,7 @@ ${halaman.map(([u, p2, f]) => `  <url>
       if (p === 'legal/syarat' && req.method === 'GET') return json(isiLegal('syarat'), 200, env);
       if (p === 'legal/privasi' && req.method === 'GET') return json(isiLegal('privasi'), 200, env);
       if (p === 'legal/refund' && req.method === 'GET') return json(isiLegal('refund'), 200, env);
+      if (p === 'legal/live' && req.method === 'GET') return json(isiLegal('live'), 200, env);
 
       // ---------------- KONFIGURASI APLIKASI ----------------
       if (p === 'config' && req.method === 'GET') {
@@ -2261,6 +2980,49 @@ async function statistikPublik(env) {
         return json({ token, user: u }, 200, env);
       }
 
+      // Tukar code custom-scheme menjadi token melalui HTTPS. Code tidak
+      // berguna tanpa verifier rahasia + install identity pemulai dan hidup 2 menit.
+      if (p === 'auth/social/exchange' && req.method === 'POST') {
+        if (!(await bolehLanjut(env, `oauth-exchange:${ip}`, 20, 300))) {
+          return err('Terlalu banyak percobaan penyelesaian login.', 429, env);
+        }
+        const body = await req.json().catch(() => ({}));
+        const code = String(body.code || '').trim().toLowerCase();
+        const verifier = String(body.verifier || '').trim().toLowerCase();
+        if (!/^[a-f0-9]{64}$/.test(code) || !/^[a-f0-9]{64}$/.test(verifier)) {
+          return err('Kode penyelesaian login tidak valid.', 400, env);
+        }
+        const challenge = b64u(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)));
+        const deviceId = await deviceFromRequest(env, req, { required: true });
+        const handoffId = await securityHash(env, 'oauth-handoff', code);
+        const now = new Date().toISOString();
+        const handoff = await env.DB.prepare(
+          `UPDATE oauth_handoffs SET exchange_count=exchange_count+1,
+             first_exchanged_at=COALESCE(first_exchanged_at,?)
+           WHERE id=? AND device_id=? AND handoff_challenge=?
+             AND datetime(expires_at)>datetime('now') AND exchange_count<5
+           RETURNING user_id,provider,device_id,session_version,created_at,expires_at`,
+        ).bind(now, handoffId, deviceId, challenge).first();
+        if (!handoff) {
+          await auditSecurity(env, 'oauth_handoff_rejected', deviceId, 'invalid/expired/mismatched', '/api/auth/social/exchange');
+          return err('Penyelesaian login kedaluwarsa atau tidak cocok dengan perangkat ini. Mulai ulang.', 401, env);
+        }
+        let u = await env.DB.prepare('SELECT * FROM users WHERE id=?').bind(handoff.user_id).first();
+        if (!u || Number(u.session_version || 0) !== Number(handoff.session_version || 0)) {
+          return err('Sesi akun berubah. Mulai login ulang.', 401, env);
+        }
+        assertAccountEnabled(u, { izinkanBlokir: true });
+        await linkDevice(env, deviceId, u.id);
+        const issued = Date.parse(handoff.created_at);
+        if (!Number.isFinite(issued)) return err('Data penyelesaian login rusak. Mulai ulang.', 409, env);
+        const token = await sign({
+          sub: u.id, v: 2, sv: handoff.session_version || 0,
+          dv: deviceId, iat: issued, exp: issued + MASA_TOKEN,
+        }, env.JWT_SECRET);
+        bersihkanUser(env, u);
+        return json({ token, user: u, provider: handoff.provider }, 200, env);
+      }
+
       // ---------------- LOGIN SOSIAL LEWAT HALAMAN WEB ----------------
       if (p.startsWith('auth/') && (p.endsWith('/start') || p.endsWith('/callback'))) {
         const bagian = p.split('/');            // auth / provider / aksi
@@ -2286,8 +3048,11 @@ async function statistikPublik(env) {
 
         if (aksi === 'start') {
           await requireRate(env, 'oauth-start-ip', ip, 12, 300);
-          const deviceId = await deviceFromRequest(env, req, { raw: url.searchParams.get('device') });
-          const state = await newOAuthState(env, provider, deviceId);
+          const deviceId = await deviceFromRequest(env, req, {
+            raw: url.searchParams.get('device'), required: true,
+          });
+          const handoffChallenge = String(url.searchParams.get('handoff_challenge') || '');
+          const state = await newOAuthState(env, provider, deviceId, handoffChallenge);
           return new Response(null, {
             status: 302,
             headers: {
@@ -2302,8 +3067,11 @@ async function statistikPublik(env) {
         }
 
         let deviceId;
+        let handoffChallenge;
         try {
-          deviceId = await consumeOAuthState(env, req, provider);
+          const oauthState = await consumeOAuthState(env, req, provider);
+          deviceId = oauthState.deviceId;
+          handoffChallenge = oauthState.handoffChallenge;
         } catch (_) {
           await auditSecurity(env, 'oauth_state_rejected', ip, provider, `/api/auth/${provider}/callback`);
           return kembali(`${SKEMA_APLIKASI}://auth?error=${encodeURIComponent('Login kedaluwarsa. Mulai ulang.')}`, 'Login tidak valid', 400);
@@ -2330,9 +3098,12 @@ async function statistikPublik(env) {
 
         try {
           const u = await akunSosial(env, ctx, prof, provider, deviceId, req);
-          const token = await issueUserToken(env, u, typeof deviceId === 'undefined' ? null : deviceId);
+          const handoff = await buatHandoffSosial(env, provider, u.id, deviceId, handoffChallenge);
+          // Custom schemes dapat diklaim aplikasi lain. URI hanya membawa code
+          // 2 menit yang masih memerlukan verifier rahasia + install pemulai;
+          // token sesi 30 hari baru diterbitkan lewat exchange HTTPS resmi.
           return kembali(
-            `${SKEMA_APLIKASI}://auth?token=${encodeURIComponent(token)}`,
+            `${SKEMA_APLIKASI}://auth?code=${encodeURIComponent(handoff)}`,
             `Halo ${u.nama.split(' ')[0]}`,
           );
         } catch (e) {
@@ -2620,8 +3391,13 @@ async function statistikPublik(env) {
           const b = await req.json().catch(() => ({}));
           const mode = String(b.mode || '').toLowerCase();
           if (!['off', 'shadow', 'enforce'].includes(mode)) return err('Mode AI tidak valid.', 400, env);
-          if (mode !== 'off' && !env.OPENROUTER_API_KEY) {
-            return err('OPENROUTER_API_KEY belum dipasang sebagai Worker Secret.', 409, env);
+          if (mode !== 'off') {
+            const ai = await statusModerasiAi(env);
+            if (!ai.provider_ready) {
+              return err(ai.provider === 'groq'
+                ? 'GROQ_API_KEY belum siap atau Zero Data Retention belum dikonfirmasi.'
+                : 'OPENROUTER_API_KEY belum dipasang sebagai Worker Secret.', 409, env);
+            }
           }
           await simpanSetelan(env, 'ai_moderation_mode', mode);
           return json({ ok: true, mode }, 200, env);
@@ -2633,6 +3409,313 @@ async function statistikPublik(env) {
           }
           const hasil = await verifikasiOpenRouter(env);
           return json(hasil, hasil.ok ? 200 : 503, env);
+        }
+
+        // ---- XyCloud Live: approval, operasi, ledger, payout, dan rollout ----
+        if (a === 'livestream' && req.method === 'GET') {
+          if (admin.peran !== 'pemilik') return err('Hanya pemilik', 403, env);
+          const [cfg, profiles, lives, payouts, tips, finance, pushStats, pushRows, cleanupStats, cleanupRows] = await Promise.all([
+            konfigurasiLivestream(env),
+            env.DB.prepare(
+              `SELECT c.*,u.nama user_nama,u.email user_email,u.foto user_foto
+               FROM creator_profile c JOIN users u ON u.id=c.user_id
+               ORDER BY CASE c.status WHEN 'pending' THEN 0 WHEN 'approved' THEN 1 ELSE 2 END,c.applied_at DESC LIMIT 200`,
+            ).all(),
+            env.DB.prepare(
+              `SELECT l.*,u.email creator_email,a.nama agen_nama,
+                      (SELECT COUNT(DISTINCT v.viewer_id) FROM livestream_view v WHERE v.livestream_id=l.id AND datetime(v.last_seen)>=datetime('now','-45 seconds')) viewers
+               FROM livestream l LEFT JOIN users u ON u.id=l.user_id LEFT JOIN agen a ON a.id=l.agen_id
+               ORDER BY l.created_at DESC LIMIT 200`,
+            ).all(),
+            env.DB.prepare(
+              `SELECT p.*,u.nama user_nama,u.email user_email FROM creator_payout p
+               LEFT JOIN users u ON u.id=p.user_id ORDER BY p.requested_at DESC LIMIT 200`,
+            ).all(),
+            env.DB.prepare(
+              `SELECT t.id,t.livestream_id,t.gross,t.platform_fee,t.creator_net,t.status,t.created_at,t.reversed_at,t.reverse_reason,
+                      vu.nama viewer_name,cu.nama creator_name,e.status earning_status
+               FROM livestream_tip t LEFT JOIN users vu ON vu.id=t.viewer_id LEFT JOIN users cu ON cu.id=t.creator_id
+               LEFT JOIN creator_earning e ON e.tip_id=t.id ORDER BY t.created_at DESC LIMIT 200`,
+            ).all(),
+            env.DB.prepare(
+              `SELECT COALESCE(SUM(gross),0) gross,COALESCE(SUM(platform_fee),0) platform_fee,
+                      COALESCE(SUM(net),0) creator_net,
+                      COALESCE(SUM(CASE WHEN status='held' THEN net ELSE 0 END),0) held,
+                      COALESCE(SUM(CASE WHEN status='available' THEN net ELSE 0 END),0) available,
+                      COALESCE(SUM(CASE WHEN status='reserved' THEN net ELSE 0 END),0) reserved,
+                      COALESCE(SUM(CASE WHEN status='paid' THEN net ELSE 0 END),0) paid
+               FROM creator_earning WHERE status!='reversed'`,
+            ).first(),
+            env.DB.prepare(
+              `SELECT COUNT(*) total,
+                      COALESCE(SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END),0) pending,
+                      COALESCE(SUM(CASE WHEN status='sending' THEN 1 ELSE 0 END),0) sending,
+                      COALESCE(SUM(CASE WHEN status='sent' THEN 1 ELSE 0 END),0) sent,
+                      COALESCE(SUM(CASE WHEN status='cancelled' THEN 1 ELSE 0 END),0) cancelled,
+                      COALESCE(SUM(CASE WHEN status IN ('pending','sending') AND attempts>=3 THEN 1 ELSE 0 END),0) retrying,
+                      COALESCE(MAX(attempts),0) max_attempts,
+                      MIN(CASE WHEN status IN ('pending','sending') THEN created_at END) oldest_open_at,
+                      MAX(updated_at) last_updated_at
+               FROM livestream_push_outbox`,
+            ).first(),
+            env.DB.prepare(
+              `SELECT id,livestream_id,status,attempts,next_attempt_at,lease_until,provider_id,
+                      last_error,created_at,updated_at,sent_at
+               FROM livestream_push_outbox ORDER BY updated_at DESC LIMIT 100`,
+            ).all(),
+            env.DB.prepare(
+              `SELECT COUNT(*) total,
+                      COALESCE(SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END),0) pending,
+                      COALESCE(MAX(attempts),0) max_attempts,
+                      MIN(CASE WHEN status='pending' THEN created_at END) oldest_pending_at
+               FROM livestream_provider_cleanup`,
+            ).first(),
+            env.DB.prepare(
+              `SELECT input_uid,live_id,status,reason,attempts,next_attempt_at,last_error,created_at,updated_at,deleted_at
+               FROM livestream_provider_cleanup ORDER BY updated_at DESC LIMIT 100`,
+            ).all(),
+          ]);
+          return json({
+            config: { ...cfg, boleh_mengubah: true },
+            creators: profiles.results || [], lives: lives.results || [], payouts: payouts.results || [],
+            tips: tips.results || [], finance: finance || {},
+            push_outbox: { stats: pushStats || {}, rows: pushRows.results || [] },
+            provider_cleanup: { stats: cleanupStats || {}, rows: cleanupRows.results || [] },
+          }, 200, env);
+        }
+
+        if (a === 'livestream/reconcile' && req.method === 'POST') {
+          if (admin.peran !== 'pemilik') return err('Hanya pemilik', 403, env);
+          if (!(await bolehLanjut(env, `live-reconcile:${admin.id || 'owner'}`, 6, 3600))) {
+            return err('Rekonsiliasi manual terlalu sering. Tunggu watchdog berjalan.', 429, env);
+          }
+          const b = await req.json().catch(() => ({}));
+          if (b.confirmation !== 'RETRY CLEANUP') {
+            return err('Konfirmasi RETRY CLEANUP diperlukan.', 422, env);
+          }
+          const now = new Date().toISOString();
+          const hasil = await env.DB.batch([
+            env.DB.prepare(
+              `UPDATE livestream_push_outbox
+               SET status='pending',lease_until=NULL,next_attempt_at=?,updated_at=?
+               WHERE status='pending' OR (status='sending' AND (lease_until IS NULL OR datetime(lease_until)<=datetime('now')))`,
+            ).bind(now, now),
+            env.DB.prepare(
+              "UPDATE livestream_provider_cleanup SET next_attempt_at=?,updated_at=? WHERE status='pending'",
+            ).bind(now, now),
+          ]);
+          const changes = (x) => Number(x?.meta?.changes || x?.changes || 0);
+          ctx.waitUntil(rawatLivestream(env).catch(() => {}));
+          ctx.waitUntil(catatLog(env, 'livestream',
+            `Rekonsiliasi manual oleh ${admin.id || admin.nama}: push ${changes(hasil[0])}, provider ${changes(hasil[1])}`));
+          return json({
+            ok: true,
+            queued: true,
+            push_requeued: changes(hasil[0]),
+            provider_requeued: changes(hasil[1]),
+          }, 202, env);
+        }
+
+        if (a === 'livestream/config' && req.method === 'POST') {
+          if (admin.peran !== 'pemilik') return err('Hanya pemilik', 403, env);
+          const b = await req.json().catch(() => ({}));
+          const current = await konfigurasiLivestream(env);
+          const next = {
+            enabled: b.enabled === undefined ? current.enabled : b.enabled === true,
+            feeBps: b.platform_fee_bps === undefined ? current.feeBps : Number(b.platform_fee_bps),
+            minTip: b.min_tip === undefined ? current.minTip : Number(b.min_tip),
+            maxTip: b.max_tip === undefined ? current.maxTip : Number(b.max_tip),
+            minPayout: b.min_payout === undefined ? current.minPayout : Number(b.min_payout),
+            maxMinutes: b.max_minutes === undefined ? current.maxMinutes : Number(b.max_minutes),
+            maxConcurrent: b.max_concurrent === undefined ? current.maxConcurrent : Number(b.max_concurrent),
+          };
+          if (!Number.isSafeInteger(next.feeBps) || next.feeBps < 0 || next.feeBps > 5000) return err('Fee harus 0–5000 bps.', 422, env);
+          if (!Number.isSafeInteger(next.minTip) || !Number.isSafeInteger(next.maxTip)
+              || next.minTip < 1000 || next.maxTip > 5_000_000 || next.minTip > next.maxTip) return err('Rentang dukungan tidak valid.', 422, env);
+          if (!Number.isSafeInteger(next.minPayout) || next.minPayout < 50_000 || next.minPayout > 10_000_000) return err('Minimum payout tidak valid.', 422, env);
+          if (!Number.isSafeInteger(next.maxMinutes) || next.maxMinutes < 15 || next.maxMinutes > 360) return err('Durasi maksimum harus 15–360 menit.', 422, env);
+          if (!Number.isSafeInteger(next.maxConcurrent) || next.maxConcurrent < 1 || next.maxConcurrent > 10) return err('Kapasitas live bersamaan harus 1–10.', 422, env);
+          if (next.enabled && !current.enabled) {
+            if (b.confirmation !== 'AKTIFKAN LIVE') return err('Ketik AKTIFKAN LIVE untuk mengaktifkan fitur berbiaya.', 422, env);
+            if (!current.configured) return err('Account ID, customer host, atau token Cloudflare Stream belum lengkap.', 409, env);
+            const cleanup = await env.DB.prepare(
+              `SELECT
+                 (SELECT COUNT(*) FROM livestream_provider_cleanup WHERE status='pending') +
+                 (SELECT COUNT(*) FROM livestream WHERE cleanup_pending=1) AS n`,
+            ).first();
+            if (Number(cleanup?.n || 0) > 0) {
+              return err('Rollout diblokir sampai seluruh cleanup OBS dan Live Input Cloudflare selesai.', 409, env);
+            }
+          }
+          const now = new Date().toISOString();
+          await env.DB.batch([
+            env.DB.prepare("INSERT INTO setelan(kunci,nilai,diperbarui) VALUES('livestream_enabled',?,?) ON CONFLICT(kunci) DO UPDATE SET nilai=excluded.nilai,diperbarui=excluded.diperbarui").bind(next.enabled ? '1' : '0', now),
+            env.DB.prepare("INSERT INTO setelan(kunci,nilai,diperbarui) VALUES('livestream_platform_fee_bps',?,?) ON CONFLICT(kunci) DO UPDATE SET nilai=excluded.nilai,diperbarui=excluded.diperbarui").bind(String(next.feeBps), now),
+            env.DB.prepare("INSERT INTO setelan(kunci,nilai,diperbarui) VALUES('livestream_min_tip',?,?) ON CONFLICT(kunci) DO UPDATE SET nilai=excluded.nilai,diperbarui=excluded.diperbarui").bind(String(next.minTip), now),
+            env.DB.prepare("INSERT INTO setelan(kunci,nilai,diperbarui) VALUES('livestream_max_tip',?,?) ON CONFLICT(kunci) DO UPDATE SET nilai=excluded.nilai,diperbarui=excluded.diperbarui").bind(String(next.maxTip), now),
+            env.DB.prepare("INSERT INTO setelan(kunci,nilai,diperbarui) VALUES('livestream_min_payout',?,?) ON CONFLICT(kunci) DO UPDATE SET nilai=excluded.nilai,diperbarui=excluded.diperbarui").bind(String(next.minPayout), now),
+            env.DB.prepare("INSERT INTO setelan(kunci,nilai,diperbarui) VALUES('livestream_max_minutes',?,?) ON CONFLICT(kunci) DO UPDATE SET nilai=excluded.nilai,diperbarui=excluded.diperbarui").bind(String(next.maxMinutes), now),
+            env.DB.prepare("INSERT INTO setelan(kunci,nilai,diperbarui) VALUES('livestream_max_concurrent',?,?) ON CONFLICT(kunci) DO UPDATE SET nilai=excluded.nilai,diperbarui=excluded.diperbarui").bind(String(next.maxConcurrent), now),
+          ]);
+          if (!next.enabled && current.enabled) {
+            const active = await env.DB.prepare(
+              "SELECT * FROM livestream WHERE status IN ('queued','starting','live','ending') OR (status='failed' AND cleanup_pending=1)",
+            ).all();
+            await jalankanTerbatas((active.results || []).map((live) =>
+              () => antreAkhirLivestream(env, live, 'Fitur dinonaktifkan pemilik')), 5);
+          }
+          return json({ ok: true, config: await konfigurasiLivestream(env) }, 200, env);
+        }
+
+        const cocokAdminCreator = a.match(/^livestream\/creators\/([^/]+)$/);
+        if (cocokAdminCreator && req.method === 'PATCH') {
+          if (admin.peran !== 'pemilik') return err('Hanya pemilik', 403, env);
+          const creator = await env.DB.prepare('SELECT * FROM creator_profile WHERE user_id=?').bind(decodeURIComponent(cocokAdminCreator[1])).first();
+          if (!creator) return err('Pengajuan kreator tidak ditemukan.', 404, env);
+          const b = await req.json().catch(() => ({}));
+          const status = String(b.status || creator.status);
+          if (!['pending', 'approved', 'rejected', 'suspended'].includes(status)) return err('Status kreator tidak valid.', 422, env);
+          if (status === 'approved' && (creator.age_18 !== 1 || creator.terms_version !== 'live-creator-v1')) return err('Deklarasi usia atau versi syarat belum valid.', 409, env);
+          const note = String(b.review_note || '').trim();
+          if (note.length > 300) return err('Catatan review maksimal 300 karakter.', 422, env);
+          if (['rejected', 'suspended'].includes(status) && note.length < 8) {
+            return err('Alasan penolakan/penangguhan minimal 8 karakter agar audit dapat dipahami.', 422, env);
+          }
+          let verified = b.payout_verified === undefined ? creator.payout_verified : (b.payout_verified === true ? 1 : 0);
+          if (status !== 'approved') verified = 0;
+          let label = b.payout_label === undefined ? creator.payout_label : String(b.payout_label || '').trim();
+          if (label && label.length > 80) return err('Label payout maksimal 80 karakter.', 422, env);
+          if (verified && !label) return err('Payout hanya dapat diverifikasi dengan label metode tersamar.', 422, env);
+          if ((label || '').replace(/\D/g, '').length > 4) {
+            return err('Jangan simpan nomor rekening lengkap; gunakan nama bank dan maksimal 4 digit terakhir.', 422, env);
+          }
+          if (!verified) label = null;
+          const now = new Date().toISOString();
+          await env.DB.prepare(
+            `UPDATE creator_profile SET status=?,payout_verified=?,payout_label=?,reviewed_at=?,reviewed_by=?,review_note=?,updated_at=? WHERE user_id=?`,
+          ).bind(status, verified, label, now, admin.id || admin.nama, note, now, creator.user_id).run();
+          if (status === 'suspended' || status === 'rejected') {
+            const active = await env.DB.prepare(
+              "SELECT * FROM livestream WHERE user_id=? AND (status IN ('queued','starting','live','ending') OR (status='failed' AND cleanup_pending=1))",
+            ).bind(creator.user_id).all();
+            for (const live of active.results || []) await antreAkhirLivestream(env, live, 'Status kreator dihentikan admin');
+          }
+          ctx.waitUntil(buatNotif(env, ctx, {
+            userId: creator.user_id, jenis: 'livestream', judul: 'Status program kreator diperbarui',
+            pesan: status === 'approved' ? 'Pengajuanmu disetujui. Kamu dapat live saat sesi PC aktif.' : `Status kreator: ${status}. ${note}`,
+            aktor: admin.nama, refJenis: 'creator', refId: creator.user_id,
+          }));
+          return json({ ok: true, status, payout_verified: verified === 1, payout_label: label }, 200, env);
+        }
+
+        const cocokAdminLive = a.match(/^livestream\/sessions\/([A-Za-z0-9_-]{8,80})\/(end|provider)$/);
+        if (cocokAdminLive) {
+          if (admin.peran !== 'pemilik') return err('Hanya pemilik', 403, env);
+          const live = await barisLivestream(env, cocokAdminLive[1]);
+          if (!live) return err('Siaran tidak ditemukan.', 404, env);
+          if (cocokAdminLive[2] === 'provider' && req.method === 'GET') {
+            if (!(await bolehLanjut(env, `live-provider:${admin.id || 'owner'}`, 30, 3600))) return err('Batas diagnostik provider tercapai.', 429, env);
+            return json(await statusInputLivestream(env, live.provider_input_uid), 200, env);
+          }
+          if (cocokAdminLive[2] === 'end' && req.method === 'POST') {
+            const b = await req.json().catch(() => ({}));
+            const reason = String(b.reason || 'Diakhiri admin').trim();
+            if (!reason || reason.length > 160) return err('Alasan penghentian harus 1–160 karakter.', 422, env);
+            const ended = await antreAkhirLivestream(env, live, reason);
+            return json({ ok: true, live: bentukLivestreamPublik(env, await barisLivestream(env, ended.id)) }, 200, env);
+          }
+        }
+
+        const cocokAdminPayout = a.match(/^livestream\/payouts\/([A-Za-z0-9_-]{8,80})$/);
+        if (cocokAdminPayout && req.method === 'PATCH') {
+          if (admin.peran !== 'pemilik') return err('Hanya pemilik', 403, env);
+          const payout = await env.DB.prepare('SELECT * FROM creator_payout WHERE id=?').bind(cocokAdminPayout[1]).first();
+          if (!payout) return err('Payout tidak ditemukan.', 404, env);
+          const b = await req.json().catch(() => ({}));
+          const status = String(b.status || '');
+          if (!['processing', 'paid', 'rejected'].includes(status)) return err('Status payout tidak valid.', 422, env);
+          if (status === 'paid' && b.confirmation !== 'BAYAR') return err('Ketik BAYAR setelah transfer eksternal benar-benar berhasil.', 422, env);
+          const providerRef = String(b.provider_ref || '').trim();
+          const note = String(b.note || '').trim();
+          if (providerRef.length > 100) return err('Referensi transfer maksimal 100 karakter.', 422, env);
+          if (note.length > 300) return err('Catatan payout maksimal 300 karakter.', 422, env);
+          if (status === 'paid' && providerRef.length < 4) return err('Referensi transfer wajib diisi.', 422, env);
+          if (status === 'rejected' && note.length < 8) return err('Alasan penolakan payout minimal 8 karakter.', 422, env);
+          // Respons PATCH yang hilang boleh diulang persis tanpa membuat admin
+          // ragu apakah ledger sudah berubah. Payload berbeda tetap ditolak.
+          if (payout.status === status) {
+            const sameRef = String(payout.provider_ref || '') === providerRef;
+            const sameNote = String(payout.note || '') === note;
+            if ((status === 'paid' && !sameRef) || (status === 'rejected' && !sameNote)
+                || (status === 'processing' && (!sameRef || !sameNote))) {
+              return err('Payout sudah memiliki hasil berbeda. Segarkan data sebelum melanjutkan.', 409, env);
+            }
+            return json({ ok: true, status, replay: true }, 200, env);
+          }
+          if (['paid', 'rejected'].includes(payout.status)) {
+            return err('Payout sudah selesai atau status berubah.', 409, env);
+          }
+          const now = new Date().toISOString();
+          try {
+            const result = await env.DB.prepare(
+              'UPDATE creator_payout SET status=?,processed_at=?,processed_by=?,provider_ref=?,note=? WHERE id=? AND status=?',
+            ).bind(status, now, admin.id || admin.nama, providerRef || null, note, payout.id, payout.status).run();
+            if (Number(result.meta?.changes || result.changes || 0) === 0) {
+              const current = await env.DB.prepare('SELECT status,provider_ref,note FROM creator_payout WHERE id=?').bind(payout.id).first();
+              const same = current?.status === status
+                && (status !== 'paid' || String(current.provider_ref || '') === providerRef)
+                && (status !== 'rejected' || String(current.note || '') === note)
+                && (status !== 'processing' || (String(current.provider_ref || '') === providerRef && String(current.note || '') === note));
+              if (same) return json({ ok: true, status, replay: true }, 200, env);
+              return err('Payout sudah memiliki hasil berbeda. Segarkan data sebelum melanjutkan.', 409, env);
+            }
+          } catch (e) {
+            const msg = String(e?.message || e);
+            if (msg.includes('PAYOUT_LEDGER_MISMATCH')) {
+              return err('Ledger payout tidak cocok; transfer diblokir dan perlu rekonsiliasi.', 409, env);
+            }
+            if (/INVALID_PAYOUT_TRANSITION|PAYOUT_REFERENCE_REQUIRED|PAYOUT_REJECTION_REASON_REQUIRED/.test(msg)) {
+              return err('Transisi payout tidak aman.', 409, env);
+            }
+            throw e;
+          }
+          ctx.waitUntil(buatNotif(env, ctx, {
+            userId: payout.user_id, jenis: 'livestream', judul: 'Payout kreator diperbarui',
+            pesan: status === 'paid' ? `Payout Rp${Number(payout.amount).toLocaleString('id-ID')} telah ditandai terkirim.` : `Status payout: ${status}. ${note}`,
+            aktor: admin.nama, refJenis: 'payout', refId: payout.id,
+          }));
+          return json({ ok: true, status }, 200, env);
+        }
+
+        const cocokBalikTip = a.match(/^livestream\/tips\/([A-Za-z0-9_-]{8,80})\/reverse$/);
+        if (cocokBalikTip && req.method === 'POST') {
+          if (admin.peran !== 'pemilik') return err('Hanya pemilik', 403, env);
+          const b = await req.json().catch(() => ({}));
+          if (b.confirmation !== 'KEMBALIKAN') return err('Ketik KEMBALIKAN untuk mengonfirmasi refund dukungan.', 422, env);
+          const reason = String(b.reason || '').trim();
+          if (reason.length < 8 || reason.length > 200) return err('Alasan harus 8–200 karakter.', 422, env);
+          const tip = await env.DB.prepare('SELECT * FROM livestream_tip WHERE id=?').bind(cocokBalikTip[1]).first();
+          if (!tip) return err('Dukungan tidak ditemukan.', 404, env);
+          if (tip.status === 'reversed' && String(tip.reverse_reason || '') === reason) {
+            return json({ ok: true, replay: true }, 200, env);
+          }
+          if (tip.status !== 'charged') return err('Dukungan sudah pernah dikembalikan dengan hasil berbeda.', 409, env);
+          try {
+            const reversed = await env.DB.prepare(
+              "UPDATE livestream_tip SET status='reversed',reversed_at=?,reversed_by=?,reverse_reason=? WHERE id=? AND status='charged'",
+            ).bind(new Date().toISOString(), admin.id || admin.nama, reason, tip.id).run();
+            if (Number(reversed.meta?.changes || reversed.changes || 0) === 0) {
+              const current = await env.DB.prepare('SELECT status,reverse_reason FROM livestream_tip WHERE id=?').bind(tip.id).first();
+              if (current?.status === 'reversed' && String(current.reverse_reason || '') === reason) {
+                return json({ ok: true, replay: true }, 200, env);
+              }
+              return err('Dukungan sudah pernah dikembalikan dengan hasil berbeda.', 409, env);
+            }
+          } catch (e) {
+            if (/TIP_ALREADY_IN_PAYOUT|INVALID_TIP_TRANSITION/.test(String(e?.message || e))) return err('Dukungan sudah masuk payout atau pernah dikembalikan.', 409, env);
+            throw e;
+          }
+          return json({ ok: true }, 200, env);
         }
 
         if(a==='security'||a.startsWith('security/')||a==='devices'||a.startsWith('devices/')||a==='audit'||/^users\/[^/]+\/(trash|restore|permanent)$/.test(a)){
@@ -3196,7 +4279,22 @@ async function statistikPublik(env) {
 
           if (b.diblokir != null) {
             await env.DB.prepare('UPDATE users SET session_version=session_version+1 WHERE id=?').bind(idU).run();
-            if(b.diblokir){const sessions=await env.DB.prepare("SELECT * FROM sesi WHERE user_id=? AND status NOT IN ('selesai','gagal')").bind(idU).all();for(const session of sessions.results)await antreAkhir(env,session,'Akun dibatasi oleh admin');}
+            if (b.diblokir) {
+              const [sessions, lives] = await Promise.all([
+                env.DB.prepare("SELECT * FROM sesi WHERE user_id=? AND status NOT IN ('selesai','gagal')").bind(idU).all(),
+                env.DB.prepare(
+                  "SELECT * FROM livestream WHERE user_id=? AND (status IN ('queued','starting','live','ending') OR (status='failed' AND cleanup_pending=1))",
+                ).bind(idU).all(),
+              ]);
+              for (const session of sessions.results || []) await antreAkhir(env, session, 'Akun dibatasi oleh admin');
+              // Jangan menunggu cron: blokir creator harus memutus ingress dan
+              // mencabut player dalam request administrasi yang sama.
+              for (const live of lives.results || []) await antreAkhirLivestream(env, live, 'Akun dibatasi oleh admin');
+              await env.DB.batch([
+                env.DB.prepare('DELETE FROM livestream_watch_handoff WHERE viewer_id=?').bind(idU),
+                env.DB.prepare('DELETE FROM livestream_view WHERE viewer_id=?').bind(idU),
+              ]);
+            }
             ctx.waitUntil(buatNotif(env, ctx, {
               userId: idU,
               jenis: 'sistem',
@@ -4316,6 +5414,26 @@ async function statistikPublik(env) {
         }, 200, env);
       }
 
+      // ---- XyCloud Live: daftar publik tidak memerlukan token ----
+      if (p === 'live' && req.method === 'GET') {
+        const cfg = await konfigurasiLivestream(env);
+        return json({
+          enabled: cfg.effective,
+          min_tip: cfg.minTip,
+          max_tip: cfg.maxTip,
+          platform_fee_bps: cfg.feeBps,
+          creator_hold_days: cfg.creator_hold_days,
+          streams: cfg.effective ? await daftarLivestreamPublik(env, 60) : [],
+        }, 200, env);
+      }
+      const cocokDetailLive = p.match(/^live\/([A-Za-z0-9_-]{8,80})$/);
+      if (cocokDetailLive && req.method === 'GET') {
+        const live = await barisLivestream(env, cocokDetailLive[1]);
+        if (!live || live.visibility !== 'public' || Number(live.creator_blocked || 0) === 1
+            || live.creator_deleted_at) return err('Siaran tidak ditemukan', 404, env);
+        return json(bentukLivestreamPublik(env, live), 200, env);
+      }
+
       // ---- ulasan sebuah produk ----
       if (p.startsWith('akun/produk/') && p.endsWith('/ulasan') && req.method === 'GET') {
         const pid = p.split('/')[2];
@@ -4370,6 +5488,351 @@ async function statistikPublik(env) {
         const result=await kirimPush(env,{userId:me.sub,judul:'Tes notifikasi XyCloudStore',pesan:'Jika pesan ini terdengar, pengaturan nada Android sudah diterapkan.',data:{tipe:'sistem'}});
         if(!result.ok)return err('Push belum diterima penyedia. Periksa izin perangkat dan konfigurasi OneSignal/FCM.',502,env);
         return json({ok:true,pesan:'Permintaan dikirim ke penyedia push. Periksa pemberitahuan HP.'},200,env);
+      }
+
+      // ---------------- XYCLOUD LIVE & MONETISASI KREATOR ----------------
+      if (p === 'live/creator/me' && req.method === 'GET') {
+        await env.DB.prepare(
+          "UPDATE creator_earning SET status='available',updated_at=? WHERE user_id=? AND status='held' AND datetime(available_at)<=datetime('now')",
+        ).bind(new Date().toISOString(), me.sub).run();
+        const [profile, active, earning, payouts, last] = await Promise.all([
+          env.DB.prepare('SELECT * FROM creator_profile WHERE user_id=?').bind(me.sub).first(),
+          env.DB.prepare(
+            "SELECT * FROM livestream WHERE user_id=? AND (status IN ('queued','starting','live','ending') OR (status='failed' AND cleanup_pending=1)) ORDER BY created_at DESC LIMIT 1",
+          ).bind(me.sub).first(),
+          env.DB.prepare(
+            `SELECT COALESCE(SUM(CASE WHEN status='held' THEN net ELSE 0 END),0) held,
+                    COALESCE(SUM(CASE WHEN status='available' THEN net ELSE 0 END),0) available,
+                    COALESCE(SUM(CASE WHEN status='reserved' THEN net ELSE 0 END),0) reserved,
+                    COALESCE(SUM(CASE WHEN status='paid' THEN net ELSE 0 END),0) paid,
+                    COALESCE(SUM(CASE WHEN status!='reversed' THEN net ELSE 0 END),0) lifetime
+             FROM creator_earning WHERE user_id=?`,
+          ).bind(me.sub).first(),
+          env.DB.prepare('SELECT id,amount,status,payout_label,requested_at,processed_at,provider_ref,note FROM creator_payout WHERE user_id=? ORDER BY requested_at DESC LIMIT 30').bind(me.sub).all(),
+          env.DB.prepare('SELECT * FROM livestream WHERE user_id=? ORDER BY created_at DESC LIMIT 1').bind(me.sub).first(),
+        ]);
+        const cfg = await konfigurasiLivestream(env);
+        const activeRow = active ? await barisLivestream(env, active.id) : null;
+        return json({
+          feature_enabled: cfg.effective,
+          profile: profile || null,
+          active: activeRow ? bentukLivestreamPublik(env, activeRow) : null,
+          active_diagnostics: diagnostikLivestream(activeRow),
+          last_broadcast: last ? bentukLivestreamPublik(env, last) : null,
+          last_diagnostics: diagnostikLivestream(last),
+          earning: earning || {},
+          payouts: payouts.results || [],
+          min_payout: cfg.minPayout,
+          hold_days: cfg.creator_hold_days,
+          terms_version: 'live-creator-v1',
+          broadcast_terms_version: 'live-broadcast-v1',
+        }, 200, env);
+      }
+
+      if (p === 'live/creator/apply' && req.method === 'POST') {
+        if (!(await bolehLanjut(env, `creator-apply:${me.sub}`, 3, 86400))) return err('Pengajuan kreator terlalu sering.', 429, env);
+        const existing = await env.DB.prepare('SELECT status FROM creator_profile WHERE user_id=?').bind(me.sub).first();
+        if (existing?.status === 'approved') return err('Akunmu sudah menjadi kreator.', 409, env);
+        if (existing?.status === 'suspended') return err('Status kreator sedang ditangguhkan. Hubungi admin.', 403, env);
+        const b = await req.json().catch(() => ({}));
+        const display = String(b.display_name || '').trim();
+        const bio = String(b.bio || '').trim();
+        if (display.length < 3 || display.length > 40) return err('Nama kreator harus 3–40 karakter.', 422, env);
+        if (bio.length > 240) return err('Bio kreator maksimal 240 karakter.', 422, env);
+        if (b.age_18 !== true) return err('Program penghasilan kreator hanya untuk pengguna berusia 18 tahun ke atas.', 422, env);
+        if (b.terms_version !== 'live-creator-v1' || b.accept_terms !== true) return err('Persetujuan program kreator diperlukan.', 422, env);
+        const cek = await periksaKontenPublik(env, {
+          userId: me.sub, konteks: 'livestream', teks: `${display}\n${bio}`, opt: { maksUrl: 1 },
+        });
+        if (!cek.ok) return err(cek.alasan, 422, env);
+        const now = new Date().toISOString();
+        await env.DB.prepare(
+          `INSERT INTO creator_profile(user_id,status,display_name,bio,age_18,terms_version,applied_at,updated_at)
+           VALUES(?,'pending',?,?,?,?,?,?)
+           ON CONFLICT(user_id) DO UPDATE SET status='pending',display_name=excluded.display_name,bio=excluded.bio,
+             age_18=excluded.age_18,terms_version=excluded.terms_version,applied_at=excluded.applied_at,
+             reviewed_at=NULL,reviewed_by=NULL,review_note=NULL,updated_at=excluded.updated_at`,
+        ).bind(me.sub, display, bio, 1, 'live-creator-v1', now, now).run();
+        return json({ ok: true, status: 'pending' }, 201, env);
+      }
+
+      if (p === 'live/start' && req.method === 'POST') {
+        const cfg = await konfigurasiLivestream(env);
+        if (!cfg.effective) return err('Livestream belum diaktifkan oleh pemilik.', 503, env);
+        const creator = await env.DB.prepare("SELECT * FROM creator_profile WHERE user_id=? AND status='approved'").bind(me.sub).first();
+        if (!creator) return err('Akun kreator belum disetujui.', 403, env);
+        const b = await req.json().catch(() => ({}));
+        if (b.recording_consent !== true || b.safe_scene_ack !== true || b.terms_version !== 'live-broadcast-v1') {
+          return err('Persetujuan rekaman dan pemeriksaan scene wajib sebelum live.', 422, env);
+        }
+        const title = String(b.title || '').trim();
+        const game = String(b.game || '').trim();
+        if (title.length < 5 || title.length > 100) return err('Judul live harus 5–100 karakter.', 422, env);
+        if (game.length < 2 || game.length > 60) return err('Nama game harus 2–60 karakter.', 422, env);
+        const cek = await periksaKontenPublik(env, {
+          userId: me.sub, konteks: 'livestream', teks: `${title}\n${game}`, opt: { maksUrl: 0 },
+        });
+        if (!cek.ok) return err(cek.alasan, 422, env);
+        const sesi = await env.DB.prepare(
+          `SELECT s.*,a.terakhir agen_terakhir,a.status agen_status,a.spec agen_spec,a.versi agen_versi,u.nama creator_name
+           FROM sesi s JOIN agen a ON a.id=s.agen_id JOIN users u ON u.id=s.user_id
+           WHERE s.user_id=? AND s.status IN ('siap','berjalan') AND datetime(s.berakhir)>datetime('now')
+           ORDER BY s.dibuat DESC LIMIT 1`,
+        ).bind(me.sub).first();
+        if (!sesi) return err('Mulai sesi PC rental terlebih dahulu sebelum siaran.', 409, env);
+        // Status agen untuk start harus persis `online`; `offline` hanya dibuat
+        // watchdog server. Timestamp tetap diperiksa agar status stale tidak
+        // cukup untuk mengalokasikan resource Cloudflare berbiaya.
+        if (sesi.agen_status !== 'online'
+            || !sesi.agen_terakhir
+            || !Number.isFinite(Date.parse(sesi.agen_terakhir))
+            || Date.now() - Date.parse(sesi.agen_terakhir) > 90_000) {
+          return err('Agen PC sedang offline. Siaran tidak dapat dimulai.', 503, env);
+        }
+        let agentSpec = {};
+        try { agentSpec = JSON.parse(sesi.agen_spec || '{}') || {}; } catch (_) { agentSpec = {}; }
+        if (!versiMinimal(sesi.agen_versi, [1, 5, 5]) || agentSpec?.obs?.installed !== true) {
+          return err('Unit belum memakai agen livestream 1.5.5 atau OBS Studio belum siap. Hubungi admin unit.', 409, env);
+        }
+        // Retry setelah respons hilang tidak boleh membuat Live Input kedua.
+        // Selama payload dan sesi sama, kembalikan siaran yang sudah tercipta.
+        const existingLive = await env.DB.prepare(
+          `SELECT * FROM livestream WHERE user_id=?
+           AND (status IN ('queued','starting','live','ending') OR (status='failed' AND cleanup_pending=1))
+           ORDER BY created_at DESC LIMIT 1`,
+        ).bind(me.sub).first();
+        if (existingLive) {
+          const sama = ['queued', 'starting', 'live'].includes(existingLive.status)
+            && existingLive.sesi_id === sesi.id && existingLive.title === title
+            && existingLive.game === game && Number(existingLive.mic_consent || 0) === (b.mic_consent === true ? 1 : 0);
+          if (sama) {
+            return json({ ...bentukLivestreamPublik(env, await barisLivestream(env, existingLive.id)), replay: true }, 200, env);
+          }
+          return err('Kamu masih memiliki siaran aktif atau cleanup OBS yang belum selesai.', 409, env);
+        }
+        const kapasitas = await env.DB.prepare(
+          "SELECT COUNT(*) n FROM livestream WHERE status IN ('queued','starting','live','ending') OR (status='failed' AND cleanup_pending=1)",
+        ).first();
+        if (Number(kapasitas?.n || 0) >= cfg.maxConcurrent) return err('Kapasitas livestream sedang penuh. Coba lagi nanti.', 409, env);
+        if (!(await bolehLanjut(env, `live-start:${me.sub}`, 4, 86400))) return err('Batas memulai siaran hari ini tercapai.', 429, env);
+        const leaseEnd = Date.parse(String(sesi.berakhir || ''));
+        if (!Number.isFinite(leaseEnd) || leaseEnd <= Date.now()) {
+          return err('Waktu akhir sesi PC tidak valid atau sudah terlewati. Muat ulang sesi.', 409, env);
+        }
+        const id = uid('live_');
+        const input = await buatInputLivestream(env, id);
+        if (!input.ok) return err(`Cloudflare Stream belum siap (${input.code}).`, 503, env);
+        const now = new Date().toISOString();
+        const maxEnd = Date.now() + cfg.maxMinutes * 60_000;
+        const scheduledEnd = new Date(Math.min(leaseEnd, maxEnd)).toISOString();
+        try {
+          await env.DB.batch([
+            env.DB.prepare(
+              `INSERT INTO livestream
+               (id,user_id,creator_name,sesi_id,agen_id,title,game,status,provider_input_uid,recording_consent,
+                safe_scene_ack,mic_consent,scheduled_end,created_at,updated_at)
+               VALUES(?,?,?,?,?,?,?,'starting',?,1,1,?,?,?,?)`,
+            ).bind(id, me.sub, creator.display_name || sesi.creator_name || 'Kreator XyCloud', sesi.id, sesi.agen_id, title, game,
+              input.uid, b.mic_consent === true ? 1 : 0, scheduledEnd, now, now),
+            env.DB.prepare("INSERT INTO perintah(id,agen_id,jenis,muatan) VALUES(?,?,'mulai_siaran',?)")
+              .bind(`live_start_${id}`, sesi.agen_id, JSON.stringify({ live_id: id })),
+          ]);
+        } catch (e) {
+          // Create provider adalah side-effect eksternal. Jika transaksi D1
+          // kalah race, persist antrean kompensasi SEBELUM merespons. Bila D1
+          // justru sedang gagal, coba cleanup provider sinkron sebagai fallback.
+          const alasanKompensasi = 'INSERT livestream gagal';
+          let kompensasiDurabel = false;
+          try {
+            kompensasiDurabel = await antreKompensasiProvider(env, input.uid, id, alasanKompensasi);
+          } catch (_) { /* cleanup sinkron di bawah */ }
+          if (kompensasiDurabel) {
+            ctx.waitUntil(bersihkanProviderOrphan(env, input.uid, id, alasanKompensasi));
+          } else {
+            await bersihkanProviderOrphan(env, input.uid, id, alasanKompensasi);
+          }
+          const dbMessage = String(e?.message || e);
+          if (dbMessage.includes('LIVESTREAM_DISABLED')) return err('Livestream baru saja dinonaktifkan pemilik. Tidak ada siaran baru yang dibuat.', 409, env);
+          if (dbMessage.includes('LIVESTREAM_CLEANUP_PENDING')) return err('Livestream menunggu rekonsiliasi cleanup OBS atau provider. Coba lagi setelah operator menyelesaikannya.', 409, env);
+          if (dbMessage.includes('LIVESTREAM_CAPACITY')) return err(`Kapasitas ${cfg.maxConcurrent} siaran bersamaan sedang penuh. Coba lagi nanti.`, 409, env);
+          if (/UNIQUE|constraint/i.test(dbMessage)) return err('Kamu, sesi, atau unit ini sudah memiliki siaran aktif.', 409, env);
+          throw e;
+        }
+        return json(bentukLivestreamPublik(env, await barisLivestream(env, id)), 201, env);
+      }
+
+      const cocokAksiLive = p.match(/^live\/([A-Za-z0-9_-]{8,80})\/(watch|tip|end|status)$/);
+      if (cocokAksiLive && req.method === 'POST') {
+        const live = await barisLivestream(env, cocokAksiLive[1]);
+        if (!live) return err('Siaran tidak ditemukan.', 404, env);
+        const aksi = cocokAksiLive[2];
+        if (['watch', 'tip'].includes(aksi) && (Number(live.creator_blocked || 0) === 1
+            || live.creator_deleted_at || (live.visibility !== 'public' && live.user_id !== me.sub))) {
+          return err('Siaran tidak ditemukan.', 404, env);
+        }
+        if (aksi === 'watch') {
+          if (!['starting', 'live'].includes(live.status)) return err('Siaran tidak sedang berlangsung.', 409, env);
+          if (!(await bolehLanjut(env, `live-watch:${me.sub}`, 60, 3600))) return err('Terlalu banyak sesi player.', 429, env);
+          const candidateViewId = uid('lv_');
+          const now = new Date().toISOString();
+          await env.DB.prepare(
+            `INSERT INTO livestream_view(id,livestream_id,viewer_id,started_at,last_seen) VALUES(?,?,?,?,?)
+             ON CONFLICT(livestream_id,viewer_id) DO UPDATE SET last_seen=excluded.last_seen`,
+          ).bind(candidateViewId, live.id, me.sub, now, now).run();
+          const view = await env.DB.prepare(
+            'SELECT id FROM livestream_view WHERE livestream_id=? AND viewer_id=?',
+          ).bind(live.id, me.sub).first();
+          if (!view?.id) return err('Sesi penonton belum dapat dibuat.', 503, env);
+          const handoff = kodeHandoffSosial();
+          const handoffId = await securityHash(env, 'live-watch-handoff', handoff);
+          const exp = Date.now() + 120_000;
+          await env.DB.prepare(
+            `INSERT INTO livestream_watch_handoff(id,livestream_id,viewer_id,view_id,expires_at,created_at)
+             VALUES(?,?,?,?,?,?)`,
+          ).bind(handoffId, live.id, me.sub, view.id, new Date(exp).toISOString(), now).run();
+          const ticket = await sign({
+            v: 2, typ: 'live-watch-handoff', sub: me.sub,
+            live_id: live.id, view_id: view.id, handoff, exp,
+          }, env.JWT_SECRET);
+          const base = String(env.PUBLIC_URL || 'https://api.xycloud.my.id').replace(/\/$/, '');
+          return json({ watch_url: `${base}/live/watch/${encodeURIComponent(live.id)}?t=${encodeURIComponent(ticket)}` }, 201, env);
+        }
+        if (aksi === 'end') {
+          if (live.user_id !== me.sub) return err('Hanya kreator yang dapat mengakhiri siaran.', 403, env);
+          return json(bentukLivestreamPublik(env, await barisLivestream(env, (await antreAkhirLivestream(env, live, 'Diakhiri kreator')).id)), 200, env);
+        }
+        if (aksi === 'status') {
+          if (live.user_id !== me.sub) return err('Hanya kreator yang dapat memeriksa status ingest.', 403, env);
+          const provider = await statusInputLivestream(env, live.provider_input_uid);
+          return json({ live: bentukLivestreamPublik(env, live), diagnostics: diagnostikLivestream(live), provider }, 200, env);
+        }
+        const b = await req.json().catch(() => ({}));
+        const gross = Number(b.amount);
+        const clientId = String(b.client_id || '');
+        const message = String(b.message || '').trim();
+        if (!Number.isSafeInteger(gross) || gross <= 0) return err('Nominal dukungan tidak valid.', 422, env);
+        if (!/^[A-Za-z0-9_-]{12,80}$/.test(clientId)) return err('ID dukungan tidak valid.', 400, env);
+        if (message.length > 120) return err('Pesan dukungan maksimal 120 karakter.', 422, env);
+
+        // Replay exact dari respons yang hilang harus tetap mengembalikan hasil
+        // asli walau live baru saja selesai. ID yang dipakai ulang dengan
+        // parameter berbeda ditolak agar UI tidak melaporkan dukungan palsu.
+        let stored = await env.DB.prepare(
+          'SELECT id,livestream_id,gross,platform_fee,creator_net,message,status,created_at FROM livestream_tip WHERE viewer_id=? AND client_id=?',
+        ).bind(me.sub, clientId).first();
+        if (stored) {
+          if (stored.livestream_id !== live.id || Number(stored.gross) !== gross || String(stored.message || '') !== message) {
+            return err('ID dukungan sudah dipakai untuk transaksi berbeda.', 409, env);
+          }
+          const saldoReplay = await env.DB.prepare('SELECT saldo FROM users WHERE id=?').bind(me.sub).first();
+          return json({ ok: true, replay: true, tip: stored, saldo: Number(saldoReplay?.saldo || 0) }, 200, env);
+        }
+
+        const cfg = await konfigurasiLivestream(env);
+        if (!cfg.effective || live.status !== 'live') return err('Siaran tidak aktif.', 409, env);
+        if (live.user_id === me.sub) return err('Kreator tidak dapat memberi dukungan ke diri sendiri.', 422, env);
+        if (!(await bolehLanjut(env, `live-tip:${me.sub}`, 20, 3600))) return err('Terlalu banyak dukungan dalam satu jam.', 429, env);
+        if (gross < cfg.minTip || gross > cfg.maxTip) {
+          return err(`Dukungan harus Rp${cfg.minTip.toLocaleString('id-ID')}–Rp${cfg.maxTip.toLocaleString('id-ID')}.`, 422, env);
+        }
+        if (message) {
+          const cek = await periksaKontenPublik(env, {
+            userId: me.sub, konteks: 'livestream', teks: message, opt: { maksUrl: 0 },
+          });
+          if (!cek.ok) return err(cek.alasan, 422, env);
+        }
+        let tipBaru = false;
+        const fee = Math.floor(gross * cfg.feeBps / 10_000);
+        const net = gross - fee;
+        try {
+          await env.DB.prepare(
+            `INSERT INTO livestream_tip(id,livestream_id,viewer_id,creator_id,gross,platform_fee,creator_net,client_id,message,created_at)
+             VALUES(?,?,?,?,?,?,?,?,?,?)`,
+          ).bind(uid('tip_'), live.id, me.sub, live.user_id, gross, fee, net, clientId, message, new Date().toISOString()).run();
+          tipBaru = true;
+        } catch (e) {
+          const msg = String(e?.message || e);
+          if (msg.includes('BALANCE_LOW')) return err('Saldo tidak cukup untuk dukungan ini.', 409, env);
+          if (msg.includes('SELF_TIP')) return err('Tidak dapat mendukung siaran sendiri.', 422, env);
+          if (msg.includes('LIVE_NOT_ACTIVE')) return err('Siaran sudah tidak aktif.', 409, env);
+          if (!/UNIQUE|constraint/i.test(msg)) throw e;
+        }
+        stored = await env.DB.prepare(
+          'SELECT id,livestream_id,gross,platform_fee,creator_net,message,status,created_at FROM livestream_tip WHERE viewer_id=? AND client_id=?',
+        ).bind(me.sub, clientId).first();
+        if (!stored) return err('Dukungan belum dapat dikonfirmasi. Saldo tidak diubah.', 503, env);
+        if (stored.livestream_id !== live.id || Number(stored.gross) !== gross || String(stored.message || '') !== message) {
+          return err('ID dukungan sudah dipakai untuk transaksi berbeda.', 409, env);
+        }
+        const saldo = await env.DB.prepare('SELECT saldo FROM users WHERE id=?').bind(me.sub).first();
+        if (tipBaru) {
+          ctx.waitUntil(buatNotif(env, ctx, {
+            userId: live.user_id, jenis: 'livestream', judul: 'Dukungan baru untuk siaranmu',
+            pesan: `Kamu menerima bagian kreator Rp${Number(stored.creator_net || 0).toLocaleString('id-ID')} (ditahan 7 hari).`,
+            aktor: 'Penonton', refJenis: 'livestream', refId: live.id, kirimPushJuga: true,
+          }));
+        }
+        return json({ ok: true, replay: !tipBaru, tip: stored, saldo: Number(saldo?.saldo || 0) }, tipBaru ? 201 : 200, env);
+      }
+
+      if (p === 'live/creator/payout' && req.method === 'POST') {
+        const b = await req.json().catch(() => ({}));
+        const clientId = String(b.client_id || '');
+        if (!/^[A-Za-z0-9_-]{12,80}$/.test(clientId)) return err('ID permintaan payout tidak valid.', 400, env);
+        // Kunci klien bertahan sesudah paid/rejected, sehingga respons yang
+        // hilang dapat diputar ulang persis bahkan bila admin bergerak cepat.
+        const exact = await env.DB.prepare(
+          'SELECT id,amount,status,requested_at,processed_at FROM creator_payout WHERE user_id=? AND client_id=?',
+        ).bind(me.sub, clientId).first();
+        if (exact) return json({ ok: true, replay: true, ...exact }, 200, env);
+        const aktif = await env.DB.prepare(
+          "SELECT id,amount,status,requested_at FROM creator_payout WHERE user_id=? AND status IN ('requested','processing')",
+        ).bind(me.sub).first();
+        if (aktif) return err('Masih ada payout lain yang sedang diproses. Segarkan riwayat sebelum membuat permintaan baru.', 409, env, 'PAYOUT_ACTIVE');
+        if (!(await bolehLanjut(env, `creator-payout:${me.sub}`, 3, 86400))) {
+          return err('Permintaan payout terlalu sering.', 429, env, 'PAYOUT_RATE_LIMIT');
+        }
+        const cfg = await konfigurasiLivestream(env);
+        await env.DB.prepare("UPDATE creator_earning SET status='available',updated_at=? WHERE user_id=? AND status='held' AND datetime(available_at)<=datetime('now')")
+          .bind(new Date().toISOString(), me.sub).run();
+        const profile = await env.DB.prepare("SELECT * FROM creator_profile WHERE user_id=? AND status='approved' AND payout_verified=1").bind(me.sub).first();
+        if (!profile) return err('Payout belum diverifikasi admin. Hubungi Chat Admin tanpa mengirim data rekening di forum.', 409, env, 'PAYOUT_NOT_VERIFIED');
+        const total = await env.DB.prepare("SELECT COALESCE(SUM(net),0) amount FROM creator_earning WHERE user_id=? AND status='available'").bind(me.sub).first();
+        const amount = Number(total?.amount || 0);
+        if (amount < cfg.minPayout) return err(`Minimum payout Rp${cfg.minPayout.toLocaleString('id-ID')}.`, 409, env, 'PAYOUT_MINIMUM');
+        const id = uid('pay_');
+        const now = new Date().toISOString();
+        try {
+          await env.DB.prepare(
+            "INSERT INTO creator_payout(id,user_id,amount,client_id,status,payout_label,requested_at) VALUES(?,?,?,?,'requested',?,?)",
+          ).bind(id, me.sub, amount, clientId, profile.payout_label || 'Metode terverifikasi', now).run();
+        } catch (e) {
+          const pesanDb = String(e?.message || e);
+          if (/UNIQUE|constraint/i.test(pesanDb)) {
+            const replay = await env.DB.prepare(
+              `SELECT id,amount,status,requested_at,processed_at FROM creator_payout
+               WHERE user_id=? AND client_id=? LIMIT 1`,
+            ).bind(me.sub, clientId).first();
+            if (replay) return json({ ok: true, replay: true, ...replay }, 200, env);
+            const otherActive = await env.DB.prepare(
+              "SELECT id FROM creator_payout WHERE user_id=? AND status IN ('requested','processing') LIMIT 1",
+            ).bind(me.sub).first();
+            if (otherActive) {
+              return err('Masih ada payout lain yang sedang diproses. Segarkan riwayat sebelum membuat permintaan baru.', 409, env, 'PAYOUT_ACTIVE');
+            }
+          }
+          if (pesanDb.includes('CREATOR_NOT_VERIFIED')) {
+            return err('Payout tidak lagi terverifikasi. Segarkan status kreator.', 409, env, 'PAYOUT_NOT_VERIFIED');
+          }
+          if (pesanDb.includes('PAYOUT_BELOW_MINIMUM')) {
+            return err('Minimum payout baru saja berubah. Segarkan lalu coba lagi.', 409, env, 'PAYOUT_MINIMUM');
+          }
+          if (/PAYOUT_AMOUNT_CHANGED|constraint/i.test(pesanDb)) {
+            return err('Saldo kreator berubah. Segarkan lalu coba lagi.', 409, env, 'PAYOUT_BALANCE_CHANGED');
+          }
+          throw e;
+        }
+        return json({ ok: true, replay: false, id, amount, status: 'requested' }, 201, env);
       }
 
       // ---- profil pengguna yang sedang login ----
@@ -5238,6 +6701,7 @@ async function statistikPublik(env) {
 
         const notifForum = b.notif_forum == null ? null : (b.notif_forum ? 1 : 0);
         const notifDm = b.notif_dm == null ? null : (b.notif_dm ? 1 : 0);
+        const notifLive = b.notif_live == null ? null : (b.notif_live ? 1 : 0);
 
         // Batch L: slogan (tagline pendek), bio link, gaya nama kustom.
         let bioLink = null; // null = tidak diubah; '' = hapus
@@ -5279,6 +6743,7 @@ async function statistikPublik(env) {
                             foto = COALESCE(?, foto),
                             notif_forum = COALESCE(?, notif_forum),
                             notif_dm = COALESCE(?, notif_dm),
+                            notif_live = COALESCE(?, notif_live),
                             bio = COALESCE(?, bio),
                             banner = COALESCE(NULLIF(?,'~'), banner),
                             bingkai = COALESCE(NULLIF(?,'~'), bingkai),
@@ -5286,7 +6751,7 @@ async function statistikPublik(env) {
                             bio_link = CASE WHEN ? IS NULL THEN bio_link ELSE NULLIF(?, '') END,
                             gaya_nama = COALESCE(NULLIF(?,'~'), gaya_nama)
            WHERE id = ?`
-        ).bind(nama, phone, foto, notifForum, notifDm, bio, banner === null ? '~' : (banner || ''), bingkai,
+        ).bind(nama, phone, foto, notifForum, notifDm, notifLive, bio, banner === null ? '~' : (banner || ''), bingkai,
                slogan, bioLink, bioLink, gayaNama, me.sub).run();
 
         if (usernameBaru !== undefined) {

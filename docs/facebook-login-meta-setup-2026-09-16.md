@@ -77,7 +77,8 @@ Setelah secret dipasang, deploy Worker kembali. `/api/config` baru mengembalikan
 2. `/api/config` menunjukkan `providers.facebook: true`.
 3. Uji dengan akun role/tester:
    - consent berhasil;
-   - callback kembali ke aplikasi;
+   - callback kembali ke aplikasi hanya dengan `code`, bukan token sesi;
+   - exchange HTTPS pada device pemulai berhasil, replay respons-hilang memberi token yang sama, dan device berbeda ditolak;
    - akun baru dibuat satu kali;
    - login kedua masuk ke user yang sama;
    - perubahan email Facebook tidak membuat akun baru;
@@ -93,7 +94,8 @@ Setelah secret dipasang, deploy Worker kembali. `/api/config` baru mengembalikan
 - Access token Facebook hanya hidup selama satu request dan tidak masuk D1.
 - App Secret dikirim hanya server-to-server ke endpoint HTTPS pertukaran code resmi Meta; URL subrequest tidak pernah dicatat oleh kode aplikasi.
 - Profil diminta dengan Bearer token dan `appsecret_proof`.
-- Code hanya dapat ditukar oleh App ID + App Secret + exact redirect URI yang sama; token kemudian harus lolos permintaan profil `/me`, jenis/masa token divalidasi, dan token tidak pernah ditempatkan di URL.
+- Code Meta hanya dapat ditukar oleh App ID + App Secret + exact redirect URI yang sama; token provider kemudian harus lolos permintaan profil `/me` dan validasi jenis/masa.
+- Token sesi XyCloudStore 30 hari tidak pernah ditempatkan di custom-scheme URL. URL kembali hanya membawa handoff code acak 2 menit; exchange HTTPS memerlukan verifier PKCE-style yang hanya dipegang app, serta cocok dengan challenge, install identity, dan snapshot `session_version`. Maksimal lima replay identik menoleransi kehilangan respons tanpa membuka sesi lintas perangkat.
 - Email sintetis seperti `123@facebook.local` tidak lagi dibuat. Bila Meta tidak memberi email valid, login ditolak dengan penjelasan; klik berikutnya baru memakai `auth_type=rerequest` agar Meta meminta izin email kembali setelah education message.
 - ID Facebook/Google mentah tidak disimpan. D1 menyimpan HMAC app-scoped dalam `social_identity`.
 - Foto profil penyedia diimpor ke Cloudinary milik layanan melalui allowlist host + batas ukuran; URL CDN bertoken tidak disimpan.

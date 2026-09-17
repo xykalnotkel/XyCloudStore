@@ -104,7 +104,7 @@ class _LiveUnitScreenState extends State<LiveUnitScreen> {
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                       Row(children: [
                         // Batch J: ilustrasi AI menggantikan ikon material.
-                        Image.asset('assets/ikon/3d_unitpc.png',
+                        Image.asset('assets/ikon/3d_unitpc.webp',
                             width: 46,
                             height: 46,
                             fit: BoxFit.contain,

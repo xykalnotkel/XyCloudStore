@@ -179,9 +179,12 @@ npm run deploy
 ## Fitur v1.4.0
 
 ### Login sosial sungguhan
-Alur OAuth dijalankan di server: aplikasi membuka `/api/auth/{provider}/start`, pengguna menyetujui di
-halaman resmi Google atau Facebook, lalu server menukar kode, membuat akun bila perlu, dan
-mengembalikan token lewat `xycloudstore://auth?token=...`. Flow browser tidak membutuhkan Firebase.
+Alur OAuth dijalankan di server: aplikasi membuat verifier acak, mengirim challenge SHA-256 serta
+identitas instalasi saat membuka `/api/auth/{provider}/start`, lalu pengguna menyetujui di halaman
+resmi Google atau Facebook. Callback hanya kembali melalui `xycloudstore://auth?code=...` dengan
+handoff sekali pakai berumur dua menit. Aplikasi menukar code + verifier melalui
+`POST /api/auth/social/exchange`; token sesi 30 hari hanya pernah dikirim di body respons HTTPS dan
+disimpan di secure storage, bukan di custom-scheme URL. Flow browser tidak membutuhkan Firebase.
 Tombol yang tampil di aplikasi mengikuti `GET /api/config`, jadi penyedia yang belum dikonfigurasi
 otomatis disembunyikan.
 
@@ -431,8 +434,9 @@ bawaan Flutter lewat `showLicensePage`.
 - Tanpa warna neon. Aksen emas `#D9A441` hanya untuk rating dan tier.
 - Logo resmi ada di `app/assets/brand/` (ikon, wordmark, versi putih) dan dipakai di splash, onboarding,
   welcome, login, dashboard admin, serta ikon launcher.
-- Ilustrasi di `app/assets/ilustrasi/` dibuat dengan AI bergaya 3D glosi ungu di atas latar putih,
-  lalu latarnya dihapus memakai `rembg` (model `isnet-general-use`) sehingga transparan.
+- Ilustrasi di `app/assets/ilustrasi/` dibuat dengan AI bergaya 3D glosi ungu, disimpan sebagai
+  WebP terkompresi. Aset yang membutuhkan latar transparan memakai alpha asli; checkerboard yang
+  sempat tertanam pada ilustrasi blokir dibersihkan dengan mask terkontrol tanpa menghapus gembok putih.
 
 ## Domain
 

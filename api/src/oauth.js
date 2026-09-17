@@ -6,9 +6,10 @@
  *    aplikasi  ->  /api/auth/{provider}/start
  *              ->  halaman izin Google / Facebook
  *              ->  /api/auth/{provider}/callback
- *              ->  balik ke aplikasi lewat xycloudstore://auth?token=...
+ *              ->  balik lewat xycloudstore://auth?code=... (sekali pakai)
+ *              ->  app menukar code terikat-perangkat lewat HTTPS
  *
- *  Pertukaran kode dan App Secret hanya berlangsung di Worker. APK tidak
+ *  Pertukaran kode penyedia dan App Secret hanya berlangsung di Worker. APK tidak
  *  pernah membawa FACEBOOK_APP_SECRET maupun GOOGLE_CLIENT_SECRET.
  */
 

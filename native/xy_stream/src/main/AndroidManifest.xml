@@ -22,6 +22,16 @@
                 <data android:scheme="xycloudstore" android:host="referral"/>
             </intent-filter>
         </activity>
+        <activity android:name="id.xycloud.stream.LiveLinkActivity"
+            android:exported="true" android:noHistory="true" android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="xycloudstore" android:host="live"/>
+            </intent-filter>
+        </activity>
         <service android:name="com.limelight.binding.input.driver.UsbDriverService" android:exported="false"/>
         <service android:name="com.limelight.computers.ComputerManagerService" android:exported="false"/>
         <service android:name="com.limelight.discovery.DiscoveryService" android:exported="false"/>

@@ -16,7 +16,7 @@ import java.util.Map;
 /** Android owns notification sound/vibration settings; the UI never pretends to override user choices. */
 public final class NotificationSettings {
     private final Activity activity;
-    private final String[][] channels={{"xy_orders_v1","Pesanan dan saldo"},{"xy_cs_v1","Chat CS"},{"xy_forum_v1","Komunitas"},{"xy_promo_v1","Promo dan info"},{"xy_system_v1","Sistem"}};
+    private final String[][] channels={{"xy_orders_v1","Pesanan dan saldo"},{"xy_cs_v1","Chat CS"},{"xy_live_v1","XyCloud Live"},{"xy_forum_v1","Komunitas"},{"xy_promo_v1","Promo dan info"},{"xy_system_v1","Sistem"}};
     public NotificationSettings(Activity a){activity=a;}
     public void ensureChannels(){
         if(Build.VERSION.SDK_INT<26)return;
@@ -68,6 +68,12 @@ public final class NotificationSettings {
         }
         if(method.equals("clearReferralAttribution")){
             activity.getSharedPreferences(ReferralActivity.PREFS,0).edit().clear().commit();return null;
+        }
+        if(method.equals("consumeLiveDeepLink")){
+            android.content.SharedPreferences sp=activity.getSharedPreferences(LiveLinkActivity.PREFS,0);
+            String id=sp.getString(LiveLinkActivity.KEY_ID,"");
+            sp.edit().remove(LiveLinkActivity.KEY_ID).commit();
+            return id!=null&&id.matches("^[A-Za-z0-9_-]{8,80}$")?id:null;
         }
         if(method.equals("notificationStatus")){
             ensureChannels();List<Map<String,Object>> out=new ArrayList<>();

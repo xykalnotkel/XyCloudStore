@@ -6,4 +6,4 @@ out
 .env
 .env.local
 .env*
-dashboard/tsconfig.tsbuildinfo
+*.tsbuildinfo

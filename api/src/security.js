@@ -50,7 +50,9 @@ export async function deviceFromRequest(env,req,{required=false,raw=null}={}){
   const type=req.headers.get('x-xy-device-kind')||'unknown';
   let model=String(req.headers.get('x-xy-device-model')||'');try{model=decodeURIComponent(model);}catch{}model=model.replace(/[\r\n]/g,'').slice(0,80);
   await env.DB.prepare(`INSERT INTO security_devices(id,kind,model,created_at,last_seen) VALUES(?,?,?,?,?)
-    ON CONFLICT(id) DO UPDATE SET last_seen=excluded.last_seen,model=COALESCE(NULLIF(excluded.model,''),model)`)
+    ON CONFLICT(id) DO UPDATE SET last_seen=excluded.last_seen,
+      kind=CASE WHEN security_devices.kind='unknown' AND excluded.kind!='unknown' THEN excluded.kind ELSE security_devices.kind END,
+      model=COALESCE(NULLIF(excluded.model,''),security_devices.model)`)
     .bind(id,['android','install','browser'].includes(type)?type:'unknown',model,time,time).run();
   const device=await env.DB.prepare('SELECT * FROM security_devices WHERE id=?').bind(id).first();
   if(device.blocked)throw new SecurityError('Perangkat ini dibatasi. Hubungi pengelola layanan.',403,'DEVICE_BLOCKED');
@@ -93,10 +95,13 @@ export async function otpAllowed(env,email){
 }
 export async function otpDigest(env,email,type,code){return 'v2:'+await securityHash(env,'otp',email.toLowerCase()+':'+type+':'+String(code).trim());}
 
-export async function newOAuthState(env,provider,deviceId){
+export async function newOAuthState(env,provider,deviceId,handoffChallenge){
+  if(!/^[a-f0-9]{64}$/.test(String(deviceId||'')))throw new SecurityError('Identitas perangkat OAuth tidak valid.',400,'DEVICE_REQUIRED');
+  if(!/^[A-Za-z0-9_-]{43}$/.test(String(handoffChallenge||'')))throw new SecurityError('Challenge penyelesaian OAuth tidak valid.',400,'OAUTH_CHALLENGE');
   const value=[...crypto.getRandomValues(new Uint8Array(24))].map(x=>x.toString(16).padStart(2,'0')).join('');
   const id=await securityHash(env,'oauth',value);
-  await env.DB.prepare('INSERT INTO oauth_states(id,provider,device_id,expires_at) VALUES(?,?,?,?)').bind(id,provider,deviceId,new Date(Date.now()+600000).toISOString()).run();
+  await env.DB.prepare('INSERT INTO oauth_states(id,provider,device_id,handoff_challenge,expires_at) VALUES(?,?,?,?,?)')
+    .bind(id,provider,deviceId,handoffChallenge,new Date(Date.now()+600000).toISOString()).run();
   return value;
 }
 export async function consumeOAuthState(env,req,provider){
@@ -104,9 +109,10 @@ export async function consumeOAuthState(env,req,provider){
   const cookie=(req.headers.get('cookie')||'').split(';').map(x=>x.trim()).find(x=>x.startsWith('xy_oauth_nonce='))?.slice(15);
   if(!/^[a-f0-9]{48}$/.test(value)||cookie!==value)throw new SecurityError('Sesi login tidak cocok. Mulai login ulang.',400,'OAUTH_STATE');
   const id=await securityHash(env,'oauth',value);
-  const row=await env.DB.prepare('DELETE FROM oauth_states WHERE id=? AND provider=? AND expires_at>? RETURNING device_id').bind(id,provider,new Date().toISOString()).first();
-  if(!row)throw new SecurityError('Sesi login kedaluwarsa atau sudah dipakai.',400,'OAUTH_STATE');
-  return row.device_id;
+  const row=await env.DB.prepare('DELETE FROM oauth_states WHERE id=? AND provider=? AND expires_at>? RETURNING device_id,handoff_challenge').bind(id,provider,new Date().toISOString()).first();
+  if(!row||!/^[a-f0-9]{64}$/.test(String(row.device_id||''))
+      ||!/^[A-Za-z0-9_-]{43}$/.test(String(row.handoff_challenge||'')))throw new SecurityError('Sesi login kedaluwarsa atau sudah dipakai.',400,'OAUTH_STATE');
+  return {deviceId:row.device_id,handoffChallenge:row.handoff_challenge};
 }
 
 export async function saveSecurityConfig(env,body){

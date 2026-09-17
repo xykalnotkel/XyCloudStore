@@ -1,4 +1,9 @@
+import 'dart:convert';
+import 'dart:math';
+
 import 'device_identity.dart';
+import 'api_client.dart';
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_web_auth_2/flutter_web_auth_2.dart';
 import 'package:google_sign_in/google_sign_in.dart';
@@ -58,15 +63,26 @@ class LoginSosial {
     }
   }
 
-  /// Cara cadangan: halaman izin resmi di browser aman, hasilnya
-  /// dikembalikan lewat tautan xycloudstore://auth?token=...
+  /// Cara cadangan: halaman izin resmi di browser aman. Custom scheme hanya
+  /// membawa code 2 menit yang terikat install ini; token sesi ditukar lagi
+  /// melalui HTTPS agar aplikasi lain tidak dapat mencurinya dari deep link.
   static Future<String> tokenLewatHalaman(String provider) async {
     if (provider != 'google' && provider != 'facebook') {
       throw GagalLoginSosial('Penyedia login tidak dikenal.');
     }
+    await DeviceIdentity.prepare();
+    if (!RegExp(r'^[a-f0-9]{64}$').hasMatch(DeviceIdentity.id)) {
+      throw GagalLoginSosial('Identitas instalasi tidak tersedia. Tutup lalu buka kembali aplikasi.');
+    }
+    final random = Random.secure();
+    final verifier = List<int>.generate(32, (_) => random.nextInt(256))
+        .map((x) => x.toRadixString(16).padLeft(2, '0')).join();
+    final challenge = base64Url.encode(sha256.convert(utf8.encode(verifier)).bytes)
+        .replaceAll('=', '');
     final mulai = Uri.parse('${XyConfig.aktif}/api/auth/$provider/start')
         .replace(queryParameters: {
-          if (DeviceIdentity.id.isNotEmpty) 'device': DeviceIdentity.id,
+          'device': DeviceIdentity.id,
+          'handoff_challenge': challenge,
           if (provider == 'facebook' && _ulangIzinEmailFacebook) 'rerequest': 'email',
         });
 
@@ -78,11 +94,28 @@ class LoginSosial {
       );
 
       final u = Uri.parse(hasil);
-      final token = u.queryParameters['token'];
+      if (u.scheme.toLowerCase() != skema || u.host.toLowerCase() != 'auth') {
+        throw GagalLoginSosial('Callback login tidak dikenali. Mulai ulang dari aplikasi.');
+      }
+      final code = u.queryParameters['code'];
       final galat = u.queryParameters['error'];
-      if (token != null && token.isNotEmpty) {
-        if (provider == 'facebook') _ulangIzinEmailFacebook = false;
-        return token;
+      if (code != null && RegExp(r'^[a-f0-9]{64}$').hasMatch(code)) {
+        final api = ApiClient();
+        try {
+          final data = Map<String, dynamic>.from(
+            await api.post('/auth/social/exchange', {'code': code, 'verifier': verifier}),
+          );
+          final token = data['token'] as String?;
+          if (token == null || token.isEmpty) {
+            throw GagalLoginSosial('Server tidak mengembalikan sesi login.');
+          }
+          if (provider == 'facebook') _ulangIzinEmailFacebook = false;
+          return token;
+        } on ApiException catch (e) {
+          throw GagalLoginSosial(e.pesan);
+        } finally {
+          api.dispose();
+        }
       }
       if (provider == 'facebook' &&
           (galat ?? '').toLowerCase().contains('tidak membagikan email')) {

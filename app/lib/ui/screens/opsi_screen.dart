@@ -414,6 +414,16 @@ class _OpsiNotifikasiScreenState extends State<OpsiNotifikasiScreen>
                   ScaffoldMessenger.of(context)
                       .showSnackBar(SnackBar(content: Text(e)));
               }),
+          SwitchListTile(
+              value: s.user?.notifLive ?? true,
+              title: const Text('Kreator mulai live'),
+              subtitle: const Text('Kabar dari kreator yang kamu ikuti'),
+              onChanged: (v) async {
+                final e = await s.perbaruiProfil(notifLive: v);
+                if (e != null && context.mounted)
+                  ScaffoldMessenger.of(context)
+                      .showSnackBar(SnackBar(content: Text(e)));
+              }),
           Text(
               'Memilih nada tidak mengaktifkan layanan push yang belum dikonfigurasi. Android dan izin perangkat tetap menentukan apakah pemberitahuan ditampilkan.',
               style: TextStyle(

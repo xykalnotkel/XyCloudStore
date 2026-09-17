@@ -1,3 +1,4 @@
+import { setInputLivestream } from './livestream.js';
 
 /**
  * Host streaming harus alamat yang bisa dijangkau HP penyewa — IP publik, IPv6,
@@ -151,10 +152,28 @@ export async function mulaiSewa(env,userId,orderId){
 }
 export async function antreAkhir(env,s,alasan='Sesi diakhiri pengguna'){
   if(['selesai','gagal'].includes(s.status))return s;
-  await env.DB.batch([
+  // Livestream publik tidak boleh bertahan melewati lease PC. Putus ingress
+  // lebih dahulu, lalu minta agen menghentikan OBS dan Sunshine secara lokal.
+  const live=await env.DB.prepare(
+    "SELECT * FROM livestream WHERE sesi_id=? AND (status IN ('queued','starting','live','ending') OR (status='failed' AND cleanup_pending=1)) LIMIT 1",
+  ).bind(s.id).first();
+  const now=new Date().toISOString();
+  const jobs=[
     env.DB.prepare("UPDATE sesi SET status='mengakhiri',catatan=? WHERE id=? AND status NOT IN ('selesai','gagal')").bind(alasan,s.id),
-    env.DB.prepare("INSERT OR IGNORE INTO perintah(id,agen_id,jenis,muatan) VALUES(?,?,'akhiri_sesi',?)").bind('end_'+s.id,s.agen_id,JSON.stringify({sesi_id:s.id})),
-  ]);
+  ];
+  if(live){
+    jobs.push(env.DB.prepare("UPDATE livestream SET status='ending',end_reason=?,updated_at=? WHERE id=?").bind('Sesi PC berakhir: '+String(alasan).slice(0,120),now,live.id));
+    jobs.push(env.DB.prepare("INSERT OR IGNORE INTO perintah(id,agen_id,jenis,muatan) VALUES(?,?,'akhiri_siaran',?)").bind('live_end_'+live.id,s.agen_id,JSON.stringify({live_id:live.id})));
+  }
+  jobs.push(env.DB.prepare("INSERT OR IGNORE INTO perintah(id,agen_id,jenis,muatan) VALUES(?,?,'akhiri_sesi',?)").bind('end_'+s.id,s.agen_id,JSON.stringify({sesi_id:s.id})));
+  await env.DB.batch(jobs);
+  if(live?.provider_input_uid){
+    const blocked=await setInputLivestream(env,live.provider_input_uid,false);
+    if(blocked.ok||blocked.code==='NOT_FOUND'){
+      await env.DB.prepare('UPDATE livestream SET provider_disabled_at=COALESCE(provider_disabled_at,?) WHERE id=?')
+        .bind(now,live.id).run();
+    }
+  }
   return {...s,status:'mengakhiri',catatan:alasan};
 }
 export async function bacaSewa(env,userId,key){

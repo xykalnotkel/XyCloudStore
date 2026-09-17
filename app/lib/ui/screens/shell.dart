@@ -9,11 +9,13 @@ import '../../core/theme.dart';
 import '../../providers/app_state.dart';
 import '../../core/motion.dart';
 import '../../data/push_service.dart';
+import '../../data/live_deep_link.dart';
 import 'akun_screen.dart';
 import 'cs_screen.dart';
 import 'dm_chat_screen.dart';
 import 'notifikasi_screen.dart';
 import 'order_list_screen.dart';
+import 'livestream_screen.dart';
 import 'wallet_screen.dart';
 import 'home_screen.dart';
 import 'forum_screen.dart';
@@ -32,8 +34,14 @@ class _XyShellState extends State<XyShell> {
   @override
   void initState() {
     super.initState();
-    // buka halaman yang sesuai ketika notifikasi diketuk
+    // buka halaman yang sesuai ketika notifikasi/deep link diketuk
     PushService.saatDiketuk = _tanganiNotif;
+    LiveDeepLink.pasang((id) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) Navigator.push(context, xyRoute(XyLiveScreen(fokusId: id)));
+      });
+    });
+    LiveDeepLink.periksa();
     final tertunda = PushService.tertunda;
     if (tertunda != null) {
       PushService.tertunda = null;
@@ -68,6 +76,7 @@ class _XyShellState extends State<XyShell> {
   @override
   void dispose() {
     PushService.saatDiketuk = null;
+    LiveDeepLink.saatDiterima = null;
     super.dispose();
   }
 
@@ -134,6 +143,9 @@ class _XyShellState extends State<XyShell> {
         break;
       case 'wallet':
         Navigator.push(context, xyRoute(const WalletScreen()));
+        break;
+      case 'livestream':
+        Navigator.push(context, xyRoute(XyLiveScreen(fokusId: '${data['id'] ?? ''}')));
         break;
       case 'peringatan':
       case 'sistem':

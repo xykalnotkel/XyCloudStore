@@ -79,6 +79,7 @@ export async function jalankanPemeliharaan(env) {
 
     await env.DB.prepare("DELETE FROM security_events WHERE datetime(last_seen)<datetime('now','-30 days')").run();
     await env.DB.prepare("DELETE FROM oauth_states WHERE expires_at<?").bind(sekarang).run();
+    await env.DB.prepare("DELETE FROM oauth_handoffs WHERE expires_at<?").bind(sekarang).run();
 
     // catatan sistem lama
     const logLama = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();

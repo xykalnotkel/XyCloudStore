@@ -83,7 +83,7 @@ class _PembaruanScreenState extends State<PembaruanScreen> {
 
     // gambar rilis (AI per update), atau fallback ilustrasi update bawaan.
     final hero = gambar.isEmpty
-        ? Image.asset('assets/ilustrasi/update.png',
+        ? Image.asset('assets/ilustrasi/update.webp',
             height: 210,
             fit: BoxFit.contain,
             errorBuilder: (_, __, ___) => const XyIlustrasi('update', tinggi: 210))
@@ -95,7 +95,7 @@ class _PembaruanScreenState extends State<PembaruanScreen> {
                 ? anak
                 : const Shimmer(height: 210),
             errorBuilder: (_, __, ___) =>
-                Image.asset('assets/ilustrasi/update.png',
+                Image.asset('assets/ilustrasi/update.webp',
                     height: 210, fit: BoxFit.contain));
 
     return Scaffold(

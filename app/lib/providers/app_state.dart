@@ -9,6 +9,7 @@ import '../core/pengaturan.dart';
 import '../data/api_client.dart';
 import '../data/lapor_galat.dart';
 import '../data/login_sosial.dart';
+import '../data/live_deep_link.dart';
 import '../data/push_service.dart';
 import '../data/realtime_service.dart';
 import '../data/referral_attribution.dart';
@@ -41,6 +42,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     unawaited(muatKunciBiometrik());
     unawaited(periksaPembaruan());
     unawaited(konfirmasiInstalReferral());
+    unawaited(LiveDeepLink.periksa());
     unawaited(pulihkanSesi());
   }
 
@@ -50,6 +52,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       // ReferralActivity bisa membangunkan MainActivity yang masih hidup.
       // Baca ulang SharedPreferences native, bukan menunggu restart aplikasi.
       unawaited(sinkronAtribusiReferral());
+      unawaited(LiveDeepLink.periksa());
     }
   }
 
@@ -561,6 +564,309 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
+  // ================= XyCloud Live & studio kreator =================
+  LiveCatalog liveCatalog = const LiveCatalog();
+  CreatorLiveData? creatorLive;
+  String? _livePayoutClientId;
+  String? _livePayoutUserId;
+  Future<String?>? _liveTipAktif;
+  Future<String?>? _livePayoutAktif;
+  Future<String?>? _liveMuatAktif;
+  bool liveMemuat = false;
+  String? liveGalat;
+  String? creatorLiveGalat;
+
+  Future<void> muatLive({bool senyap = false}) async {
+    await _muatLiveDenganHasil(senyap: senyap);
+  }
+
+  Future<LivestreamItem> detailLivestream(String id) => _repo.liveDetail(id);
+
+  /// Semua pemanggil konkuren berbagi satu refresh. Nilai kembali khusus
+  /// dipakai mutasi finansial agar sukses request tidak tertukar dengan gagal
+  /// menyegarkan tampilan sesudahnya.
+  Future<String?> _muatLiveDenganHasil({bool senyap = false}) {
+    return _liveMuatAktif ??= _jalankanMuatLive(senyap: senyap);
+  }
+
+  Future<String?> _jalankanMuatLive({required bool senyap}) async {
+    liveMemuat = true;
+    if (!senyap) notifyListeners();
+    LiveCatalog? katalogBaru;
+    CreatorLiveData? creatorBaru;
+    Object? galatKatalog;
+    Object? galatCreator;
+    try {
+      // Katalog publik dan Studio harus gagal secara independen. Gangguan
+      // endpoint kreator tidak boleh menyembunyikan live publik yang berhasil.
+      await Future.wait<void>([
+        () async {
+          try {
+            katalogBaru = await _repo.liveCatalog();
+          } catch (e) {
+            galatKatalog = e;
+          }
+        }(),
+        if (user != null) () async {
+          try {
+            creatorBaru = await _repo.liveCreator();
+          } catch (e) {
+            galatCreator = e;
+          }
+        }(),
+      ]);
+      if (katalogBaru != null) liveCatalog = katalogBaru!;
+      if (creatorBaru != null) creatorLive = creatorBaru;
+      liveGalat = galatKatalog == null ? null : _pesan(galatKatalog!);
+      creatorLiveGalat = galatCreator == null ? null : _pesan(galatCreator!);
+      return liveGalat ?? creatorLiveGalat;
+    } finally {
+      liveMemuat = false;
+      _liveMuatAktif = null;
+      notifyListeners();
+    }
+  }
+
+  /// Jika refresh lama dimulai sebelum mutasi, tunggu hingga selesai lalu ambil
+  /// snapshot baru supaya hasil mutasi pasti punya kesempatan terlihat.
+  Future<String?> _segarkanLiveSesudahMutasi() async {
+    final lama = _liveMuatAktif;
+    if (lama != null) await lama;
+    return _muatLiveDenganHasil(senyap: true);
+  }
+
+  Future<String?> ajukanKreatorLive(String nama, String bio) async {
+    try {
+      await _repo.liveApply(displayName: nama, bio: bio);
+      await muatLive(senyap: true);
+      return null;
+    } catch (e) {
+      return _pesan(e);
+    }
+  }
+
+  Future<String?> mulaiLivestream({
+    required String title,
+    required String game,
+    required bool mic,
+  }) async {
+    try {
+      await _repo.liveStart(title: title, game: game, micConsent: mic);
+      await muatLive(senyap: true);
+      return null;
+    } catch (e) {
+      return _pesan(e);
+    }
+  }
+
+  Future<String?> akhiriLivestream(String id) async {
+    try {
+      await _repo.liveEnd(id);
+      await muatLive(senyap: true);
+      return null;
+    } catch (e) {
+      return _pesan(e);
+    }
+  }
+
+  Future<String> tiketTontonLive(String id) => _repo.liveWatch(id);
+
+  Future<LiveTipTertunda?> dukunganLivestreamTertunda() async {
+    final akun = user?.id;
+    if (akun == null || akun.isEmpty) return null;
+    return Prefs.tipLiveTertunda(akun);
+  }
+
+  Future<String?> dukungLivestream(
+    String id, {
+    required int amount,
+    required String message,
+  }) async {
+    final aktif = _liveTipAktif;
+    if (aktif != null) return aktif;
+    final operasi = _kirimDukunganLivestream(
+      id, amount: amount, message: message.trim(),
+    );
+    _liveTipAktif = operasi;
+    try {
+      return await operasi;
+    } finally {
+      if (identical(_liveTipAktif, operasi)) _liveTipAktif = null;
+    }
+  }
+
+  Future<String?> _kirimDukunganLivestream(
+    String id, {
+    required int amount,
+    required String message,
+  }) async {
+    final akun = user?.id;
+    if (akun == null || akun.isEmpty) return 'Masuk kembali sebelum mengirim dukungan.';
+
+    late LiveTipTertunda pending;
+    try {
+      final tersimpan = await Prefs.tipLiveTertunda(akun);
+      if (tersimpan != null && !tersimpan.payloadSama(
+        liveId: id, amount: amount, message: message,
+      )) {
+        final lokasi = tersimpan.liveId == id
+            ? 'siaran ini dengan nominal Rp${tersimpan.amount}'
+            : 'siaran sebelumnya';
+        return 'Retry dukungan $lokasi belum terkonfirmasi. Ulangi payload awal atau hubungi Chat Admin; transaksi baru tidak dikirim agar saldo tidak terpotong dua kali.';
+      }
+      if (tersimpan != null) {
+        pending = tersimpan;
+      } else {
+        final random = Random.secure();
+        final clientId = 'tip_${List<int>.generate(24, (_) => random.nextInt(256)).map((x) => x.toRadixString(16).padLeft(2, '0')).join()}';
+        pending = LiveTipTertunda(
+          userId: akun,
+          liveId: id,
+          amount: amount,
+          message: message,
+          clientId: clientId,
+          dibuatPada: DateTime.now().toUtc().toIso8601String(),
+        );
+        // Persist dahulu. Endpoint finansial tidak boleh disentuh jika key retry
+        // belum durabel lintas process death/restart.
+        await Prefs.simpanTipLiveTertunda(pending);
+      }
+    } catch (_) {
+      return 'Penyimpanan aman tidak dapat dibaca. Dukungan tidak dikirim agar tidak terduplikasi.';
+    }
+
+    Map<String, dynamic> result;
+    try {
+      result = await _repo.liveTip(
+        id,
+        amount: amount,
+        clientId: pending.clientId,
+        message: message,
+      );
+    } catch (e) {
+      // Hanya kegagalan yang pasti terjadi sebelum mutasi boleh membuang key.
+      // Timeout, pergantian sesi, 5xx, dan konflik client ID tetap direplay.
+      final pastiBelumMutasi = e is ApiException && (
+        e.status == 400 || e.status == 403 || e.status == 422 || e.status == 429 ||
+        (e.status == 409 && (
+          e.pesan == 'Siaran tidak aktif.' ||
+          e.pesan == 'Siaran sudah tidak aktif.' ||
+          e.pesan == 'Saldo tidak cukup untuk dukungan ini.'
+        ))
+      );
+      if (pastiBelumMutasi) {
+        try {
+          await Prefs.hapusTipLiveTertunda(akun, pending.clientId);
+        } catch (_) {
+          return '${_pesan(e)} Penanda retry lokal belum dapat dibersihkan; jangan ubah nominal sebelum mencoba lagi.';
+        }
+      }
+      return _pesan(e);
+    }
+
+    final saldo = (result['saldo'] as num?)?.toInt();
+    if (saldo != null && user != null && user!.id == akun) {
+      user = user!.copyWith(saldo: saldo);
+    }
+
+    String? peringatan;
+    try {
+      await Prefs.hapusTipLiveTertunda(akun, pending.clientId);
+    } catch (_) {
+      peringatan = 'Dukungan berhasil, tetapi penanda retry lokal belum dapat dibersihkan. Retry berikutnya tetap aman dan tidak memotong saldo dua kali.';
+    }
+    final galatRefresh = await _segarkanLiveSesudahMutasi();
+    final tip = result['tip'];
+    if (tip is Map && tip['status'] == 'reversed') {
+      return 'INFO:Dukungan ini sudah dikembalikan ke saldo kamu.';
+    }
+    if (peringatan != null) return 'INFO:$peringatan';
+    if (galatRefresh != null) {
+      return 'INFO:Dukungan berhasil, tetapi status terbaru belum dapat dimuat. Tarik layar untuk menyegarkan.';
+    }
+    return null;
+  }
+
+  Future<String?> mintaPayoutLive() async {
+    final aktif = _livePayoutAktif;
+    if (aktif != null) return aktif;
+    final operasi = _kirimPayoutLivestream();
+    _livePayoutAktif = operasi;
+    try {
+      return await operasi;
+    } finally {
+      if (identical(_livePayoutAktif, operasi)) _livePayoutAktif = null;
+    }
+  }
+
+  Future<String?> _kirimPayoutLivestream() async {
+    final akun = user?.id;
+    if (akun == null || akun.isEmpty) return 'Masuk kembali sebelum meminta payout.';
+
+    if (_livePayoutUserId != akun) {
+      _livePayoutUserId = akun;
+      _livePayoutClientId = null;
+    }
+    try {
+      _livePayoutClientId ??= await Prefs.payoutLiveClientId(akun);
+      if (!RegExp(r'^[A-Za-z0-9_-]{12,80}$').hasMatch(_livePayoutClientId ?? '')) {
+        final random = Random.secure();
+        _livePayoutClientId = 'payout_${List<int>.generate(24, (_) => random.nextInt(256)).map((x) => x.toRadixString(16).padLeft(2, '0')).join()}';
+        // Persist first, baru boleh menyentuh endpoint finansial.
+        await Prefs.simpanPayoutLiveClientId(akun, _livePayoutClientId!);
+      }
+    } catch (_) {
+      return 'Penyimpanan aman tidak dapat dibaca. Payout tidak dikirim agar tidak terduplikasi.';
+    }
+
+    final clientId = _livePayoutClientId!;
+    try {
+      await _repo.livePayout(clientId: clientId);
+    } catch (e) {
+      // Hanya kode server yang menjamin request ditolak sebelum INSERT boleh
+      // membuang key. Timeout, 5xx, 401 akibat pergantian sesi, atau galat tanpa
+      // kode tetap mempertahankan key untuk replay exact lintas restart.
+      const pastiBelumMutasi = {
+        'PAYOUT_ACTIVE',
+        'PAYOUT_RATE_LIMIT',
+        'PAYOUT_NOT_VERIFIED',
+        'PAYOUT_MINIMUM',
+        'PAYOUT_BALANCE_CHANGED',
+      };
+      if (e is ApiException && pastiBelumMutasi.contains(e.code)) {
+        try {
+          await Prefs.hapusPayoutLiveClientId(akun);
+          if (_livePayoutUserId == akun && _livePayoutClientId == clientId) {
+            _livePayoutClientId = null;
+          }
+        } catch (_) {
+          return '${_pesan(e)} Penanda retry lokal belum dapat dibersihkan; jangan kirim berulang kali sebelum penyimpanan aman pulih.';
+        }
+      }
+      return _pesan(e);
+    }
+
+    String? peringatanLokal;
+    try {
+      await Prefs.hapusPayoutLiveClientId(akun);
+      if (_livePayoutUserId == akun && _livePayoutClientId == clientId) {
+        _livePayoutClientId = null;
+      }
+    } catch (_) {
+      // Server sudah memastikan sukses. Mempertahankan key lebih aman daripada
+      // membuat key baru; ketukan berikut hanya memutar ulang payout yang sama.
+      peringatanLokal =
+          'Payout masuk antrean, tetapi penanda retry lokal belum dapat dibersihkan. Tidak ada payout ganda yang dibuat.';
+    }
+
+    final galatRefresh = await _segarkanLiveSesudahMutasi();
+    if (peringatanLokal != null) return 'INFO:$peringatanLokal';
+    if (galatRefresh != null) {
+      return 'INFO:Payout masuk antrean, tetapi status terbaru belum dapat dimuat. Tarik layar untuk menyegarkan.';
+    }
+    return null;
+  }
+
   // ================= sesi main di PC sewaan =================
   Future<SesiMain?> mulaiSesi(String orderId) async {
     error = null;
@@ -890,9 +1196,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   // ================= profil =================
-  Future<String?> perbaruiProfil({String? nama, String? phone, String? foto, bool? notifForum, bool? notifDm, String? bio, String? banner, String? username, String? bingkai, String? slogan, String? bioLink, String? gayaNama}) async {
+  Future<String?> perbaruiProfil({String? nama, String? phone, String? foto, bool? notifForum, bool? notifDm, bool? notifLive, String? bio, String? banner, String? username, String? bingkai, String? slogan, String? bioLink, String? gayaNama}) async {
     try {
-      user = await _repo.perbaruiProfil(nama: nama, phone: phone, foto: foto, notifForum: notifForum, notifDm: notifDm, bio: bio, banner: banner, username: username, bingkai: bingkai, slogan: slogan, bioLink: bioLink, gayaNama: gayaNama);
+      user = await _repo.perbaruiProfil(nama: nama, phone: phone, foto: foto, notifForum: notifForum, notifDm: notifDm, notifLive: notifLive, bio: bio, banner: banner, username: username, bingkai: bingkai, slogan: slogan, bioLink: bioLink, gayaNama: gayaNama);
       forumRevisi++;
       forum = forum.map((p) => p.userId == user!.id ? ForumPost.fromJson({...p.toJson(), 'nama': user!.nama, 'foto': user!.foto}) : p).toList();
       _ulasan.clear();
@@ -1306,6 +1612,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     perawatan = false; memeriksaSesi = false; loading = false;
     offline = false; dariCache = false; error = null;
     user = null; orders = []; transaksi = []; chat = []; topupSaya = [];
+    liveCatalog = const LiveCatalog(); creatorLive = null; liveGalat = null; creatorLiveGalat = null; liveMemuat = false;
+    _livePayoutClientId = null; _livePayoutUserId = null;
     forum = []; forumDisukai.clear(); balasanDisukai.clear();
     notifikasi = []; notifBelum = 0; notifBelumDibaca = 0;
     favorit.clear(); _ulasan.clear(); _identitasForum.clear();
@@ -1344,6 +1652,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       error = null;
       unawaited(_simpanCache());
       unawaited(muatTopup());
+      unawaited(muatLive(senyap: true));
     } catch (e) {
       if (e is ApiException && e.sedangPerawatan) {
         perawatan = true;
@@ -1498,6 +1807,26 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         break;
       case 'sesi.update':
         // status sesi diperbarui oleh agen PC
+        break;
+      case 'livestream.update':
+        try {
+          final live = LivestreamItem.fromJson(Map<String, dynamic>.from(e.payload));
+          final items = [...liveCatalog.streams];
+          final i = items.indexWhere((x) => x.id == live.id);
+          if (live.status == 'live' || live.status == 'starting') {
+            if (i >= 0) items[i] = live; else items.insert(0, live);
+          } else if (i >= 0) {
+            items.removeAt(i);
+          }
+          liveCatalog = LiveCatalog(
+            enabled: liveCatalog.enabled,
+            minTip: liveCatalog.minTip,
+            maxTip: liveCatalog.maxTip,
+            platformFeeBps: liveCatalog.platformFeeBps,
+            streams: items,
+          );
+          unawaited(muatLive(senyap: true));
+        } catch (_) {}
         break;
       case 'notif.baru':
         try {

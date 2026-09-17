@@ -12,7 +12,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-pub const VERSI: &str = "1.5.4-rust";
+mod obs_live;
+
+pub const VERSI: &str = "1.5.5-rust";
 
 /// Batch L: semua proses anak (powershell/cmd/reg/where/sunshine) dibuat
 /// dengan CREATE_NO_WINDOW supaya tidak ada jendela konsol hitam yang
@@ -127,7 +129,8 @@ pub fn simpan_konfig(k: &Konfig) -> std::io::Result<()> {
 
 fn klien() -> reqwest::blocking::Client {
     reqwest::blocking::Client::builder()
-        .danger_accept_invalid_certs(true)
+        // Agen membawa kode autentikasi dan credential ingest; sertifikat TLS
+        // server wajib diverifikasi, tidak boleh fail-open terhadap MITM.
         .timeout(Duration::from_secs(10))
         .build()
         .expect("gagal membuat klien HTTP")
@@ -528,6 +531,48 @@ fn kirim_balasan(k: &Konfig, id: &str, hasil: Value) {
     let _ = minta(&url, Some(hasil), "POST", Some(vec![("x-agen-kode".into(), k.kode.clone())]));
 }
 
+/// Ambil credential sekali pakai langsung dari endpoint privat agen. Nilainya
+/// tidak pernah diteruskan ke logger, file konfigurasi, atau payload ACK.
+fn credential_livestream(k: &Konfig, live_id: &str) -> Result<(String, String, bool), String> {
+    if !live_id.starts_with("live_") || live_id.len() > 80 {
+        return Err("LIVE_ID_INVALID".into());
+    }
+    let url = format!(
+        "{}/api/agen/live/{}/credential",
+        k.server.trim_end_matches('/'),
+        live_id
+    );
+    let (status, body) = minta(
+        &url,
+        None,
+        "GET",
+        Some(vec![("x-agen-kode".into(), k.kode.clone())]),
+    )
+    .map_err(|_| "LIVE_CREDENTIAL_NETWORK".to_string())?;
+    if !(200..300).contains(&status) {
+        return Err(format!("LIVE_CREDENTIAL_HTTP_{status}"));
+    }
+    let data = body.get("data").unwrap_or(&body);
+    if data.get("live_id").and_then(Value::as_str) != Some(live_id) {
+        return Err("LIVE_CREDENTIAL_MISMATCH".into());
+    }
+    let ingest = data
+        .get("ingest_url")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let key = data
+        .get("stream_key")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let mic = data.get("mic_consent").and_then(Value::as_bool).unwrap_or(false);
+    if ingest != "rtmps://live.cloudflare.com:443/live/" || key.len() < 20 || key.len() > 512 {
+        return Err("LIVE_CREDENTIAL_INVALID".into());
+    }
+    Ok((ingest, key, mic))
+}
+
 fn kerjakan(k: &Konfig, perintah: &Value, log: &Logger) {
     let jenis = perintah.get("jenis").and_then(|x| x.as_str()).unwrap_or("?");
     let muatan = perintah.get("muatan").cloned().unwrap_or_else(|| json!({}));
@@ -585,14 +630,48 @@ fn kerjakan(k: &Konfig, perintah: &Value, log: &Logger) {
             balas(hasil);
         }
         "akhiri_sesi" => {
+            // Lease PC berakhir berarti siaran publik juga wajib berhenti,
+            // bahkan bila command akhiri_siaran datang sesudah command ini.
+            let live_bersih = obs_live::akhiri_aktif(k, log).is_ok();
             let tutup = minta(&format!("{sunshine}/api/apps/close"), Some(json!({})), "POST", Some(header_basic(k)));
             let lepas = minta(&format!("{sunshine}/api/clients/unpair-all"), Some(json!({})), "POST", Some(header_basic(k)));
-            let oke = tutup.is_ok() && lepas.is_ok();
+            let oke = live_bersih && tutup.is_ok() && lepas.is_ok();
             balas(json!({
                 "ok": oke, "sesi_id": sesi_id,
                 "status": if oke { "selesai" } else { "mengakhiri" },
-                "catatan": if oke { "Sesi dibersihkan" } else { "Pembersihan belum berhasil; unit tetap dikunci" },
+                "catatan": if oke { "Sesi dan OBS dibersihkan" } else { "Pembersihan Sunshine/OBS belum terverifikasi; unit tetap dikunci" },
             }));
+        }
+        "mulai_siaran" => {
+            let live_id = muatan.get("live_id").and_then(Value::as_str).unwrap_or("");
+            log(&format!("Menyiapkan XyCloud Live {} (credential tidak dicatat)…", live_id));
+            let hasil = credential_livestream(k, live_id).and_then(|(ingest, key, mic)| {
+                obs_live::mulai(k, live_id, &ingest, &key, mic, log)
+            });
+            match hasil {
+                Ok(()) => balas(json!({"ok": true, "live_id": live_id, "code": "OK"})),
+                Err(code) => {
+                    let clean: String = code.chars()
+                        .filter(|x| x.is_ascii_alphanumeric() || *x == '_')
+                        .take(50)
+                        .collect();
+                    log(&format!("Siaran tidak dimulai ({}).", clean));
+                    balas(json!({"ok": false, "live_id": live_id, "code": clean}));
+                }
+            }
+        }
+        "akhiri_siaran" => {
+            let live_id = muatan.get("live_id").and_then(Value::as_str).unwrap_or("");
+            match obs_live::akhiri(k, live_id, log) {
+                Ok(()) => balas(json!({"ok": true, "live_id": live_id, "code": "OK"})),
+                Err(code) => {
+                    let clean: String = code.chars()
+                        .filter(|x| x.is_ascii_alphanumeric() || *x == '_')
+                        .take(50)
+                        .collect();
+                    balas(json!({"ok": false, "live_id": live_id, "code": clean}));
+                }
+            }
         }
         lainnya => balas(json!({"ok": false, "catatan": format!("Perintah {lainnya} tidak dikenal")})),
     }
@@ -602,6 +681,8 @@ fn detak(k: &Konfig, log: &Logger) {
     let cek = periksa_sunshine(k);
     let mut spec = spesifikasi();
     spec["sunshine"] = cek;
+    spec["obs"] = obs_live::status();
+    let live_health = obs_live::pantau(k, log);
     let stream = alamat_stream(k);
     spec["stream_host"] = json!(stream);
     let muatan = json!({
@@ -610,6 +691,7 @@ fn detak(k: &Konfig, log: &Logger) {
         "spec": spec,
         "host": stream,
         "hostname": std::env::var("COMPUTERNAME").unwrap_or_default(),
+        "live_health": live_health,
     });
     let url = format!("{}/api/agen/heartbeat", k.server.trim_end_matches('/'));
     match minta(&url, Some(muatan), "POST", Some(vec![("x-agen-kode".into(), k.kode.clone())])) {
@@ -640,12 +722,16 @@ pub fn jalankan_loop(k: Konfig, log: Logger, stop: Arc<AtomicBool>) {
     log(&format!("Sunshine : {SUNSHINE_BAWAAN}"));
     let mut terakhir = Instant::now();
     while !stop.load(Ordering::Relaxed) {
-        if terakhir.elapsed() >= Duration::from_secs(20) {
+        // Idle tetap hemat (20 dtk). Selama ada tombstone OBS, audit scene,
+        // audio, output, dan cleanup dilaporkan tiap 5 dtk agar fail-closed cepat.
+        let interval = if obs_live::perlu_pantau_cepat() { 5 } else { 20 };
+        if terakhir.elapsed() >= Duration::from_secs(interval) {
             terakhir = Instant::now();
             detak(&k, &log);
         }
-        std::thread::sleep(Duration::from_secs(2));
+        std::thread::sleep(Duration::from_secs(1));
     }
+    let _ = obs_live::akhiri_aktif(&k, &log);
     log("Agen dihentikan.");
 }
 
@@ -689,7 +775,6 @@ fn jalankan_timeout(program: &str, args: &[&str], detik: u64, log: &Logger) -> R
 fn unduh_berkas(url: &str, tujuan: &PathBuf, log: &Logger) -> Result<(), String> {
     log(&format!("Mengunduh {url} …"));
     let c = reqwest::blocking::Client::builder()
-        .danger_accept_invalid_certs(true)
         .timeout(Duration::from_secs(180))
         .user_agent(format!("XyAgent/{VERSI}"))
         .redirect(reqwest::redirect::Policy::limited(8))
@@ -853,7 +938,7 @@ fn pastikan_service_sunshine(log: &Logger) {
 pub fn setup_otomatis(k: &Konfig, log: Logger) -> (Konfig, Value) {
     let mut k = k.clone();
     log(&format!("=== Auto-setup Sunshine · Agen {VERSI} ==="));
-    log("Langkah 1/5: deteksi engine…");
+    log("Langkah 1/6: deteksi engine…");
 
     // 1) Pastikan engine terpasang
     let sudah_exe = cari_sunshine_exe().is_some();
@@ -894,7 +979,7 @@ pub fn setup_otomatis(k: &Konfig, log: Logger) -> (Konfig, Value) {
     };
 
     // 2) Kredensial
-    log("Langkah 2/5: kredensial API lokal…");
+    log("Langkah 2/6: kredensial API lokal…");
     let perlu_set_creds = k.user.is_empty() || k.sandi.is_empty();
     if perlu_set_creds {
         if k.user.is_empty() {
@@ -916,17 +1001,17 @@ pub fn setup_otomatis(k: &Konfig, log: Logger) -> (Konfig, Value) {
     }
 
     // 3) Service
-    log("Langkah 3/5: layanan…");
+    log("Langkah 3/6: layanan…");
     pastikan_service_sunshine(&log);
 
     // 4) Tunggu API
-    log("Langkah 4/5: tunggu API 47990 (maks 45 dtk)…");
-    let cek = tunggu_api_siap(&k, &log, 45);
+    log("Langkah 4/6: tunggu API 47990 (maks 45 dtk)…");
+    let mut cek = tunggu_api_siap(&k, &log, 45);
     if cek.get("siap").and_then(|x| x.as_bool()).unwrap_or(false) {
         log("SETUP OK — Sunshine siap. Tidak perlu login web UI manual.");
         // 5) Kunci rasio landscape — display host (termasuk headless/virtual
         //    display) dipaksa 1920x1080@60 lewat opsi dd_* Sunshine.
-        log("Langkah 5/5: kunci rasio landscape (termasuk headless)…");
+        log("Langkah 5/6: kunci rasio landscape (termasuk headless)…");
         let _ = kunci_lanskap_sunshine(&k, &log);
     } else {
         let pesan = cek
@@ -937,6 +1022,10 @@ pub fn setup_otomatis(k: &Konfig, log: Logger) -> (Konfig, Value) {
         log("Tips: jalankan Agent sebagai Admin, atau buka https://127.0.0.1:47990 sekali.");
         log("Lalu klik 'Uji koneksi' / ulangi Pasang & kunci.");
     }
+    log("Langkah 6/6: engine livestream gamer (OBS Studio)…");
+    let obs_ok = obs_live::pastikan_terpasang(&log);
+    cek["obs"] = obs_live::status();
+    cek["obs"]["siap"] = json!(obs_ok);
     (k, cek)
 }
 

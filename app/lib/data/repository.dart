@@ -77,7 +77,7 @@ abstract class XyRepository {
   Future<Map<String, dynamic>> cekTopupPenyedia(String idTopup);
 
   // ---------- profil ----------
-  Future<UserProfile> perbaruiProfil({String? nama, String? phone, String? foto, bool? notifForum, bool? notifDm, String? bio, String? banner, String? username, String? bingkai, String? slogan, String? bioLink, String? gayaNama});
+  Future<UserProfile> perbaruiProfil({String? nama, String? phone, String? foto, bool? notifForum, bool? notifDm, bool? notifLive, String? bio, String? banner, String? username, String? bingkai, String? slogan, String? bioLink, String? gayaNama});
   Future<Map<String, dynamic>> cekNama({String? nama, String? username});
   Future<Map<String, dynamic>> laporPengguna(String id, String alasan);
   Future<List<BisukanItem>> bisukanDaftar();
@@ -128,6 +128,25 @@ abstract class XyRepository {
   Future<HudPresetPublik> pakaiHudPublik(String id);
   Future<Map<String, dynamic>> sukaiHud(String id);
   Future<void> hapusHudPublik(String id);
+
+  // ---------- XyCloud Live & studio kreator ----------
+  Future<LiveCatalog> liveCatalog();
+  Future<LivestreamItem> liveDetail(String id);
+  Future<CreatorLiveData> liveCreator();
+  Future<Map<String, dynamic>> liveApply({required String displayName, required String bio});
+  Future<LivestreamItem> liveStart({
+    required String title,
+    required String game,
+    required bool micConsent,
+  });
+  Future<String> liveWatch(String id);
+  Future<Map<String, dynamic>> liveTip(String id, {
+    required int amount,
+    required String clientId,
+    String message = '',
+  });
+  Future<LivestreamItem> liveEnd(String id);
+  Future<Map<String, dynamic>> livePayout({required String clientId});
 
   // ---------- sesi main ----------
   Future<SesiMain> sesiMulai(String orderId);
@@ -371,13 +390,14 @@ class RemoteRepository implements XyRepository {
           await api.post('/wallet/topup/$idTopup/bukti', {'file': dataUri})));
 
   @override
-  Future<UserProfile> perbaruiProfil({String? nama, String? phone, String? foto, bool? notifForum, bool? notifDm, String? bio, String? banner, String? username, String? bingkai, String? slogan, String? bioLink, String? gayaNama}) async =>
+  Future<UserProfile> perbaruiProfil({String? nama, String? phone, String? foto, bool? notifForum, bool? notifDm, bool? notifLive, String? bio, String? banner, String? username, String? bingkai, String? slogan, String? bioLink, String? gayaNama}) async =>
       UserProfile.fromJson(Map<String, dynamic>.from(await api.patch('/me', {
         if (nama != null) 'nama': nama,
         if (phone != null) 'phone': phone,
         if (foto != null) 'foto': foto,
         if (notifForum != null) 'notif_forum': notifForum ? 1 : 0,
         if (notifDm != null) 'notif_dm': notifDm ? 1 : 0,
+        if (notifLive != null) 'notif_live': notifLive ? 1 : 0,
         if (bio != null) 'bio': bio,
         if (banner != null) 'banner': banner,
         if (username != null) 'username': username,
@@ -543,6 +563,69 @@ class RemoteRepository implements XyRepository {
 
   @override
   Future<void> hapusHudPublik(String id) async => api.delete('/hud/presets/$id');
+
+  // ---------- XyCloud Live ----------
+  @override
+  Future<LiveCatalog> liveCatalog() async => LiveCatalog.fromJson(
+      Map<String, dynamic>.from(await api.get('/live')));
+
+  @override
+  Future<LivestreamItem> liveDetail(String id) async => LivestreamItem.fromJson(
+      Map<String, dynamic>.from(await api.get('/live/$id')));
+
+  @override
+  Future<CreatorLiveData> liveCreator() async => CreatorLiveData.fromJson(
+      Map<String, dynamic>.from(await api.get('/live/creator/me')));
+
+  @override
+  Future<Map<String, dynamic>> liveApply({
+    required String displayName,
+    required String bio,
+  }) async => Map<String, dynamic>.from(await api.post('/live/creator/apply', {
+        'display_name': displayName,
+        'bio': bio,
+        'age_18': true,
+        'accept_terms': true,
+        'terms_version': 'live-creator-v1',
+      }));
+
+  @override
+  Future<LivestreamItem> liveStart({
+    required String title,
+    required String game,
+    required bool micConsent,
+  }) async => LivestreamItem.fromJson(Map<String, dynamic>.from(
+      await api.post('/live/start', {
+        'title': title,
+        'game': game,
+        'mic_consent': micConsent,
+        'recording_consent': true,
+        'safe_scene_ack': true,
+        'terms_version': 'live-broadcast-v1',
+      })));
+
+  @override
+  Future<String> liveWatch(String id) async =>
+      '${(await api.post('/live/$id/watch', const {}))['watch_url'] ?? ''}';
+
+  @override
+  Future<Map<String, dynamic>> liveTip(String id, {
+    required int amount,
+    required String clientId,
+    String message = '',
+  }) async => Map<String, dynamic>.from(await api.post('/live/$id/tip', {
+        'amount': amount,
+        'client_id': clientId,
+        if (message.isNotEmpty) 'message': message,
+      }));
+
+  @override
+  Future<LivestreamItem> liveEnd(String id) async => LivestreamItem.fromJson(
+      Map<String, dynamic>.from(await api.post('/live/$id/end', const {})));
+
+  @override
+  Future<Map<String, dynamic>> livePayout({required String clientId}) async => Map<String, dynamic>.from(
+      await api.post('/live/creator/payout', {'client_id': clientId}));
 
   @override
   Future<SesiMain> sesiMulai(String orderId) async =>
@@ -863,7 +946,7 @@ class MockRepository implements XyRepository {
       _delay(<String, dynamic>{'status': 'disetujui', 'saldo': 150000}, 300);
 
   @override
-  Future<UserProfile> perbaruiProfil({String? nama, String? phone, String? foto, bool? notifForum, bool? notifDm, String? bio, String? banner, String? username, String? bingkai, String? slogan, String? bioLink, String? gayaNama}) =>
+  Future<UserProfile> perbaruiProfil({String? nama, String? phone, String? foto, bool? notifForum, bool? notifDm, bool? notifLive, String? bio, String? banner, String? username, String? bingkai, String? slogan, String? bioLink, String? gayaNama}) =>
       _delay(MockData.user, 400);
 
   @override
@@ -964,6 +1047,67 @@ class MockRepository implements XyRepository {
 
   @override
   Future<void> hapusHudPublik(String id) async => _delay(null, 250);
+
+  // ---------- XyCloud Live (demo lokal) ----------
+  @override
+  Future<LiveCatalog> liveCatalog() async => _delay(LiveCatalog(
+        enabled: true,
+        streams: [LivestreamItem(
+          id: 'live_demo', creatorName: 'Ayu Gamer',
+          title: 'Rank push malam dari PC RTX', game: 'Valorant', status: 'live',
+          startedAt: DateTime.now().subtract(const Duration(minutes: 28)),
+          scheduledEnd: DateTime.now().add(const Duration(hours: 1)),
+          viewers: 128, grossTip: 185000,
+          shareUrl: 'https://api.xycloud.my.id/live/watch/live_demo', canWatch: true,
+        )],
+      ), 300);
+
+  @override
+  Future<LivestreamItem> liveDetail(String id) async => _delay(LivestreamItem(
+        id: id, creatorName: 'Ayu Gamer', title: 'Rank push malam dari PC RTX',
+        game: 'Valorant', status: 'live',
+        startedAt: DateTime.now().subtract(const Duration(minutes: 28)),
+        scheduledEnd: DateTime.now().add(const Duration(hours: 1)),
+        viewers: 128, grossTip: 185000,
+        shareUrl: 'https://api.xycloud.my.id/live/watch/$id', canWatch: true,
+      ), 250);
+
+  @override
+  Future<CreatorLiveData> liveCreator() async => _delay(const CreatorLiveData(
+        featureEnabled: true,
+        profile: {'status': 'approved', 'display_name': 'Pengguna Demo', 'payout_verified': 1},
+        earning: {'held': 64000, 'available': 125000, 'reserved': 0, 'paid': 350000, 'lifetime': 539000},
+      ), 250);
+
+  @override
+  Future<Map<String, dynamic>> liveApply({required String displayName, required String bio}) async =>
+      _delay({'ok': true, 'status': 'pending'}, 350);
+
+  @override
+  Future<LivestreamItem> liveStart({required String title, required String game, required bool micConsent}) async =>
+      _delay(LivestreamItem(
+        id: 'live_demo_baru', creatorId: MockData.user.id,
+        creatorName: MockData.user.nama, title: title, game: game,
+        status: 'starting', scheduledEnd: DateTime.now().add(const Duration(hours: 1)),
+        shareUrl: 'https://api.xycloud.my.id/live/watch/live_demo_baru', canWatch: true,
+      ), 500);
+
+  @override
+  Future<String> liveWatch(String id) async =>
+      'https://api.xycloud.my.id/live/watch/$id?demo=1';
+
+  @override
+  Future<Map<String, dynamic>> liveTip(String id, {required int amount, required String clientId, String message = ''}) async =>
+      _delay({'ok': true, 'saldo': (MockData.user.saldo - amount).clamp(0, 1 << 31)}, 300);
+
+  @override
+  Future<LivestreamItem> liveEnd(String id) async => _delay(LivestreamItem(
+        id: id, creatorId: MockData.user.id, creatorName: MockData.user.nama,
+        title: 'Siaran demo', game: 'Game', status: 'ending'), 300);
+
+  @override
+  Future<Map<String, dynamic>> livePayout({required String clientId}) async =>
+      _delay({'ok': true, 'id': 'pay_demo', 'amount': 125000, 'status': 'requested'}, 350);
 
   // ---------- sosial (Batch D) ----------
   @override

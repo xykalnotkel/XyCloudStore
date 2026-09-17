@@ -1732,6 +1732,37 @@ class _PengaturanNotifikasiScreenState extends State<PengaturanNotifikasiScreen>
                 width: 40,
                 height: 40,
                 decoration: BoxDecoration(color: XyTheme.of(context).primarySoft, borderRadius: BorderRadius.circular(14)),
+                child: Icon(Icons.live_tv_rounded, size: 20, color: XyTheme.primary),
+              ),
+              const SizedBox(width: 13),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('XyCloud Live', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+                  SizedBox(height: 3),
+                  Text('Kabar saat kreator yang kamu ikuti mulai live',
+                      style: TextStyle(color: XyTheme.of(context).muted, fontSize: 11.5, height: 1.4)),
+                ]),
+              ),
+              Switch(
+                value: u?.notifLive ?? true,
+                activeColor: XyTheme.primary,
+                onChanged: (v) async {
+                  final galat = await s.perbaruiProfil(notifLive: v);
+                  if (galat != null && context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(galat)));
+                  }
+                },
+              ),
+            ]),
+          ),
+          const SizedBox(height: 12),
+          XyCard(
+            padding: const EdgeInsets.fromLTRB(15, 6, 8, 6),
+            child: Row(children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(color: XyTheme.of(context).primarySoft, borderRadius: BorderRadius.circular(14)),
                 child: Icon(Icons.chat_bubble_outline_rounded, size: 20, color: XyTheme.primary),
               ),
               const SizedBox(width: 13),

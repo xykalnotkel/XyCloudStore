@@ -55,7 +55,7 @@ class PerawatanScreen extends StatelessWidget {
                     ),
                   ),
                   Image.asset(
-                    'assets/ilustrasi/maintenance.png',
+                    'assets/ilustrasi/maintenance.webp',
                     width: 176,
                     fit: BoxFit.contain,
                     errorBuilder: (_, __, ___) => const Icon(

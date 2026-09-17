@@ -1,4 +1,4 @@
-export const kanalPush = tipe => ['cs'].includes(tipe) ? 'xy_cs_v1' : ['order','sesi','wallet','akun'].includes(tipe) ? 'xy_orders_v1' : ['forum','balasan','suka','komunitas'].includes(tipe) ? 'xy_forum_v1' : ['promo','banner'].includes(tipe) ? 'xy_promo_v1' : 'xy_system_v1';
+export const kanalPush = tipe => ['cs'].includes(tipe) ? 'xy_cs_v1' : ['order','sesi','wallet','akun'].includes(tipe) ? 'xy_orders_v1' : ['livestream'].includes(tipe) ? 'xy_live_v1' : ['forum','balasan','suka','komunitas'].includes(tipe) ? 'xy_forum_v1' : ['promo','banner'].includes(tipe) ? 'xy_promo_v1' : 'xy_system_v1';
 /**
  * ============================================================
  *  XyCloudStore - Push notification (OneSignal)
@@ -44,9 +44,12 @@ export async function kirimPush(env, { userId, judul, pesan, data, url, tombol, 
     ...(url ? { url } : {}),
   };
 
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10_000);
   try {
     const r = await fetch('https://api.onesignal.com/notifications', {
       method: 'POST',
+      signal: controller.signal,
       headers: {
         Authorization: `Key ${env.ONESIGNAL_API_KEY}`,
         'Content-Type': 'application/json',
@@ -56,7 +59,66 @@ export async function kirimPush(env, { userId, judul, pesan, data, url, tombol, 
     const j = await r.json().catch(() => ({}));
     return r.ok && !j.errors ? { ok: true, id: j.id } : { ok: false, alasan: JSON.stringify(j.errors || j) };
   } catch (e) {
-    return { ok: false, alasan: String(e) };
+    return { ok: false, alasan: e?.name === 'AbortError' ? 'timeout OneSignal' : String(e) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Satu request OneSignal untuk sekumpulan external_id. Dipakai fan-out follower
+ * agar satu kreator live tidak menghasilkan ratusan subrequest Worker.
+ * `idempotencyKey`, bila ada, harus UUID RFC 9562 yang disimpan di outbox dan
+ * dipakai ulang pada retry. OneSignal menahan kunci itu selama 30 hari.
+ */
+export async function kirimPushBanyak(env, {
+  userIds, judul, pesan, data, url, gambar, idempotencyKey,
+}) {
+  const ids = [...new Set((Array.isArray(userIds) ? userIds : [])
+    .map((x) => String(x || '')).filter(Boolean))].slice(0, 10_000);
+  if (!env.ONESIGNAL_APP_ID || !env.ONESIGNAL_API_KEY || !ids.length) {
+    return { ok: false, alasan: 'kredensial/target OneSignal belum tersedia' };
+  }
+  const kunci = String(idempotencyKey || '').trim().toLowerCase();
+  if (kunci && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(kunci)) {
+    return { ok: false, alasan: 'idempotency key push tidak valid' };
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10_000);
+  try {
+    const r = await fetch('https://api.onesignal.com/notifications', {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        Authorization: `Key ${env.ONESIGNAL_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        app_id: env.ONESIGNAL_APP_ID,
+        include_aliases: { external_id: ids },
+        target_channel: 'push',
+        headings: { en: judul, id: judul },
+        contents: { en: pesan, id: pesan },
+        android_accent_color: `FF${UNGU}`,
+        existing_android_channel_id: kanalPush(data?.tipe),
+        small_icon: 'ic_stat_onesignal_default',
+        ...(gambar ? { image: String(gambar) } : {}),
+        data: data || {},
+        ...(url ? { url } : {}),
+        ...(kunci ? { idempotency_key: kunci } : {}),
+      }),
+    });
+    const j = await r.json().catch(() => ({}));
+    // HTTP 2xx berarti operasi logis telah diproses. `id` dapat kosong jika
+    // semua alias sedang tidak berlangganan; itu bukan alasan mengulang event.
+    // Partial alias errors juga tidak boleh memicu pengiriman kedua.
+    return r.ok
+      ? { ok: true, id: j.id || null, peringatan: j.errors || null }
+      : { ok: false, alasan: JSON.stringify(j.errors || j), retryAfter: r.headers.get('retry-after') || null };
+  } catch (e) {
+    return { ok: false, alasan: e?.name === 'AbortError' ? 'timeout OneSignal' : String(e) };
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -65,9 +127,12 @@ export async function siarkanPush(env, { judul, pesan, data }) {
   if (!env.ONESIGNAL_APP_ID || !env.ONESIGNAL_API_KEY) {
     return { ok: false, alasan: 'kredensial OneSignal belum diatur' };
   }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10_000);
   try {
     const r = await fetch('https://api.onesignal.com/notifications', {
       method: 'POST',
+      signal: controller.signal,
       headers: {
         Authorization: `Key ${env.ONESIGNAL_API_KEY}`,
         'Content-Type': 'application/json',
@@ -87,6 +152,8 @@ export async function siarkanPush(env, { judul, pesan, data }) {
     const j = await r.json().catch(() => ({}));
     return r.ok && !j.errors ? { ok: true, id: j.id } : { ok: false, alasan: JSON.stringify(j.errors || j) };
   } catch (e) {
-    return { ok: false, alasan: String(e) };
+    return { ok: false, alasan: e?.name === 'AbortError' ? 'timeout OneSignal' : String(e) };
+  } finally {
+    clearTimeout(timer);
   }
 }

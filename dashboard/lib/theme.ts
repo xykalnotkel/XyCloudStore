@@ -104,6 +104,7 @@ export const MENU: { id: string; label: string; icon: MenuIcon; path: string; ba
   { id: "unit", label: "Unit PC", icon: "cpu", path: "/unit" },
   { id: "sesi", label: "Sesi PC", icon: "sesi", path: "/sesi", badge: "BARU" },
   { id: "live", label: "Live Monitor", icon: "activity", path: "/live" },
+  { id: "livestream", label: "XyCloud Live", icon: "activity", path: "/livestream", badge: "BARU" },
   { id: "security", label: "Security", icon: "shield-check", path: "/security" },
   { id: "perangkat", label: "Perangkat", icon: "smartphone", path: "/perangkat" },
   { id: "keuangan", label: "Keuangan", icon: "wallet", path: "/keuangan" },

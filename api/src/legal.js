@@ -51,10 +51,12 @@ const PRIVASI = [
    'Data dipakai untuk memproses pesanan, memverifikasi pembayaran, mengirim kredensial akun, menjawab pertanyaanmu, ' +
    'serta mengirim pemberitahuan penting mengenai pesanan. Kami tidak menjual data pribadi kepada siapa pun.'],
   ['Moderasi Konten Berbantuan AI',
-   'Teks yang sengaja kamu publikasikan, seperti diskusi, komentar, ulasan, profil, atau preset HUD publik, dapat diperiksa oleh filter lokal dan layanan AI Grok melalui OpenRouter bila fitur diaktifkan. Pesan privat dan Chat Admin tidak dikirim untuk klasifikasi AI. Permintaan upstream mewajibkan zero-data-retention dan menolak penyedia yang mengumpulkan data. Basis data kami hanya menyimpan HMAC konten dan metadata verdict maksimal 90 hari, bukan prompt, teks, atau respons mentah. AI tidak menjatuhkan sanksi akun; keputusan dapat dilaporkan atau ditinjau moderator.'],
+   'Teks yang sengaja kamu publikasikan, seperti diskusi, komentar, ulasan, profil, atau preset HUD publik, dapat diperiksa oleh filter lokal dan layanan AI Grok melalui OpenRouter atau model keselamatan melalui GroqCloud bila provider tersebut dipilih dan Zero Data Retention telah dikonfirmasi, jika fitur diaktifkan. Pesan privat dan Chat Admin tidak dikirim untuk klasifikasi AI. Permintaan upstream mewajibkan zero-data-retention dan menolak penyedia yang mengumpulkan data. Basis data kami hanya menyimpan HMAC konten dan metadata verdict maksimal 90 hari, bukan prompt, teks, atau respons mentah. AI tidak menjatuhkan sanksi akun; keputusan dapat dilaporkan atau ditinjau moderator.'],
+  ['Livestream dan Rekaman Gameplay',
+   'Jika kamu memilih XyCloud Live, OBS pada PC rental menangkap Game Capture dan audio game; mic hanya ditangkap setelah persetujuan eksplisit. Kami memproses judul, game, waktu siaran, status scene/ingest, congestion, frame terlewat, jumlah penonton, dukungan, serta rekaman gameplay maksimal 30 hari untuk player, diagnostik, sengketa, dan moderasi. Stream key diambil agen langsung dari penyedia dan tidak disimpan di D1, command, ACK, atau log aplikasi. Pengikut yang mengizinkan dapat menerima notifikasi saat kreator mulai live.'],
   ['Layanan Pihak Ketiga',
-   'Kami memakai Cloudflare (server dan basis data), Resend (pengiriman email), OneSignal (notifikasi), ' +
-   'Cloudinary (penyimpanan gambar), Pakasir (pembayaran), Google Sign-In, Facebook Login (login opsional), dan OpenRouter/xAI (moderasi teks publik bila diaktifkan). ' +
+   'Kami memakai Cloudflare (server, basis data, dan Stream untuk livestream/rekaman), Resend (pengiriman email), OneSignal (notifikasi), ' +
+   'Cloudinary (penyimpanan gambar), Pakasir (pembayaran), Google Sign-In, Facebook Login (login opsional), serta OpenRouter/xAI atau GroqCloud (moderasi teks publik bila dipilih dan diaktifkan). ' +
    'Masing-masing hanya menerima data seperlunya untuk menjalankan fungsinya. Token akses sosial tidak disimpan oleh kami.'],
   ['Keamanan',
    'Password disimpan dalam bentuk hash SHA-256 dengan garam acak, tidak pernah dalam bentuk teks biasa. ' +
@@ -71,6 +73,29 @@ const PRIVASI = [
    'layanan dengan pendampingan orang tua atau wali.'],
   ['Perubahan Kebijakan',
    'Kebijakan ini dapat diperbarui. Tanggal pembaruan terakhir selalu tertera di bagian atas halaman.'],
+];
+
+const LIVE = [
+  ['Kelayakan dan Persetujuan',
+   'Program kreator XyCloud Live hanya untuk pemilik akun berusia sekurang-kurangnya 18 tahun yang disetujui admin. Setiap siaran memerlukan sesi PC rental aktif, persetujuan perekaman, pengakuan scene aman, dan versi ketentuan siaran yang berlaku. Persetujuan kreator dapat ditolak atau ditangguhkan dengan alasan tertulis.'],
+  ['Ruang Lingkup Tangkapan dan Mic',
+   'Agen hanya diizinkan memakai OBS 30.1 atau lebih baru dengan Game Capture pada scene XyCloudLive. Audio game ditangkap terisolasi dari source Game Capture; Display Capture, Window Capture, Browser Capture, source asing, serta perangkat audio global dilarang dan memicu penghentian fail-closed. Mic mati secara default dan hanya boleh hidup setelah persetujuan eksplisit apabila source XyCloudMic aman sudah disiapkan operator. Kreator tetap wajib menutup notifikasi, kredensial, percakapan pribadi, dan data sensitif sebelum tayang.'],
+  ['Konten, Hak, dan Moderasi',
+   'Kreator hanya boleh menyiarkan game dan materi yang secara hukum boleh digunakan. Dilarang menampilkan kekerasan seksual, eksploitasi anak, perjudian ilegal, kebencian, doxxing, penipuan, pelanggaran hak cipta, cheat berbahaya, atau aktivitas melawan hukum. Judul, game, dan pesan publik diperiksa filter/moderasi; laporan penonton dapat ditinjau manusia. Sistem dapat langsung memutus ingest untuk melindungi pengguna atau platform.'],
+  ['Player, Rekaman, dan Retensi',
+   'Player diterbitkan melalui Cloudflare Stream dan memerlukan tiket pengguna XyCloudStore yang singkat serta terlacak. Kunjungan tautan publik hanya menampilkan teaser. Siaran dapat direkam untuk replay, keamanan, sengketa, dan moderasi lalu dihapus maksimal 30 hari setelah dibuat, kecuali salinan wajib dipertahankan lebih lama karena proses hukum atau investigasi. Jumlah penonton dan diagnostik teknis dicatat secara terbatas.'],
+  ['Dukungan dan Bagian Kreator',
+   'Penonton dapat mengirim dukungan dari saldo aplikasi dalam batas yang ditampilkan. Biaya platform dan bagian bersih kreator dihitung serta ditampilkan sebelum/di ledger; nilai awal biaya platform adalah 20 persen dan dapat berubah untuk siaran berikutnya setelah pemberitahuan. Kreator tidak boleh mendukung akun sendiri, mengatur transaksi palsu, membeli engagement, atau memaksa penonton membayar. Dukungan bukan investasi, taruhan, atau pembelian kepemilikan.'],
+  ['Hold, Anti-Fraud, dan Payout',
+   'Bagian kreator ditahan selama tujuh hari sebelum tersedia untuk menampung pemeriksaan fraud/refund. Payout hanya dapat diminta setelah metode penerima diverifikasi admin dan minimum payout terpenuhi. Permintaan direservasi, ditinjau pemilik, lalu ditandai dibayar hanya setelah transfer eksternal berhasil. Kreator bertanggung jawab atas pajak dan keakuratan identitas penerima sesuai hukum yang berlaku. Jangan mengirim nomor rekening lengkap melalui forum atau profil publik.'],
+  ['Pembatalan dan Pengembalian Dukungan',
+   'Dukungan yang sah pada umumnya final sebagai transfer saldo. Admin dapat membalik dukungan yang masih held/available bila terjadi transaksi duplikat, pengambilalihan akun, fraud, kesalahan sistem, atau pelanggaran; saldo penonton dikembalikan dan earning kreator dibatalkan dengan alasan audit. Earning yang sudah masuk payout memerlukan pemeriksaan manual dan tidak dibalik otomatis.'],
+  ['Ketersediaan dan Batas Biaya',
+   'Livestream adalah fitur rollout berbiaya dan dapat dimatikan, dibatasi durasi, dibatasi jumlah siaran bersamaan, atau dihentikan sewaktu-waktu untuk keamanan, pemeliharaan, dan kontrol biaya. Gangguan internet, OBS, PC rental, atau penyedia upstream dapat menurunkan kualitas atau mengakhiri siaran. Status diagnostik di aplikasi bersifat bantuan teknis, bukan jaminan kualitas tanpa putus.'],
+  ['Notifikasi Pengikut dan Berbagi',
+   'Saat siaran berhasil aktif, pengikut yang mengizinkan notifikasi XyCloud Live dapat menerima pemberitahuan. Kreator boleh membagikan tautan teaser resmi, tetapi dilarang membagikan stream key, credential OBS, tiket player, atau cara melewati autentikasi. Preferensi notifikasi dapat dimatikan dari aplikasi atau pengaturan channel Android.'],
+  ['Pengakhiran Program dan Kontak',
+   'Sesi rental berakhir, akun dibekukan, pelanggaran scene/konten, atau keputusan admin akan mengakhiri siaran dan menonaktifkan Live Input. Kewajiban payout yang sah tetap diselesaikan sesuai ledger, sedangkan transaksi bermasalah dapat ditahan selama investigasi. Banding dan pertanyaan disampaikan melalui Chat Admin dengan kode siaran, tanpa mengirim rahasia akun atau data rekening lengkap.'],
 ];
 
 const REFUND = [
@@ -104,6 +129,8 @@ const REFUND = [
    'Refund tidak diberikan untuk: perubahan pikiran setelah layanan dipakai normal, pelanggaran aturan (termasuk ' +
    'pemakaian untuk aktivitas ilegal), akun yang dinonaktifkan karena pelanggaran, voucher/promo yang sudah dipakai, ' +
    'dan kendala akibat force majeure di luar kendali kami yang diberitahukan melalui aplikasi.'],
+  ['Dukungan XyCloud Live',
+   'Dukungan saldo kepada kreator pada umumnya final. Pengembalian hanya dapat dilakukan sebelum earning masuk payout bila ada duplikasi, pengambilalihan akun, fraud, kegagalan sistem, atau pelanggaran yang terverifikasi. Admin mencatat alasan; saldo penonton dikembalikan dan earning kreator dibatalkan secara atomik. Gangguan player atau kualitas jaringan tanpa pemotongan saldo tidak menghasilkan refund dukungan.'],
   ['Kontak',
    'Pertanyaan soal pengembalian dana bisa disampaikan lewat Chat Admin di aplikasi. Keputusan refund selalu ' +
    'disertai alasan tertulis yang bisa kamu lihat di riwayat transaksi.'],
@@ -131,6 +158,7 @@ export const LISENSI = [
   ['Cloudinary', 'Cloudinary Ltd.', 'layanan berlangganan'],
   ['Pakasir', 'Pakasir', 'layanan pembayaran'],
   ['OpenRouter dan Grok', 'OpenRouter / xAI', 'layanan AI opsional'],
+  ['GroqCloud', 'Groq, Inc.', 'layanan inferensi AI opsional dengan ZDR'],
   ['Material Symbols', 'Google', 'Apache-2.0'],
 ];
 
@@ -138,8 +166,9 @@ export const LISENSI = [
 export function halamanLegal(jenis) {
   const judul = jenis === 'privasi' ? 'Kebijakan Privasi'
     : jenis === 'refund' ? 'Kebijakan Pengembalian Dana'
+    : jenis === 'live' ? 'Ketentuan Kreator XyCloud Live'
     : 'Syarat dan Ketentuan';
-  const isi = jenis === 'privasi' ? PRIVASI : jenis === 'refund' ? REFUND : SYARAT;
+  const isi = jenis === 'privasi' ? PRIVASI : jenis === 'refund' ? REFUND : jenis === 'live' ? LIVE : SYARAT;
 
   const bagian = isi
     .map(
@@ -201,6 +230,7 @@ export function halamanLegal(jenis) {
       <a href="/legal/syarat">Syarat dan Ketentuan</a>
       <a href="/legal/privasi">Kebijakan Privasi</a>
       <a href="/legal/refund">Pengembalian Dana</a>
+      <a href="/legal/live">Ketentuan XyCloud Live</a>
     </div>
   </main>
   <footer>XyCloudStore &middot; Sewa PC Cloud dan Akun Digital &middot; xycloud.my.id</footer>
@@ -209,10 +239,11 @@ export function halamanLegal(jenis) {
 
 /** Versi data mentah untuk ditampilkan di dalam aplikasi. */
 export function isiLegal(jenis) {
-  const isi = jenis === 'privasi' ? PRIVASI : jenis === 'refund' ? REFUND : SYARAT;
+  const isi = jenis === 'privasi' ? PRIVASI : jenis === 'refund' ? REFUND : jenis === 'live' ? LIVE : SYARAT;
   return {
     judul: jenis === 'privasi' ? 'Kebijakan Privasi'
       : jenis === 'refund' ? 'Kebijakan Pengembalian Dana'
+      : jenis === 'live' ? 'Ketentuan Kreator XyCloud Live'
       : 'Syarat dan Ketentuan',
     pembaruan: PEMBARUAN,
     bagian: isi.map(([judul, teks]) => ({ judul, teks })),

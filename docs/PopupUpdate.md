@@ -325,9 +325,9 @@ Font:
 Struktur:
 ```
 app/assets/ilustrasi/
-  rilis_popup.png
-  rilis_popup_ramadan.png
-  rilis_popup_idulfitri.png
+  rilis_popup.webp
+  rilis_popup_ramadan.webp
+  rilis_popup_idulfitri.webp
   ...
 api/src/assets/
   popup-update.png (928×1152)

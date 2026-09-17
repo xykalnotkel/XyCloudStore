@@ -93,7 +93,7 @@ Struktur:
 - Console → Sistem: kartu **Mode pemeliharaan bertingkat** dengan 3 kartu pilih cakupan +
   keterangan + pesan. `statistikLengkap` kini mengekspos `cakupanPemeliharaan`.
 - Ilustrasi dipasang: web → `api/src/assets/maintenance-web.png` (+ route `/brand/`),
-  app → `app/assets/ilustrasi/maintenance.png`; `PerawatanScreen` Flutter kini menampilkan
+  app → `app/assets/ilustrasi/maintenance.webp`; `PerawatanScreen` Flutter kini menampilkan
   ilustrasi 3D (dengan fallback ikon bila aset gagal dimuat).
 - Preview visual: `preview/maint-web-preview.html`.
 - **Cara uji sebelum produksi:** `cd api && npm i && npx wrangler dev`, lalu:

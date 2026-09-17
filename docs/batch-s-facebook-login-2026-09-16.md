@@ -20,13 +20,17 @@ Mengaudit serta menyiapkan Facebook Login agar setara dengan Google tanpa menyim
 - Email sintetis `@facebook.local` dihapus. Facebook tanpa email valid diarahkan untuk mengizinkan email atau memakai email/password.
 - Penolakan email baru memakai `auth_type=rerequest` pada percobaan berikutnya, setelah aplikasi menampilkan alasan (education message).
 - Halaman callback di-escape, memakai no-referrer, dan cookie state dibersihkan.
+- Long-lived token tidak lagi ditempatkan pada custom-scheme URI. Callback hanya membawa code acak 64-hex selama 2 menit; D1 menyimpan keyed hash-nya, terikat ke install identity pemulai OAuth.
+- App membuat verifier acak PKCE-style; browser hanya melihat challenge SHA-256 base64url. Aplikasi menukar code + verifier melalui `POST /api/auth/social/exchange` di HTTPS.
+- Exchange dibatasi lima replay identik untuk toleransi respons jaringan hilang dan menghasilkan token deterministik yang sama; verifier/device mismatch, expiry, atau perubahan `session_version` ditolak.
 
 ### Identitas sosial stabil
 
-Migration `0017_social_identity_facebook.sql` menambah:
+Migration `0017_social_identity_facebook.sql` menambah identity/deletion, lalu `0021_oauth_handoff.sql` menambah handoff browser yang aman:
 
 - `social_identity`: primary key `(provider, provider_user_hash)` dan unique `(provider, user_id)`;
-- `social_deletion_request`: status asynchronous deletion dengan confirmation code yang hanya disimpan sebagai HMAC.
+- `social_deletion_request`: status asynchronous deletion dengan confirmation code yang hanya disimpan sebagai HMAC;
+- `oauth_handoffs`: hanya keyed hash code, challenge SHA-256, provider, user, device hash, snapshot `session_version`, hitungan replay maksimal lima, dan expiry 2 menit—tanpa verifier, access token, atau provider ID mentah.
 
 ID Google/Facebook mentah tidak masuk D1. Hash app-scoped dibuat dengan `securityHash`. Akun sosial lama berbasis email akan ditautkan saat login berikutnya; tidak mungkin di-backfill sebelum provider mengembalikan `sub/id`.
 

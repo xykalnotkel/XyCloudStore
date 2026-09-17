@@ -49,14 +49,14 @@ Versi app: **3.6.0+24** · Worker: tanpa migrasi baru (tetap s.d. 0011) · Agen:
 - App: `UnitLive` model + `repository.unitLive()`; `live_unit_screen.dart`
   digabung per planId (online+spec menang): hostname/CPU/RAM/GPU nyata saat agen
   hidup, chip "Spek terdeteksi" & "agen vX", catatan bila agen diam,
-  RefreshIndicator; ikon pakai `assets/ikon/3d_unitpc.png` (AI-generated).
+  RefreshIndicator; ikon pakai `assets/ikon/3d_unitpc.webp` (AI-generated).
 
 ## 8. Home: kartu kategori grid
 - `_MenuCepat.kartu()` dibungkus Container halus (bg violet 5% / white 4,5% dark,
   border tipis) — label lebih terbaca tanpa norak.
 
 ## 9. Ilustrasi AI untuk blokir & maintenance
-- `assets/ilustrasi/blokir.png` (AI-generated) jadi hero di `blokir_screen.dart`.
+- `assets/ilustrasi/blokir.webp` (AI-generated) jadi hero di `blokir_screen.dart`.
 - `perawatan_screen.dart` sudah memakai `maintenance.png` ✓.
 
 ## 10. Komunitas disempurnakan

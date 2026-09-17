@@ -2,11 +2,15 @@ import { periksaTeks } from './moderasi.js';
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const OPENROUTER_KEY_URL = 'https://openrouter.ai/api/v1/auth/key';
+const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
+const GROQ_MODELS_URL = 'https://api.groq.com/openai/v1/models';
 const MODEL_BAWAAN = 'x-ai/grok-4.3';
+const MODEL_GROQ_BAWAAN = 'llama-3.3-70b-versatile';
 const VERSI_KEBIJAKAN = 'xy-safe-v1';
 const MODE_VALID = new Set(['off', 'shadow', 'enforce']);
 const KONTEKS_VALID = new Set([
   'forum_post', 'forum_reply', 'forum_edit', 'hud_preset', 'profile', 'review_pc', 'review_product',
+  'livestream',
 ]);
 const KATEGORI_VALID = new Set([
   'safe', 'spam', 'harassment', 'hate', 'sexual', 'minor_safety', 'violence', 'self_harm',
@@ -33,9 +37,31 @@ function kodeGalat(status) {
   return `HTTP_${status}`;
 }
 
+function providerUntuk(env) {
+  return String(env.AI_MODERATION_PROVIDER || 'openrouter').toLowerCase() === 'groq'
+    ? 'groq' : 'openrouter';
+}
+
 function modelUntuk(env) {
-  const model = String(env.AI_MODERATION_MODEL || MODEL_BAWAAN).trim();
-  return /^[a-z0-9._-]+\/[a-z0-9._:-]{2,100}$/i.test(model) ? model : MODEL_BAWAAN;
+  const provider = providerUntuk(env);
+  const fallback = provider === 'groq' ? MODEL_GROQ_BAWAAN : MODEL_BAWAAN;
+  const model = String(env.AI_MODERATION_MODEL || fallback).trim();
+  const valid = provider === 'groq'
+    // Groq juga memakai ID bernamespace, mis. meta-llama/llama-4-….
+    ? model.length >= 3 && model.length <= 120
+      && /^[a-z0-9][a-z0-9._:-]*(?:\/[a-z0-9][a-z0-9._:-]*)*$/i.test(model)
+    : /^[a-z0-9._-]+\/[a-z0-9._:-]{2,100}$/i.test(model);
+  return valid ? model : fallback;
+}
+
+function providerSiap(env) {
+  if (providerUntuk(env) === 'groq') {
+    // ZDR Groq adalah kontrol organisasi di Console, bukan parameter request.
+    // Fail closed agar konten publik tidak dikirim bila pemilik belum
+    // mengonfirmasi Data Controls tersebut.
+    return Boolean(env.GROQ_API_KEY) && String(env.GROQ_ZDR_CONFIRMED || '') === '1';
+  }
+  return Boolean(env.OPENROUTER_API_KEY);
 }
 
 async function modeUntuk(env) {
@@ -209,6 +235,77 @@ async function panggilOpenRouter(env, teks, konteks) {
   }
 }
 
+async function panggilGroq(env, teks, konteks) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 6500);
+  const mulai = Date.now();
+  const model = modelUntuk(env);
+  try {
+    const response = await fetch(GROQ_URL, {
+      method: 'POST', signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${env.GROQ_API_KEY}`,
+        'Content-Type': 'application/json',
+        'User-Agent': 'XyCloudStore-Worker/1.0',
+      },
+      body: JSON.stringify({
+        model, temperature: 0, max_completion_tokens: 180, stream: false,
+        response_format: { type: 'json_object' },
+        messages: [
+          {
+            role: 'system',
+            content: `${promptSistem()}\nSchema wajib: {"verdict":"allow|review|block","category":"safe|spam|harassment|hate|sexual|minor_safety|violence|self_harm|illegal|scam|personal_data|other","severity":0,"confidence":0.0,"reason_code":"NONE|PROFANITY|SPAM|HARASSMENT|HATE|SEXUAL|MINOR_SAFETY|VIOLENCE|SELF_HARM|ILLEGAL|SCAM|PERSONAL_DATA|OTHER"}`,
+          },
+          { role: 'user', content: JSON.stringify({ konteks, teks: String(teks).slice(0, 12_000) }) },
+        ],
+      }),
+    });
+    const latencyMs = Date.now() - mulai;
+    if (!response.ok) {
+      try { await response.body?.cancel(); } catch (_) { /* noop */ }
+      return { ok: false, errorCode: kodeGalat(response.status), latencyMs, model };
+    }
+    const panjang = Number(response.headers.get('content-length') || 0);
+    if (panjang > 64_000) {
+      try { await response.body?.cancel(); } catch (_) { /* noop */ }
+      return { ok: false, errorCode: 'RESPONSE_TOO_LARGE', latencyMs, model };
+    }
+    const rawText = await response.text();
+    if (rawText.length > 64_000) return { ok: false, errorCode: 'RESPONSE_TOO_LARGE', latencyMs, model };
+    let payload;
+    try { payload = JSON.parse(rawText); } catch (_) {
+      return { ok: false, errorCode: 'INVALID_PROVIDER_JSON', latencyMs, model };
+    }
+    const content = payload?.choices?.[0]?.message?.content;
+    if (typeof content !== 'string' || content.length > 4000) {
+      return { ok: false, errorCode: 'INVALID_MODEL_OUTPUT', latencyMs, model };
+    }
+    let parsed;
+    try { parsed = JSON.parse(content.replace(/^```(?:json)?\s*|\s*```$/gi, '')); } catch (_) {
+      return { ok: false, errorCode: 'INVALID_MODEL_OUTPUT', latencyMs, model };
+    }
+    return {
+      ok: true, ...bersihkanHasil(parsed), latencyMs,
+      model: String(payload?.model || model).slice(0, 120),
+      promptTokens: potongAngka(payload?.usage?.prompt_tokens, 0, 1_000_000, 0),
+      completionTokens: potongAngka(payload?.usage?.completion_tokens, 0, 1_000_000, 0),
+    };
+  } catch (e) {
+    return {
+      ok: false, errorCode: e?.name === 'AbortError' ? 'TIMEOUT' : 'NETWORK',
+      latencyMs: Date.now() - mulai, model,
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function panggilAi(env, teks, konteks) {
+  return providerUntuk(env) === 'groq'
+    ? panggilGroq(env, teks, konteks)
+    : panggilOpenRouter(env, teks, konteks);
+}
+
 /**
  * Filter deterministik selalu berjalan. AI hanya menerima konten publik ketika
  * mode shadow/enforce aktif. Gangguan AI fail-open setelah filter lokal, agar
@@ -224,7 +321,9 @@ export async function periksaKontenPublik(env, {
   const input = String(teks || '').trim();
   const konteksAman = KONTEKS_VALID.has(konteks) ? konteks : 'forum_post';
   const lokal = periksaTeks(input, opt);
-  const hash = input ? await hmacHex(env, `${VERSI_KEBIJAKAN}|${konteksAman}|${input}`) : null;
+  const hash = input
+    ? await hmacHex(env, `${VERSI_KEBIJAKAN}|${providerUntuk(env)}|${modelUntuk(env)}|${konteksAman}|${input}`)
+    : null;
 
   if (!lokal.ok) {
     await catatEvent(env, {
@@ -238,10 +337,11 @@ export async function periksaKontenPublik(env, {
   const mode = await modeUntuk(env);
   if (mode === 'off') return lokal;
   const model = modelUntuk(env);
-  if (!env.OPENROUTER_API_KEY || !hash) {
+  if (!providerSiap(env) || !hash) {
     await catatEvent(env, {
       userId, konteks: konteksAman, hash, mode, sumber: 'ai', verdict: 'error',
-      errorCode: env.OPENROUTER_API_KEY ? 'HASH_UNAVAILABLE' : 'MISSING_KEY', model,
+      errorCode: providerSiap(env) ? 'HASH_UNAVAILABLE'
+        : (providerUntuk(env) === 'groq' && env.GROQ_API_KEY ? 'GROQ_ZDR_NOT_CONFIRMED' : 'MISSING_KEY'), model,
     });
     return { ok: true, ai: { status: 'unavailable' } };
   }
@@ -272,7 +372,7 @@ export async function periksaKontenPublik(env, {
     // Cache adalah optimasi; kegagalannya tidak boleh melewati filter lokal.
   }
 
-  const hasil = await panggilOpenRouter(env, input, konteksAman);
+  const hasil = await panggilAi(env, input, konteksAman);
   if (!hasil.ok) {
     await catatEvent(env, {
       userId, konteks: konteksAman, hash, mode, sumber: 'ai', verdict: 'error',
@@ -316,27 +416,37 @@ export async function periksaKontenPublik(env, {
 
 export async function statusModerasiAi(env) {
   const mode = await modeUntuk(env);
+  const provider = providerUntuk(env);
   return {
-    provider: 'openrouter',
+    provider,
     model: modelUntuk(env),
     mode,
-    key_configured: Boolean(env.OPENROUTER_API_KEY),
-    privacy: { data_collection: 'deny', zero_data_retention: true },
+    key_configured: provider === 'groq' ? Boolean(env.GROQ_API_KEY) : Boolean(env.OPENROUTER_API_KEY),
+    provider_ready: providerSiap(env),
+    privacy: {
+      data_collection: 'deny', zero_data_retention: providerSiap(env),
+      confirmation_required: provider === 'groq' ? 'GROQ_ZDR_CONFIRMED=1' : null,
+    },
     enforcement: mode === 'enforce',
     fail_policy: 'local-filter-then-ai-fail-open',
     stores_raw_content: false,
   };
 }
 
-/** Verifikasi credential tanpa mengirim konten dan tanpa mengembalikan metadata akun. */
+/** Verifikasi credential provider aktif tanpa mengirim konten pengguna. */
 export async function verifikasiOpenRouter(env) {
-  if (!env.OPENROUTER_API_KEY) return { ok: false, code: 'MISSING_KEY' };
+  const provider = providerUntuk(env);
+  const key = provider === 'groq' ? env.GROQ_API_KEY : env.OPENROUTER_API_KEY;
+  if (!key) return { ok: false, code: 'MISSING_KEY' };
+  if (provider === 'groq' && String(env.GROQ_ZDR_CONFIRMED || '') !== '1') {
+    return { ok: false, code: 'GROQ_ZDR_NOT_CONFIRMED' };
+  }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 5000);
   try {
-    const r = await fetch(OPENROUTER_KEY_URL, {
+    const r = await fetch(provider === 'groq' ? GROQ_MODELS_URL : OPENROUTER_KEY_URL, {
       headers: {
-        Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
+        Authorization: `Bearer ${key}`,
         'User-Agent': 'XyCloudStore-Worker/1.0',
       },
       signal: controller.signal,

@@ -1,3 +1,5 @@
+export 'livestream.dart';
+
 import '../core/waktu.dart';
 import 'stiker.dart';
 import 'dart:convert';
@@ -79,6 +81,9 @@ class UserProfile {
   /// Terima pemberitahuan pesan langsung (DM).
   final bool notifDm;
 
+  /// Terima pemberitahuan saat kreator yang diikuti mulai livestream.
+  final bool notifLive;
+
   /// Batch L: slogan pendek di bawah nama (maks 60 huruf).
   final String? slogan;
 
@@ -116,6 +121,7 @@ class UserProfile {
     this.pinTransferAktif = false,
     this.notifForum = true,
     this.notifDm = true,
+    this.notifLive = true,
     this.slogan,
     this.bioLink,
     this.gayaNama,
@@ -147,6 +153,7 @@ class UserProfile {
         pinTransferAktif: (j['pin_transfer_aktif'] ?? 0) == 1,
         notifForum: (j['notif_forum'] ?? 1) == 1,
         notifDm: (j['notif_dm'] ?? 1) == 1,
+        notifLive: (j['notif_live'] ?? 1) == 1,
         slogan: (j['slogan'] as String?)?.isNotEmpty == true ? j['slogan'] : null,
         bioLink: (j['bio_link'] as String?)?.isNotEmpty == true ? j['bio_link'] : null,
         gayaNama: (j['gaya_nama'] as String?)?.isNotEmpty == true ? j['gaya_nama'] : null,
@@ -184,6 +191,7 @@ class UserProfile {
         'pin_transfer_aktif': pinTransferAktif ? 1 : 0,
         'notif_forum': notifForum ? 1 : 0,
         'notif_dm': notifDm ? 1 : 0,
+        'notif_live': notifLive ? 1 : 0,
         'slogan': slogan,
         'bio_link': bioLink,
         'gaya_nama': gayaNama,
@@ -211,6 +219,7 @@ class UserProfile {
         pinTransferAktif: pinTransferAktif ?? this.pinTransferAktif,
         notifForum: notifForum,
         notifDm: notifDm,
+        notifLive: notifLive,
         slogan: slogan ?? this.slogan,
         bioLink: bioLink ?? this.bioLink,
         gayaNama: gayaNama ?? this.gayaNama,

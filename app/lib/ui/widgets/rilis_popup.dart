@@ -7,8 +7,8 @@ import '../screens/pembaruan_screen.dart';
 ///  RilisPopup — popup saat ada versi baru (Violet-Indigo Glossy v3.2)
 /// ============================================================
 ///  Sistem theming popup:
-///  - Gambar default: assets/ilustrasi/rilis_popup.png (violet-indigo glossy)
-///  - Varian tema: rilis_popup_{tema}.png (misal ramadan, idulfitri, natal, tahunbaru)
+///  - Gambar default: assets/ilustrasi/rilis_popup.webp (violet-indigo glossy)
+///  - Varian tema: rilis_popup_{tema}.webp (misal ramadan, idulfitri, natal, tahunbaru)
 ///  - Prioritas: 1) gambar dari server (rilis.gambar), 2) aset tema lokal, 3) default
 ///  - Tombol X putih glossy di pojok kanan atas → buka PembaruanScreen
 ///
@@ -45,7 +45,7 @@ class RilisPopup extends StatelessWidget {
   final Map<String, dynamic>? rilis;
 
   String _assetUntukTema(String? tema) {
-    if (tema == null || tema.isEmpty) return 'assets/ilustrasi/rilis_popup.png';
+    if (tema == null || tema.isEmpty) return 'assets/ilustrasi/rilis_popup.webp';
     final t = tema.toLowerCase().trim();
     // Daftar tema yang didukung (file harus ada di assets/ilustrasi/)
     const supported = [
@@ -60,11 +60,11 @@ class RilisPopup extends StatelessWidget {
       'default'
     ];
     if (supported.contains(t)) {
-      if (t == 'default') return 'assets/ilustrasi/rilis_popup.png';
-      return 'assets/ilustrasi/rilis_popup_$t.png';
+      if (t == 'default') return 'assets/ilustrasi/rilis_popup.webp';
+      return 'assets/ilustrasi/rilis_popup_$t.webp';
     }
     // fallback: coba pakai nama tema langsung
-    return 'assets/ilustrasi/rilis_popup_$t.png';
+    return 'assets/ilustrasi/rilis_popup_$t.webp';
   }
 
   @override
@@ -97,7 +97,7 @@ class RilisPopup extends StatelessWidget {
           assetLokal,
           fit: BoxFit.cover,
           errorBuilder: (_, __, ___) => Image.asset(
-            'assets/ilustrasi/rilis_popup.png',
+            'assets/ilustrasi/rilis_popup.webp',
             fit: BoxFit.cover,
             errorBuilder: (_, __, ___) => Container(
               decoration: BoxDecoration(gradient: XyTheme.gradPrimary),
@@ -110,7 +110,7 @@ class RilisPopup extends StatelessWidget {
         assetLokal,
         fit: BoxFit.cover,
         errorBuilder: (_, __, ___) => Image.asset(
-          'assets/ilustrasi/rilis_popup.png',
+          'assets/ilustrasi/rilis_popup.webp',
           fit: BoxFit.cover,
           errorBuilder: (_, __, ___) => Container(
             decoration: BoxDecoration(gradient: XyTheme.gradPrimary),

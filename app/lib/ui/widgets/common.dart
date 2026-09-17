@@ -496,7 +496,7 @@ class _ShimmerState extends State<Shimmer> with SingleTickerProviderStateMixin {
 class Kosong extends StatelessWidget {
   const Kosong({super.key, required this.icon, required this.judul, this.sub, this.aksi, this.ilustrasi = 'kosong'});
 
-  /// Nama berkas ilustrasi di assets/ilustrasi (tanpa .png). Kosongkan untuk memakai ikon saja.
+  /// Nama berkas ilustrasi di assets/ilustrasi (tanpa ekstensi). Kosongkan untuk memakai ikon saja.
   final String ilustrasi;
   final IconData icon;
   final String judul;
@@ -627,7 +627,7 @@ class XyIlustrasi extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Image.asset(
-        'assets/ilustrasi/$nama.png',
+        'assets/ilustrasi/$nama.webp',
         height: tinggi,
         fit: BoxFit.contain,
         filterQuality: FilterQuality.medium,

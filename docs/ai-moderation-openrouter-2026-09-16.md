@@ -1,10 +1,11 @@
-# Operasi Moderasi AI — OpenRouter/Grok
+# Operasi Moderasi AI — OpenRouter/Grok atau GroqCloud
 
 Tanggal: 16 September 2026
 
 ## Status saat coding
 
-- Integrasi memakai API OpenAI-compatible OpenRouter dan model default `x-ai/grok-4.3`.
+- Provider default memakai API OpenAI-compatible OpenRouter dan model `x-ai/grok-4.3`.
+- Adapter GroqCloud juga tersedia dengan model default `llama-3.3-70b-versatile`; adapter hanya siap bila `GROQ_ZDR_CONFIRMED=1` karena ZDR Groq adalah kontrol organisasi, bukan parameter request.
 - Credential di berkas kerja dikenali sebagai format OpenRouter, tetapi pemeriksaan read-only `GET /api/v1/auth/key` mengembalikan HTTP 401.
 - Credential tersebut **tidak** dipasang ke Cloudflare dan tidak disimpan ke repo/D1.
 - Setelan awal `ai_moderation_mode=off`; filter lokal tetap aktif.
@@ -17,6 +18,8 @@ Minta atau buat API key OpenRouter baru sebelum mengaktifkan AI. Jangan mengirim
 cd api
 npx wrangler secret put OPENROUTER_API_KEY
 ```
+
+Atau untuk GroqCloud, aktifkan **Zero Data Retention** lebih dahulu di Groq Console → Data Controls, lalu pasang `AI_MODERATION_PROVIDER=groq`, model yang disetujui, secret `GROQ_API_KEY`, dan `GROQ_ZDR_CONFIRMED=1`. Nilai konfirmasi adalah guard operasional; aplikasi tidak dapat mengaktifkan ZDR provider dari request.
 
 Setelah deploy, masuk sebagai pemilik dan buka **Moderasi → AI Safety → Verifikasi koneksi**. Endpoint internal hanya memanggil metadata credential tanpa mengirim teks pengguna dan hanya mengembalikan `OK`, `AUTH`, `QUOTA`, `RATE_LIMIT`, `TIMEOUT`, atau `NETWORK`.
 
@@ -37,7 +40,8 @@ AI hanya dipanggil untuk teks yang sengaja dibuat publik:
 - diskusi, balasan, dan penyuntingan forum;
 - ulasan produk dan paket PC;
 - nama/bio/slogan profil yang diubah;
-- preset HUD saat berstatus publik.
+- preset HUD saat berstatus publik;
+- pengajuan/nama/judul XyCloud Live serta pesan dukungan livestream.
 
 AI tidak menerima:
 

@@ -10,10 +10,10 @@ import '../widgets/common.dart';
 import '../../core/prefs.dart';
 import '../widgets/error_state.dart';
 import 'akun_screen.dart';
-import 'bantuan_screen.dart';
 import 'cs_screen.dart';
 import 'favorit_screen.dart';
 import 'leaderboard_screen.dart';
+import 'livestream_screen.dart';
 import 'notifikasi_screen.dart';
 import 'order_detail_screen.dart';
 import 'referral_screen.dart';
@@ -56,6 +56,16 @@ class HomeScreen extends StatelessWidget {
                 const SectionHeader('Sesi Berjalan', sub: 'Diperbarui otomatis dari server'),
                 FadeInUp(child: _KartuOrderAktif(order: aktif)),
               ],
+
+              SectionHeader(
+                'XyCloud Live',
+                sub: s.liveCatalog.enabled
+                    ? '${s.liveCatalog.streams.length} gamer sedang tayang'
+                    : 'Main, siarkan, bangun komunitas',
+                aksi: 'Buka',
+                onAksi: () => Navigator.push(context, xyRoute(const XyLiveScreen())),
+              ),
+              FadeInUp(child: _LiveHomeCard(catalog: s.liveCatalog)),
 
               SectionHeader(
                 'PC Siap Pakai',
@@ -512,7 +522,7 @@ class _MenuCepat extends StatelessWidget {
     ('statistik', 'Statistik', Icons.bar_chart_rounded, StatistikScreen()),
     ('peringkat', 'Peringkat', Icons.leaderboard_rounded, LeaderboardScreen()),
     ('tier', 'Tier Saya', Icons.workspace_premium_rounded, TierScreen()),
-    ('bantuan', 'Bantuan', Icons.support_agent_rounded, BantuanScreen()),
+    ('live', 'Xy Live', Icons.live_tv_rounded, XyLiveScreen()),
   ];
 
   @override
@@ -659,6 +669,68 @@ class _KartuOrderAktif extends StatelessWidget {
           Text('Status saat ini: ${order.status.label}',
               style:  TextStyle(fontSize: 12.5, color: XyTheme.of(context).muted)),
       ]),
+    );
+  }
+}
+
+// ------------------------------------------------------------------
+class _LiveHomeCard extends StatelessWidget {
+  const _LiveHomeCard({required this.catalog});
+  final LiveCatalog catalog;
+
+  @override
+  Widget build(BuildContext context) {
+    final live = catalog.streams.isEmpty ? null : catalog.streams.first;
+    return XyCard(
+      padding: EdgeInsets.zero,
+      onTap: () => Navigator.push(context, xyRoute(XyLiveScreen(fokusId: live?.id))),
+      child: Container(
+        height: 150,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(XyRadius.lg),
+          gradient: const LinearGradient(
+            colors: [Color(0xFF120025), Color(0xFF4C1D95), Color(0xFF7C3AED)],
+            begin: Alignment.bottomLeft,
+            end: Alignment.topRight,
+          ),
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(XyRadius.lg),
+          child: Stack(children: [
+            Positioned(right: -16, bottom: -22,
+              child: Icon(Icons.sports_esports_rounded, size: 150, color: Colors.white.withOpacity(.10))),
+            Padding(
+              padding: const EdgeInsets.all(18),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: live != null ? const Color(0xFFEF4444) : Colors.white.withOpacity(.14),
+                      borderRadius: BorderRadius.circular(99),
+                    ),
+                    child: Text(live != null ? '● LIVE' : 'SEGERA HADIR',
+                      style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w800, letterSpacing: .7)),
+                  ),
+                  const Spacer(),
+                  if (live != null)
+                    Text('${live.viewers} menonton', style: TextStyle(color: Colors.white.withOpacity(.72), fontSize: 11)),
+                ]),
+                const Spacer(),
+                Text(live?.title ?? 'Main. Siarkan. Dapatkan dukungan.',
+                  maxLines: 2, overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Colors.white, fontSize: 18, height: 1.15, fontWeight: FontWeight.w900, letterSpacing: -.4)),
+                const SizedBox(height: 5),
+                Text(live == null
+                    ? 'Game Capture aman · mic default mati · payout terverifikasi'
+                    : '${live.creatorName} · ${live.game}',
+                  maxLines: 1, overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: Colors.white.withOpacity(.68), fontSize: 11.5)),
+              ]),
+            ),
+          ]),
+        ),
+      ),
     );
   }
 }

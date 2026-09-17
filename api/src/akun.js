@@ -2,10 +2,17 @@ export async function infoHapusAkun(env, user) {
   const aktif = await env.DB.prepare("SELECT COUNT(*) n FROM orders WHERE user_id=? AND status IN ('pending','dibayar','provisioning','aktif')").bind(user.id).first();
   const sesi = await env.DB.prepare("SELECT COUNT(*) n FROM sesi WHERE user_id=? AND status NOT IN ('selesai','gagal')").bind(user.id).first();
   const topup = await env.DB.prepare("SELECT COUNT(*) n FROM topup WHERE user_id=? AND status IN ('menunggu','diperiksa')").bind(user.id).first();
+  const live = await env.DB.prepare(
+    "SELECT COUNT(*) n FROM livestream WHERE user_id=? AND (status IN ('queued','starting','live','ending') OR (status='failed' AND cleanup_pending=1))",
+  ).bind(user.id).first();
+  const earning = await env.DB.prepare("SELECT COALESCE(SUM(net),0) n FROM creator_earning WHERE user_id=? AND status IN ('held','available','reserved')").bind(user.id).first();
+  const payout = await env.DB.prepare("SELECT COUNT(*) n FROM creator_payout WHERE user_id=? AND status IN ('requested','processing')").bind(user.id).first();
   const penghalang = [];
   if (Number(user.saldo) > 0) penghalang.push('Saldo masih tersedia. Habiskan saldo atau hubungi CS untuk penyelesaian saldo.');
   if (aktif.n || sesi.n) penghalang.push('Selesaikan pesanan dan sesi PC yang masih aktif terlebih dahulu.');
   if (topup.n) penghalang.push('Masih ada top up yang menunggu penyelesaian. Hubungi CS.');
+  if (live.n) penghalang.push('Akhiri livestream yang masih aktif terlebih dahulu.');
+  if (Number(earning.n || 0) > 0 || payout.n) penghalang.push('Penghasilan kreator atau payout masih perlu diselesaikan oleh admin.');
   return { perlu_otp: String(user.password || '').startsWith('sosial:'), boleh_hapus: !penghalang.length, penghalang, saldo: user.saldo || 0 };
 }
 
@@ -34,6 +41,10 @@ export async function bersihkanAkun(env, user) {
     q('DELETE FROM favorit WHERE user_id=?', id),
     q('DELETE FROM ulasan WHERE user_id=?', id),
     q('DELETE FROM ulasan_pc WHERE user_id=?', id),
+    // Hapus jejak tontonan dan pesan dukungan; ledger nominal tetap anonim untuk audit.
+    q('DELETE FROM livestream_view WHERE viewer_id=?', id),
+    q("UPDATE livestream_tip SET message='' WHERE viewer_id=?", id),
+    q("UPDATE livestream SET creator_name='Kreator dihapus' WHERE user_id=?", id),
     q('DELETE FROM sesi WHERE user_id=?', id),
     q('DELETE FROM otp WHERE email=?', user.email),
     q('DELETE FROM social_identity WHERE user_id=?', id),
