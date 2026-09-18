@@ -328,10 +328,19 @@ export async function unggahVideoBanner(env, { dataUri, folder = 'xycloudstore/b
     //    aset image/gif mandiri (public_id berakhiran .gif).
     const gifSumber = String(j.secure_url).replace('/video/upload/', '/video/upload/f_gif,fps_12,w_480,c_limit/');
     let gifBytes = null;
-    try {
-      const rg = await fetch(gifSumber);
-      if (rg.ok) gifBytes = new Uint8Array(await rg.arrayBuffer());
-    } catch (_) {}
+    // Derivasi f_gif dibuat on-demand oleh Cloudinary; permintaan pertama
+    // bisa datang sebelum aset siap. Coba ulang sebentar dan validasi
+    // magic-byte "GIF" supaya byte salah tidak pernah tersimpan sebagai gif.
+    for (let coba = 0; coba < 3 && !gifBytes; coba++) {
+      if (coba) await new Promise((r) => setTimeout(r, 1200 * coba));
+      try {
+        const rg = await fetch(gifSumber);
+        if (rg.ok) {
+          const b = new Uint8Array(await rg.arrayBuffer());
+          if (b.length >= 12 && b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46) gifBytes = b;
+        }
+      } catch (_) {}
+    }
     if (!gifBytes || gifBytes.length < 12) {
       // Fallback: pakai GIF turunan (transform) dan biarkan MP4 tersimpan.
       await catatMedia(env, { id: j.public_id, url: j.secure_url, folder, format: j.format || 'mp4', width: j.width, height: j.height, bytes: j.bytes, animated: 1, hash });
@@ -460,15 +469,18 @@ export function imageVariant(env,path,accept='',animated=false){
 export async function layaniGambar(env,jalur,req,ctx){
   if(!env.CLOUDINARY_CLOUD)return new Response('Media belum tersedia',{status:503});
   const accept=req?.headers.get('accept')||'';
-  const first=imageVariant(env,jalur,accept,/\\.(gif|webp)$/i.test(jalur));
+  // Regex escape tunggal: `/\\.gif$/` (backslash ganda) tidak pernah cocok
+  // sehingga GIF animasi ikut tertransformasi f_webp,q_78 dan kehilangan
+  // seluruh frame kecuali yang pertama — bug "video convert to gif diam".
+  const first=imageVariant(env,jalur,accept,/\.(gif|webp)$/i.test(jalur));
   if(!first)return new Response('Not found',{status:404});
   const key=new URL(req.url);key.search='v=26&format='+(accept.includes('image/avif')?'avif':'webp');
   const cache=typeof caches!=='undefined'?caches.default:null;
   const cacheKey=new Request(key.toString(),{method:'GET'});
   const hit=cache?await cache.match(cacheKey):null;
   if(hit)return hit;
-  let animated=/\\.gif$/i.test(jalur);
-  if(/\\.webp$/i.test(jalur)){
+  let animated=/\.gif$/i.test(jalur);
+  if(/\.webp$/i.test(jalur)){
     const id=first.id.replace(/^v\d+\//,'').replace(/\\.[^.]+$/,'');
     try{const item=await env.DB.prepare('SELECT animated FROM media_assets WHERE id=?').bind(id).first();animated=item?!!item.animated:true;}catch{animated=true;}
   }

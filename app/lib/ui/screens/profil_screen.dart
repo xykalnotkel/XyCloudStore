@@ -148,23 +148,36 @@ class _ProfilScreenState extends State<ProfilScreen> {
                                 fontStyle: FontStyle.italic,
                                 fontWeight: FontWeight.w600)),
                       ),
-                    const SizedBox(height: 4),
-                    Text(u.email,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(color: Colors.white.withOpacity(.62), fontSize: 12.5)),
-                    if ((u.bio ?? '').isNotEmpty) ...[
-                      const SizedBox(height: 6),
-                      Text(u.bio!,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                              color: Colors.white.withOpacity(.82),
-                              fontSize: 12,
-                              height: 1.4)),
-                    ],
-                    const SizedBox(height: 8),
-                    Wrap(spacing: 7, runSpacing: 6, children: [
+                  ]),
+                ),
+              ]),
+              const SizedBox(height: 14),
+              // Audit tata letak 2026-09-18: email & bio sepenuh lebar, tidak
+              // lagi dipaksa ellipsis di kolom sempit samping avatar.
+              Row(children: [
+                Icon(Icons.mail_outline_rounded,
+                    size: 14, color: Colors.white.withOpacity(.62)),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(u.email,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          color: Colors.white.withOpacity(.72), fontSize: 12.5)),
+                ),
+              ]),
+              if ((u.bio ?? '').isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text(u.bio!,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        color: Colors.white.withOpacity(.82),
+                        fontSize: 12.5,
+                        height: 1.45)),
+              ],
+              const SizedBox(height: 10),
+              Wrap(spacing: 7, runSpacing: 6, children: [
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                         decoration: BoxDecoration(
@@ -197,9 +210,6 @@ class _ProfilScreenState extends State<ProfilScreen> {
                                     letterSpacing: .4)),
                           ]),
                         ),
-                    ]),
-                  ]),
-                ),
               ]),
               const SizedBox(height: 22),
               Row(children: [

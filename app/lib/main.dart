@@ -116,8 +116,9 @@ class _Root extends StatelessWidget {
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 480),
       switchInCurve: Curves.easeOutCubic,
-      transitionBuilder: (child, a) => FadeTransition(
-        opacity: a,
+      transitionBuilder: (child, a) => SlideTransition(
+        // Kebijakan gerak 2026-09-18: pergantian alur masuk tanpa fade.
+        position: Tween<Offset>(begin: const Offset(0, .05), end: Offset.zero).animate(a),
         child: ScaleTransition(scale: Tween(begin: .98, end: 1.0).animate(a), child: child),
       ),
       child: !masuk

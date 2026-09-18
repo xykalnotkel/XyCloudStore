@@ -149,6 +149,10 @@ class _AvatarBingkaiState extends State<AvatarBingkai>
     final tebal = widget.tebal ??
         (_asetAi ? math.max(6.0, widget.size * .13) : math.max(2.6, widget.size * .055));
     final grad = _gradBingkai(id);
+    // Kebijakan tata letak 2026-09-18: footprint widget PERSIS widget.size
+    // supaya bingkai tidak meluber di grid/baris liste. Cincin digambar
+    // masuk ke dalam; foto mengecil sebesar ketebalan cincin.
+    final inner = math.max(8.0, widget.size - tebal * 2);
 
     Widget cincin() {
       if (_asetAi) {
@@ -211,8 +215,8 @@ class _AvatarBingkaiState extends State<AvatarBingkai>
     }
 
     Widget hasil = SizedBox(
-      width: widget.size + tebal * 2,
-      height: widget.size + tebal * 2,
+      width: widget.size,
+      height: widget.size,
       child: Stack(alignment: Alignment.center, children: [
         // Cincin CSS/gradasi harus menjadi alas karena bentuknya lingkaran
         // penuh. Artwork AI punya lubang transparan, jadi dirender SETELAH
@@ -237,8 +241,8 @@ class _AvatarBingkaiState extends State<AvatarBingkai>
             ),
           ),
         Container(
-          width: widget.size,
-          height: widget.size,
+          width: inner,
+          height: inner,
           decoration: const BoxDecoration(shape: BoxShape.circle),
           clipBehavior: Clip.antiAlias,
           child: widget.child,
@@ -250,22 +254,22 @@ class _AvatarBingkaiState extends State<AvatarBingkai>
         // Elemen melayang juga berada di lapisan paling depan.
         if (id == 'galaksi')
           Positioned.fill(
-              child: _BintangOrbit(size: widget.size, tebal: tebal, putar: _putar)),
+              child: _BintangOrbit(size: inner, tebal: tebal, putar: _putar)),
         if (id == 'api')
           Positioned.fill(
-              child: _BaraNaik(size: widget.size, tebal: tebal, apung: _apung)),
+              child: _BaraNaik(size: inner, tebal: tebal, apung: _apung)),
         // Batch L: partikel khas tiap bingkai baru.
         if (id == 'sakura')
           Positioned.fill(
               child: _KelopakJatuh(
-                  size: widget.size, tebal: tebal, apung: _apung)),
+                  size: inner, tebal: tebal, apung: _apung)),
         if (id == 'sayap')
           Positioned.fill(
               child: _CahayaNaik(
-                  size: widget.size, tebal: tebal, apung: _apung)),
+                  size: inner, tebal: tebal, apung: _apung)),
         if (id == 'naga')
           Positioned.fill(
-              child: _BaraNaik(size: widget.size, tebal: tebal, apung: _apung)),
+              child: _BaraNaik(size: inner, tebal: tebal, apung: _apung)),
         if (id == 'petir')
           Positioned.fill(
               child: _BintangOrbit(
@@ -296,7 +300,7 @@ class _AvatarBingkaiState extends State<AvatarBingkai>
         if (id == 'permata')
           ...List.generate(4, (i) {
             final sudut = math.pi / 4 + i * math.pi / 2;
-            final r = widget.size / 2 + tebal;
+            final r = inner / 2 + tebal;
             return Positioned(
               left: r + r * math.cos(sudut) - tebal * .55,
               top: r + r * math.sin(sudut) - tebal * .55,

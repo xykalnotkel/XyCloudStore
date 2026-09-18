@@ -23,10 +23,13 @@ Future<void> tampilkanRilisPopup(BuildContext context, AppState s) async {
     barrierLabel: 'Rilis',
     barrierColor: XyTheme.bgGelap.withOpacity(.68), // indigo tua barrier
     transitionDuration: const Duration(milliseconds: 260),
-    transitionBuilder: (_, anim, __, child) => FadeTransition(
-      opacity: anim,
+    transitionBuilder: (_, anim, __, child) => SlideTransition(
+      // Kebijakan gerak 2026-09-18: tanpa fade; popup meluncur dari atas.
+      position: Tween<Offset>(begin: const Offset(0, -.09), end: Offset.zero).animate(
+        CurvedAnimation(parent: anim, curve: Curves.easeOutCubic),
+      ),
       child: ScaleTransition(
-        scale: Tween<double>(begin: .92, end: 1).animate(
+        scale: Tween<double>(begin: .94, end: 1).animate(
           CurvedAnimation(parent: anim, curve: Curves.easeOutBack),
         ),
         child: child,

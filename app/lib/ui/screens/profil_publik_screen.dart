@@ -288,15 +288,9 @@ class _ProfilPublikScreenState extends State<ProfilPublikScreen> {
                             LencanaTier(p.tier ?? 'basic'),
                             if (p.badge != null) LencanaKhusus(p.badge!),
                           ]),
-                          if ((p.slogan ?? '').isNotEmpty) ...[
-                            const SizedBox(height: 3),
-                            Text('“${p.slogan}”',
-                                style: TextStyle(
-                                    fontSize: 12.5,
-                                    fontStyle: FontStyle.italic,
-                                    fontWeight: FontWeight.w600,
-                                    color: t.inkSoft)),
-                          ],
+                          // Audit konsistensi 2026-09-18: urutan identitas
+                          // sama dengan profil sendiri — nama, @username,
+                          // baru slogan.
                           if ((p.username ?? '').isNotEmpty) ...[
                             const SizedBox(height: 4),
                             Text('@${p.username}',
@@ -305,6 +299,15 @@ class _ProfilPublikScreenState extends State<ProfilPublikScreen> {
                                     fontWeight: FontWeight.w800,
                                     color: XyTheme.primary,
                                     letterSpacing: .2)),
+                          ],
+                          if ((p.slogan ?? '').isNotEmpty) ...[
+                            const SizedBox(height: 3),
+                            Text('“${p.slogan}”',
+                                style: TextStyle(
+                                    fontSize: 12.5,
+                                    fontStyle: FontStyle.italic,
+                                    fontWeight: FontWeight.w600,
+                                    color: t.inkSoft)),
                           ],
                           if ((p.bio ?? '').isNotEmpty) ...[
                             const SizedBox(height: 8),

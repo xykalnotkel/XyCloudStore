@@ -775,23 +775,33 @@ class _ForumDetailScreenState extends State<ForumDetailScreen> {
         padding: const EdgeInsets.all(18),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
-            // Batch L: bingkai penulis ikut tampil di detail diskusi.
-            AvatarBingkai(
-                bingkai: p.bingkai,
-                size: 38,
-                child: _Avatar(
-                    nama: nama, foto: s.fotoPengguna(p.userId, p.foto))),
+            // Audit 2026-09-18: penulis bisa diketuk untuk lihat profil.
+            Pressable(
+                onTap: p.userId.isEmpty
+                    ? null
+                    : () => Navigator.push(context,
+                        xyRoute(ProfilPublikScreen(userId: p.userId))),
+                child: AvatarBingkai(
+                    bingkai: p.bingkai,
+                    size: 38,
+                    child: _Avatar(
+                        nama: nama, foto: s.fotoPengguna(p.userId, p.foto)))),
             const SizedBox(width: 10),
             Expanded(
-                child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                  GayaNama(nama,
-                      gaya: p.gayaNama,
-                      style: const TextStyle(fontWeight: FontWeight.w700)),
-                  Text(tanggal(p.dibuat),
-                      style: TextStyle(color: pal.muted, fontSize: 11))
-                ])),
+                child: Pressable(
+                    onTap: p.userId.isEmpty
+                        ? null
+                        : () => Navigator.push(context,
+                            xyRoute(ProfilPublikScreen(userId: p.userId))),
+                    child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          GayaNama(nama,
+                              gaya: p.gayaNama,
+                              style: const TextStyle(fontWeight: FontWeight.w700)),
+                          Text(tanggal(p.dibuat),
+                              style: TextStyle(color: pal.muted, fontSize: 11))
+                        ]))),
             LencanaTier(p.tier)
           ]),
           const SizedBox(height: 16),
@@ -841,15 +851,21 @@ class _ForumDetailScreenState extends State<ForumDetailScreen> {
             child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Padding(
                   padding: const EdgeInsets.only(top: 4),
-                  // Batch L: bingkai avatar tampil juga di komentar.
-                  child: AvatarBingkai(
-                      bingkai: b.bingkai,
-                      size: 34,
-                      child: _Avatar(
-                          nama: nama,
-                          foto: s.fotoPengguna(b.userId, b.foto),
-                          ukuran: 34,
-                          admin: b.admin))),
+                  // Audit 2026-09-18: avatar penulis komentar bisa diketuk
+                  // untuk membuka profil publiknya.
+                  child: Pressable(
+                      onTap: b.userId.isEmpty || b.admin
+                          ? null
+                          : () => Navigator.push(context,
+                              xyRoute(ProfilPublikScreen(userId: b.userId))),
+                      child: AvatarBingkai(
+                          bingkai: b.bingkai,
+                          size: 34,
+                          child: _Avatar(
+                              nama: nama,
+                              foto: s.fotoPengguna(b.userId, b.foto),
+                              ukuran: 34,
+                              admin: b.admin)))),
               const SizedBox(width: 10),
               Expanded(
                   child: Column(

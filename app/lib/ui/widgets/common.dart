@@ -659,6 +659,9 @@ class DotGrid extends StatelessWidget {
 }
 
 /// Animasi masuk berurutan untuk daftar item.
+/// Gerak masuk konten (stagger). Kebijakan gerak 2026-09-18: TANPA opacity —
+/// hanya translate vertikal yang settle, supaya tidak ada fade-in di
+/// seluruh aplikasi. Nama kelas dipertahankan agar pemanggil tidak berubah.
 class FadeInUp extends StatefulWidget {
   const FadeInUp({super.key, required this.child, this.delay = Duration.zero, this.offset = 18});
   final Widget child;
@@ -692,9 +695,9 @@ class _FadeInUpState extends State<FadeInUp> with SingleTickerProviderStateMixin
     final curve = CurvedAnimation(parent: c, curve: Curves.easeOutCubic);
     return AnimatedBuilder(
       animation: curve,
-      builder: (_, child) => Opacity(
-        opacity: curve.value,
-        child: Transform.translate(offset: Offset(0, (1 - curve.value) * widget.offset), child: child),
+      builder: (_, child) => Transform.translate(
+        offset: Offset(0, (1 - curve.value) * widget.offset),
+        child: child,
       ),
       child: widget.child,
     );

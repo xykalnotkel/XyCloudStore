@@ -8,6 +8,7 @@ import '../../providers/app_state.dart';
 import '../widgets/common.dart';
 import '../widgets/lembar.dart';
 import 'forum_screen.dart';
+import 'profil_publik_screen.dart';
 
 /// ============================================================
 ///  Pusat pemberitahuan
@@ -106,6 +107,13 @@ class _Baris extends StatelessWidget {
     await s.bacaNotifikasi(id: notif.id);
     if (!context.mounted) return;
 
+    // Audit 2026-09-18: notifikasi sosial (mis. "mulai mengikuti kamu")
+    // membawa ke profil aktornya — sebelumnya ketukan tidak berbuat apa-apa.
+    if (notif.refJenis == 'profil' && notif.refId != null) {
+      Navigator.push(
+          context, xyRoute(ProfilPublikScreen(userId: notif.refId!)));
+      return;
+    }
     if (notif.refJenis == 'forum' && notif.refId != null) {
       final post = s.forum.where((f) => f.id == notif.refId).toList();
       if (post.isNotEmpty) {
