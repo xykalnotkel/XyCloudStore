@@ -388,7 +388,17 @@ async function pulihkanBlokirKadaluarsa(env, userId) {
 
 // ---------- password ----------
 const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
-const PW_ITERATIONS = 210_000;
+// BATAS RUNTIME, bukan pilihan gaya: WebCrypto di Cloudflare Workers menolak
+// PBKDF2 di atas 100.000 iterasi —
+//   "Pbkdf2 failed: Iteration counts above 100000 are not supported (requested 210000)"
+// Node mengizinkan jauh lebih tinggi, sehingga `node --test` (65 test hijau)
+// TIDAK BISA menangkap galat ini. Nilai 210.000 pernah dipakai di commit
+// 16d5b5e dan membuat login produksi gagal total: verifikasi hash warisan
+// berhasil, lalu upgrade transparan di jalur login memanggil buatPw() yang
+// melempar, sehingga permintaan berakhir 500.
+// Jangan naikkan PW_ITERATIONS melampaui PW_ITERASI_MAKS_RUNTIME.
+const PW_ITERASI_MAKS_RUNTIME = 100_000;
+const PW_ITERATIONS = PW_ITERASI_MAKS_RUNTIME;
 const PW_PREFIX = 'pbkdf2-sha256';
 const encoderPw = new TextEncoder();
 
@@ -440,7 +450,11 @@ async function cocokPw(password, tersimpan) {
     const iterations = Number(bagian[1]);
     const salt = bytesHexPw(bagian[2]);
     const harapan = bytesHexPw(bagian[3]);
-    if (!Number.isSafeInteger(iterations) || iterations < 100_000 || iterations > 1_000_000
+    // Batas atas mengikuti kemampuan runtime, bukan angka longgar: hash dengan
+    // iterasi di atas PW_ITERASI_MAKS_RUNTIME tidak bisa diverifikasi di Workers
+    // (deriveBits akan melempar). Ditolak sebagai "password salah" supaya satu
+    // baris data yang mustahil tidak mengubah permintaan login menjadi HTTP 500.
+    if (!Number.isSafeInteger(iterations) || iterations < 100_000 || iterations > PW_ITERASI_MAKS_RUNTIME
         || !salt || salt.length < 16 || !harapan || harapan.length !== 32) return false;
     return samaKonstanPw(await pbkdf2Pw(password, salt, iterations), harapan);
   }
