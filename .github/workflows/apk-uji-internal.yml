@@ -2,10 +2,14 @@ name: APK Uji Internal (bukan rilis)
 
 # Menghasilkan APK yang BISA DIUNDUH untuk dicoba di perangkat nyata, tanpa
 # menyentuh jalur rilis sama sekali:
-#   - TANPA keystore. buildTypes.release template Flutter memakai
+#   - DEFAULT TANPA keystore: buildTypes.release template Flutter memakai
 #     signingConfigs.debug, jadi APK ditandatangani kunci debug.
-#   - TIDAK membuat GitHub Release, TIDAK mengunggah ke /unduh, TIDAK
-#     meregistrasi versi ke server, TIDAK menandai apa pun sebagai terbaru.
+#   - OPSI signed_resmi=true: menandatangani dengan keystore resmi repo ini
+#     (secrets KEYSTORE_BASE64/KEY_ALIAS/KEY_PASSWORD/STORE_PASSWORD) supaya
+#     APK bisa dipasang menimpa instalasi rilis resmi di perangkat tanpa
+#     uninstall dulu. Ini HANYA mengganti tanda tangan pada build uji:
+#     tetap TIDAK membuat GitHub Release, TIDAK meregistrasi versi ke server,
+#     TIDAK mengunggah ke /unduh, TIDAK memicu popup pembaruan.
 #   - Hanya artifact Actions (retensi 7 hari) yang butuh login repo untuk diunduh.
 #
 # Rilis publik tetap lewat repo `XyCloudStore-build` dengan keystore pemilik.
@@ -29,6 +33,12 @@ on:
         default: "true"
         type: choice
         options: ["true", "false"]
+      signed_resmi:
+        description: "Tandatangai dengan keystore RESMI repo ini? (bukan debug; tetap bukan rilis)"
+        required: false
+        default: "false"
+        type: choice
+        options: ["false", "true"]
 
 concurrency:
   group: apk-uji-${{ github.ref }}
@@ -43,7 +53,7 @@ env:
 
 jobs:
   build:
-    name: Bangun APK uji (tanda tangan debug)
+    name: Bangun APK uji (signed_resmi=${{ github.event.inputs.signed_resmi }})
     runs-on: ubuntu-latest
     timeout-minutes: 75
     steps:
@@ -126,6 +136,31 @@ jobs:
         working-directory: ${{ env.APP_DIR }}
         run: python3 ../tools/patch_manifest.py android/app/src/main/AndroidManifest.xml
 
+      - name: Siapkan tanda tangan resmi (opsional, hanya signing)
+        if: github.event.inputs.signed_resmi == 'true'
+        working-directory: ${{ env.APP_DIR }}
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          : "${KEYSTORE_BASE64:?secret KEYSTORE_BASE64 belum diisi}"
+          : "${KEY_ALIAS:?secret KEY_ALIAS belum diisi}"
+          : "${KEY_PASSWORD:?secret KEY_PASSWORD belum diisi}"
+          : "${STORE_PASSWORD:?secret STORE_PASSWORD belum diisi}"
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > android/release.keystore
+          python3 ../tools/patch_signing.py android/app
+          {
+            echo "storeFile=$(pwd)/android/release.keystore"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=$KEY_PASSWORD"
+            echo "storePassword=$STORE_PASSWORD"
+          } > android/key.properties
+          echo "key.properties ditulis. Signing release aktif HANYA untuk run ini;"
+          echo "berkas ini tidak di-commit dan tidak dipakai jalur lain."
+
       - name: Analyze & test (gerbang sebelum APK dibuat)
         working-directory: ${{ env.APP_DIR }}
         run: |
@@ -157,40 +192,61 @@ jobs:
           set -euo pipefail
           SHA_PENDEK=$(git rev-parse --short HEAD)
           VERSI=$(grep -oE '^version: [^+]+' pubspec.yaml | awk '{print $2}')
+          if [ "${{ github.event.inputs.signed_resmi }}" = "true" ]; then SUFFIX="-resmi"; else SUFFIX=""; fi
           mkdir -p ../dist-uji
           cp build/app/outputs/flutter-apk/app-release.apk \
-             "../dist-uji/XyCloudStore-UJI-${VERSI}-${SHA_PENDEK}-universal.apk"
+             "../dist-uji/XyCloudStore-UJI-${VERSI}-${SHA_PENDEK}${SUFFIX}-universal.apk"
           if [ "${{ github.event.inputs.split_abi }}" = "true" ]; then
             for abi in arm64-v8a armeabi-v7a x86_64; do
               f="build/app/outputs/flutter-apk/app-$abi-release.apk"
-              [ -f "$f" ] && cp "$f" "../dist-uji/XyCloudStore-UJI-${VERSI}-${SHA_PENDEK}-$abi.apk"
+              [ -f "$f" ] && cp "$f" "../dist-uji/XyCloudStore-UJI-${VERSI}-${SHA_PENDEK}${SUFFIX}-$abi.apk"
             done
           fi
-          cat > ../dist-uji/README-PENTING.txt <<'TXT'
-          APK UJI INTERNAL — BUKAN RILIS
-          ==============================
+          if [ "${{ github.event.inputs.signed_resmi }}" = "true" ]; then
+            cat > ../dist-uji/README-PENTING.txt <<'TXT'
+            APK UJI INTERNAL — TANDA TANGAN RESMI, TETAP BUKAN RILIS
+            ========================================================
 
-          Ditandatangani dengan KUNCI DEBUG, bukan keystore rilis XyCloudStore.
+            Ditandatangani dengan keystore RESMI XyCloudStore (secrets repo
+            ini), sehingga BISA dipasang menimpa instalasi rilis resmi di
+            perangkat tanpa uninstall dulu.
 
-          Konsekuensinya:
-          1. TIDAK BISA dipasang menimpa aplikasi XyCloudStore yang sudah
-             terpasang dari rilis resmi (tanda tangan berbeda ->
-             INSTALL_FAILED_UPDATE_INCOMPATIBLE). Uninstall dulu, data lokal
-             aplikasi akan hilang; saldo & riwayat tetap aman di server.
-          2. JANGAN dibagikan ke pengguna. Ini hanya untuk uji fungsi.
-          3. Tidak terdaftar di server, tidak muncul di halaman /unduh, dan
-             tidak akan memicu popup pembaruan.
+            Tetapi ini TETAP build uji, bukan rilis:
+            1. Tidak dibuatkan GitHub Release, tidak diregistrasi ke server,
+               tidak muncul di halaman /unduh, tidak memicu popup pembaruan.
+            2. JANGAN dibagikan ke pengguna akhir.
+            3. Jika perangkat masih memakai APK uji bertanda tangan DEBUG,
+               uninstall dulu sekali (tanda tangan debug != resmi).
 
-          Rilis resmi tetap dibangun di repo XyCloudStore-build dengan
-          keystore pemilik, setelah izin eksplisit.
-          TXT
+            Rilis publik tetap dibangun di repo XyCloudStore-build.
+            TXT
+          else
+            cat > ../dist-uji/README-PENTING.txt <<'TXT'
+            APK UJI INTERNAL — BUKAN RILIS
+            ==============================
+
+            Ditandatangani dengan KUNCI DEBUG, bukan keystore rilis XyCloudStore.
+
+            Konsekuensinya:
+            1. TIDAK BISA dipasang menimpa aplikasi XyCloudStore yang sudah
+               terpasang dari rilis resmi (tanda tangan berbeda ->
+               INSTALL_FAILED_UPDATE_INCOMPATIBLE). Uninstall dulu, data lokal
+               aplikasi akan hilang; saldo & riwayat tetap aman di server.
+            2. JANGAN dibagikan ke pengguna. Ini hanya untuk uji fungsi.
+            3. Tidak terdaftar di server, tidak muncul di halaman /unduh, dan
+               tidak akan memicu popup pembaruan.
+
+            Rilis resmi tetap dibangun di repo XyCloudStore-build dengan
+            keystore pemilik, setelah izin eksplisit.
+            TXT
+          fi
           (cd ../dist-uji && sha256sum ./*.apk ./README-PENTING.txt > SHA256SUMS.txt && cat SHA256SUMS.txt)
           ls -lh ../dist-uji
 
       - name: Unggah artifact uji
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: XyCloudStore-APK-UJI-INTERNAL
+          name: XyCloudStore-APK-UJI-${{ github.event.inputs.signed_resmi == 'true' && 'SIGNED-RESMI' || 'DEBUG' }}
           path: |
             dist-uji/*.apk
             dist-uji/README-PENTING.txt
@@ -203,7 +259,11 @@ jobs:
           {
             echo "## APK uji internal siap diunduh"
             echo ""
-            echo "**Tanda tangan debug — bukan rilis.** Baca \`README-PENTING.txt\` di dalam artifact."
+            if [ "${{ github.event.inputs.signed_resmi }}" = "true" ]; then
+              echo "**Tanda tangan RESMI (keystore repo) — tetap BUKAN rilis.** Baca \`README-PENTING.txt\`."
+            else
+              echo "**Tanda tangan debug — bukan rilis.** Baca \`README-PENTING.txt\` di dalam artifact."
+            fi
             echo ""
             echo "| Berkas | Ukuran |"
             echo "|---|---|"
@@ -215,6 +275,7 @@ jobs:
             echo ""
             echo "- Mode demo (XY_MOCK): \`${{ github.event.inputs.mock }}\`"
             echo "- Base URL API: \`${{ github.event.inputs.base_url }}\`"
+            echo "- Tanda tangan resmi: \`${{ github.event.inputs.signed_resmi }}\`"
             echo "- Commit: \`${GITHUB_SHA}\`"
             echo ""
             echo "Checksum SHA-256:"
