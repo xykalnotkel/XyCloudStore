@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 mod obs_live;
 
-pub const VERSI: &str = "1.5.5-rust";
+pub const VERSI: &str = "1.5.6-rust";
 
 /// Batch L: semua proses anak (powershell/cmd/reg/where/sunshine) dibuat
 /// dengan CREATE_NO_WINDOW supaya tidak ada jendela konsol hitam yang
@@ -127,13 +127,15 @@ pub fn simpan_konfig(k: &Konfig) -> std::io::Result<()> {
     Ok(())
 }
 
-fn klien() -> reqwest::blocking::Client {
-    reqwest::blocking::Client::builder()
-        // Agen membawa kode autentikasi dan credential ingest; sertifikat TLS
-        // server wajib diverifikasi, tidak boleh fail-open terhadap MITM.
-        .timeout(Duration::from_secs(10))
-        .build()
-        .expect("gagal membuat klien HTTP")
+fn klien(lokal: bool) -> reqwest::blocking::Client {
+    let mut b = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(10));
+    if lokal {
+        // API Sunshine di 127.0.0.1:47990 memakai sertifikat TLS self-signed bawaan Sunshine
+        // yang wajib diizinkan agar agen bisa berkomunikasi di localhost PC.
+        b = b.danger_accept_invalid_certs(true);
+    }
+    b.build().expect("gagal membuat klien HTTP")
 }
 
 fn minta(
@@ -142,7 +144,11 @@ fn minta(
     metode: &str,
     header: Option<Vec<(String, String)>>,
 ) -> Result<(u16, Value), String> {
-    let c = klien();
+    let lokal = url.starts_with("https://127.0.0.1")
+        || url.starts_with("http://127.0.0.1")
+        || url.starts_with("https://localhost")
+        || url.starts_with("http://localhost");
+    let c = klien(lokal);
     let mut req = c.request(
         reqwest::Method::from_bytes(metode.as_bytes()).unwrap_or(reqwest::Method::GET),
         url,
@@ -202,7 +208,16 @@ pub fn periksa_sunshine(k: &Konfig) -> Value {
                 json!({"siap": false, "status": "API_TIDAK_SESUAI", "pesan": format!("HTTP {status}: akses API ditolak / belum cocok."), "service": svc})
             }
         }
-        Err(e) => json!({"siap": false, "status": "TIDAK_TERHUBUNG", "pesan": e, "service": svc}),
+        Err(e) => {
+            let info = if svc == "Stopped" {
+                format!("{e} (SunshineService sedang berhenti — jalankan service atau klik Setup Engine)")
+            } else if svc == "TIDAK_DITEMUKAN" {
+                format!("{e} (Sunshine belum terpasang atau service belum dibuat — jalankan Setup Engine)")
+            } else {
+                e
+            };
+            json!({"siap": false, "status": "TIDAK_TERHUBUNG", "pesan": info, "service": svc})
+        }
     }
 }
 
