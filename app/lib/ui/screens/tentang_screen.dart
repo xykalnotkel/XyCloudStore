@@ -41,9 +41,9 @@ class _TentangScreenState extends State<TentangScreen> {
           // ---- identitas ----
           Center(
             child: Column(children: [
-              const XyLogo(size: 88, radius: 28),
-              const SizedBox(height: 16),
-              const XyWordmark(tinggi: 26),
+              // XyWordmark sudah lockup lengkap (ikon + teks); XyLogo di
+              // atasnya membuat ikon tampil dua kali.
+              const XyWordmark(tinggi: 46),
               const SizedBox(height: 10),
               Text('Versi $versi',
                   style:  TextStyle(color: XyTheme.of(context).muted, fontSize: 12.5, fontWeight: FontWeight.w600)),

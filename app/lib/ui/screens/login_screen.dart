@@ -189,12 +189,10 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
 
                     const SizedBox(height: 26),
+                    // XyWordmark SUDAH lockup lengkap (ikon + teks). Menaruh
+                    // XyLogo di sampingnya membuat ikon tampil dua kali.
                     FadeInUp(
-                      child: Row(children: [
-                        const XyLogo(size: 52, radius: 17),
-                        const SizedBox(width: 13),
-                        const XyWordmark(tinggi: 24),
-                      ]),
+                      child: const XyWordmark(tinggi: 34),
                     ),
                     const SizedBox(height: 22),
 
