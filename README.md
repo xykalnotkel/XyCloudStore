@@ -101,6 +101,22 @@ Event dari server:
 
 ---
 
+## Verifikasi otomatis (tanpa publikasi)
+
+Workflow **`Verifikasi Build Menyeluruh`** (`.github/workflows/verifikasi-build.yml`)
+adalah gerbang kompilasi/analisis seluruh monorepo: kualitas source & skema D1,
+uji regresi API, `tsc` + static export dashboard, `flutter analyze`/`test`/
+`build apk --release`, `:xy_stream:assembleRelease` 3 ABI, dan
+`cargo build --release` agen Windows.
+
+Workflow ini **tidak** memakai keystore, **tidak** mengunggah APK/AAR/exe, dan
+**tidak** menyentuh produksi — hanya membuktikan bahwa source terkompilasi.
+Pemicunya `workflow_dispatch`, push ke branch `ci/**` atau `verifikasi/**`, dan
+`pull_request` ke `main`; push ke `main` tidak memicu apa pun.
+
+Rincian celah verifikasi yang ditutupnya, temuan audit, dan cara menjalankan:
+[docs/verifikasi-ci-2026-09-18.md](docs/verifikasi-ci-2026-09-18.md).
+
 ## Build via GitHub Actions
 
 Tidak ada build otomatis. Workflow dijalankan **manual hanya setelah izin eksplisit pemilik** melalui repo publik source-free [`XyCloudStore-build`](https://github.com/xykalnotkel/XyCloudStore-build). Repo itu checkout source privat memakai deploy key read-only; secret penandatangan tidak pernah dipersist ke Git.

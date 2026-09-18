@@ -1,0 +1,563 @@
+name: Verifikasi Build Menyeluruh
+
+# Gerbang kompilasi/analisis untuk SELURUH komponen monorepo.
+#
+# Latar belakang: audit 2026-09-17 menutup seluruh batch coding, tetapi
+# `flutter analyze/test/build` dan `cargo build` sengaja belum dijalankan.
+# Sembilan commit terakhir (207 berkas) masuk dengan `[skip ci]`, sehingga
+# kode Dart, Java native, dan Rust agen belum pernah dikompilasi satu kali pun.
+# Workflow ini menutup celah itu TANPA mempublikasikan apa pun:
+#   - tidak memakai keystore/signing (build rilis memakai penandatanganan debug)
+#   - tidak mengunggah APK/AAR/exe sebagai artifact maupun release
+#   - tidak menyentuh D1 produksi, Worker, Pages, Vercel, atau secret vendor
+#
+# Build rilis yang sesungguhnya tetap hanya lewat repo publik source-free
+# `XyCloudStore-build` setelah izin eksplisit pemilik.
+on:
+  workflow_dispatch:
+    inputs:
+      ketat:
+        description: "Mode ketat: warning Flutter ikut menggagalkan (bawaan false)"
+        required: false
+        default: "false"
+        type: choice
+        options: ["false", "true"]
+  push:
+    branches:
+      - "ci/**"
+      - "verifikasi/**"
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: verifikasi-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  FLUTTER_VERSION: "3.24.5"
+  APP_DIR: app
+
+jobs:
+  # ------------------------------------------------------------------
+  # Gerbang murah: sintaks, skema D1, referensi aset, pola secret.
+  # Jalan dulu supaya galat trivial ketahuan sebelum membakar menit runner.
+  # ------------------------------------------------------------------
+  kualitas:
+    name: Kualitas source & skema
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      # Python 3 + PyYAML sudah ada di image ubuntu-latest; tidak perlu action
+      # tambahan (menghindari SHA yang belum terverifikasi).
+      - name: Sintaks seluruh tool Python
+        run: |
+          set -euo pipefail
+          python3 --version
+          python3 -m py_compile tools/*.py
+
+      - name: Sintaks YAML seluruh workflow
+        run: |
+          set -euo pipefail
+          python3 -c "import yaml" 2>/dev/null || python3 -m pip install --quiet pyyaml
+          python3 - <<'PY'
+          import glob, sys
+          try:
+              import yaml
+          except ImportError:
+              sys.exit("PyYAML tidak tersedia di runner")
+          gagal = []
+          berkas = sorted(glob.glob(".github/workflows/*.yml")) + sorted(glob.glob(".github/workflows/*.yaml"))
+          for path in berkas:
+              with open(path, encoding="utf-8") as fh:
+                  try:
+                      data = yaml.safe_load(fh)
+                  except Exception as exc:  # noqa: BLE001
+                      gagal.append(f"{path}: {exc}")
+                      continue
+              if not isinstance(data, dict) or ("jobs" not in data):
+                  gagal.append(f"{path}: bukan workflow valid (tidak ada 'jobs')")
+          for path in berkas:
+              print(f"  ok  {path}")
+          if gagal:
+              print("\nYAML GAGAL:")
+              for item in gagal:
+                  print("  -", item)
+              raise SystemExit(1)
+          print(f"\n{len(berkas)} workflow valid.")
+          PY
+
+      - name: Penomoran migrasi D1 unik & berurutan
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import glob, os, re, sys
+          berkas = sorted(glob.glob("api/migrations/*.sql"))
+          if not berkas:
+              sys.exit("Tidak ada berkas migrasi; periksa api/migrations/")
+          nomor = {}
+          for path in berkas:
+              m = re.match(r"^(\d{4})_(.+)\.sql$", os.path.basename(path))
+              if not m:
+                  sys.exit(f"Nama migrasi tidak sesuai pola NNNN_nama.sql: {path}")
+              nomor.setdefault(m.group(1), []).append(path)
+          duplikat = {k: v for k, v in nomor.items() if len(v) > 1}
+          if duplikat:
+              for k, v in sorted(duplikat.items()):
+                  print(f"Nomor migrasi {k} dipakai {len(v)} berkas: {v}")
+              raise SystemExit(1)
+          urut = sorted(nomor)
+          loncat = [a for a, b in zip(urut, urut[1:]) if int(b) - int(a) != 1]
+          print(f"{len(berkas)} migrasi: {urut[0]} .. {urut[-1]}")
+          if loncat:
+              print(f"PERINGATAN: ada nomor yang loncat setelah {loncat}")
+          PY
+
+      - name: Skema D1 repo konsisten (schema.sql + migrations)
+        run: python3 tools/cek_skema_d1.py --lokal
+
+      - name: Referensi aset aplikasi tidak ada yang hilang
+        run: python3 tools/cek_referensi_aset.py
+
+      - name: Tidak ada credential nyata di source
+        run: python3 tools/cek_secret_source.py
+
+      - name: Ringkasan
+        run: |
+          {
+            echo "## Kualitas source"
+            echo ""
+            echo "- Tool Python: \`py_compile\` lulus"
+            echo "- YAML workflow: valid"
+            echo "- Migrasi D1: penomoran unik"
+            echo "- Skema D1 repo: konsisten"
+            echo "- Referensi aset app: tidak ada yang hilang"
+            echo "- Pola secret: bersih"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ------------------------------------------------------------------
+  # API Cloudflare Worker: uji regresi lengkap (65 test) + audit dependensi.
+  # ------------------------------------------------------------------
+  api:
+    name: API Worker (uji regresi)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+
+      - name: Install dependency terkunci
+        run: npm ci --no-audit --no-fund
+
+      - name: Pemeriksaan sintaks Worker & test
+        run: |
+          set -euo pipefail
+          for file in src/*.js test/*.mjs; do node --check "$file" >/dev/null; done
+          echo "Sintaks seluruh src/*.js dan test/*.mjs valid."
+
+      - name: Uji regresi API lengkap
+        run: npm test
+
+      - name: Audit dependensi produksi
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Bundle Worker bisa dibangun (esbuild)
+        run: |
+          set -euo pipefail
+          npx esbuild src/index.js --bundle --format=esm --platform=neutral \
+            --target=es2022 --outfile=/tmp/worker-bundle.js \
+            --external:__STATIC_CONTENT_MANIFEST
+          test -s /tmp/worker-bundle.js
+          echo "Bundle Worker: $(du -h /tmp/worker-bundle.js | cut -f1)"
+
+  # ------------------------------------------------------------------
+  # Dashboard Next.js: typegen + tsc + static export seluruh route.
+  # ------------------------------------------------------------------
+  dashboard:
+    name: Dashboard (tsc + static export)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+
+      - name: Install dependency terkunci
+        run: npm ci --no-audit --no-fund
+
+      - name: Type generation + TypeScript
+        run: npm run lint
+
+      - name: Build static export produksi
+        env:
+          NEXT_PUBLIC_API_BASE: https://api.xycloud.my.id
+        run: npm run build
+
+      - name: Hitung route hasil export
+        run: |
+          set -euo pipefail
+          test -d out || { echo "Folder out/ tidak dibuat — periksa next.config.js"; exit 1; }
+          jumlah=$(find out -name '*.html' | wc -l | tr -d ' ')
+          echo "Route HTML ter-export: $jumlah"
+          test "$jumlah" -ge 50 || { echo "Jumlah route turun drastis (<50)"; exit 1; }
+          {
+            echo "## Dashboard"
+            echo ""
+            echo "- \`tsc --noEmit\`: lulus"
+            echo "- Static export: **$jumlah** halaman HTML"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ------------------------------------------------------------------
+  # Aplikasi Flutter: analyze + test + build APK rilis (tanpa keystore).
+  # Resep identik dengan build produksi, hanya bagian signing/rilis dibuang.
+  # ------------------------------------------------------------------
+  flutter:
+    name: Flutter (analyze + test + APK)
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Validasi sintaks tool build
+        run: python3 -m py_compile tools/*.py
+
+      - name: Setup Java 17
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Flutter ${{ env.FLUTTER_VERSION }}
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Info toolchain
+        run: |
+          flutter --version
+          java -version
+
+      - name: Generate platform Android
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          flutter create . \
+            --platforms=android \
+            --org id.xycloud \
+            --project-name xycloud_order \
+            --description "XyCloudStore - Sewa PC Cloud, Beli Akun, CS Realtime"
+
+      - name: Siapkan engine streaming native dalam APK
+        run: python3 tools/siapkan_streaming.py
+
+      - name: Siapkan updater native (DownloadManager + notif progress)
+        working-directory: ${{ env.APP_DIR }}
+        run: python3 ../tools/siapkan_pembaruan.py android
+
+      - name: Siapkan mode privasi (FLAG_SECURE anti-screenshot)
+        working-directory: ${{ env.APP_DIR }}
+        run: python3 ../tools/siapkan_keamanan.py android
+
+      - name: Siapkan login biometrik (MainActivity → FlutterFragmentActivity)
+        working-directory: ${{ env.APP_DIR }}
+        run: python3 ../tools/siapkan_biometrik.py android
+
+      - name: Siapkan ikon push (override ikon OneSignal)
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          python3 -m pip install --quiet pillow || python3 -m pip install --user --quiet pillow
+          python3 ../tools/siapkan_ikon_push.py --android-dir android
+          ls -la android/app/src/main/res/drawable/ic_stat_onesignal_default.png
+
+      - name: Naikkan versi Kotlin (dibutuhkan OneSignal)
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          for f in android/settings.gradle android/settings.gradle.kts; do
+            [ -f "$f" ] || continue
+            sed -i -E 's/(org\.jetbrains\.kotlin\.android["\)]?[[:space:]]+version[[:space:]]+")[^"]+"/\12.2.20"/' "$f"
+          done
+          for f in android/build.gradle android/build.gradle.kts; do
+            [ -f "$f" ] && sed -i -E 's/(kotlin-gradle-plugin:)[0-9.]+/\12.2.20/' "$f" || true
+          done
+          echo "Versi Kotlin dinaikkan ke 2.2.20."
+
+      - name: Naikkan minSdk ke 23 (dibutuhkan plugin record_android)
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          for f in android/app/build.gradle android/app/build.gradle.kts; do
+            [ -f "$f" ] || continue
+            sed -i -E 's/(minSdk\s*=?\s*)flutter\.minSdkVersion/\123/' "$f"
+            grep -nE "minSdk|compileSdk|targetSdk" "$f" || true
+          done
+
+      - name: Bersihkan berkas bawaan flutter create
+        working-directory: ${{ env.APP_DIR }}
+        run: rm -f test/widget_test.dart
+
+      - name: Install dependencies
+        working-directory: ${{ env.APP_DIR }}
+        run: flutter pub get
+
+      - name: Generate launcher icon
+        working-directory: ${{ env.APP_DIR }}
+        run: dart run flutter_launcher_icons
+
+      - name: Generate native splash
+        working-directory: ${{ env.APP_DIR }}
+        run: dart run flutter_native_splash:create
+
+      - name: Set nama aplikasi & izin internet
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          MANIFEST=android/app/src/main/AndroidManifest.xml
+          python3 ../tools/patch_manifest.py "$MANIFEST"
+          grep -nE "android:label|INTERNET|applicationId" "$MANIFEST" android/app/build.gradle || true
+
+      - name: Analyze (Dart)
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          if [ "${{ github.event.inputs.ketat }}" = "true" ]; then
+            flutter analyze
+          else
+            flutter analyze --no-fatal-infos --no-fatal-warnings
+          fi
+
+      - name: Test (Dart)
+        working-directory: ${{ env.APP_DIR }}
+        run: flutter test
+
+      # Tanpa key.properties, buildTypes.release memakai signingConfigs.debug
+      # (bawaan template Flutter). Jadi langkah ini memverifikasi kompilasi
+      # rilis penuh — Dart kernel, Kotlin, Java native, ndkBuild 3 ABI —
+      # tanpa memerlukan keystore. APK TIDAK diunggah: tanda tangan debug
+      # berarti tidak boleh didistribusikan.
+      - name: Build APK rilis (kompilasi penuh, tanda tangan debug)
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          flutter build apk --release \
+            --dart-define=XY_MOCK=false \
+            --dart-define=XY_BASE_URL=https://api.xycloud.my.id \
+            --dart-define=XY_ONESIGNAL_APP_ID=f4843c35-cc1d-4772-9f70-1c4349397ffb \
+            --dart-define=XY_GOOGLE_SERVER_CLIENT_ID=495336144977-1fu3nv7r35pi2i0t8qu6ng0u695t0veg.apps.googleusercontent.com
+
+      - name: Inspeksi hasil kompilasi (tanpa mengunggah APK)
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          set -euo pipefail
+          APK=build/app/outputs/flutter-apk/app-release.apk
+          test -f "$APK" || { echo "APK rilis tidak dibuat"; exit 1; }
+          ukuran=$(du -h "$APK" | cut -f1)
+          AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt2 2>/dev/null | sort -r | head -n1 || true)
+          info=""
+          if [ -n "$AAPT" ]; then
+            info=$("$AAPT" dump badging "$APK" 2>/dev/null | grep -E "^package:|sdkVersion|application-label:" | head -5 || true)
+          fi
+          echo "APK: $APK ($ukuran)"
+          [ -n "$info" ] && printf '%s\n' "$info"
+          {
+            echo "## Aplikasi Flutter"
+            echo ""
+            echo "- \`flutter analyze\`: lulus"
+            echo "- \`flutter test\`: lulus"
+            echo "- \`flutter build apk --release\`: **lulus** ($ukuran, tanda tangan debug)"
+            echo "- Native \`xy_stream\` (Moonlight v12.1 + NDK): terkompilasi dalam APK"
+            echo ""
+            echo "> APK verifikasi **tidak diunggah**. Build distribusi tetap lewat"
+            echo "> repo \`XyCloudStore-build\` dengan keystore pemilik."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ------------------------------------------------------------------
+  # Library native Android diisolasi: sinyal cepat bila yang gagal Java/NDK,
+  # bukan Dart. Setara `native-check.yml` yang dihapus pada 16d5b5e.
+  # ------------------------------------------------------------------
+  native-aar:
+    name: Native xy_stream (AAR 3 ABI)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Flutter ${{ env.FLUTTER_VERSION }}
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Generate platform Android
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          flutter create . --platforms=android --org id.xycloud --project-name xycloud_order
+          flutter pub get
+
+      - name: Siapkan sumber streaming terpaku (Moonlight v12.1)
+        run: python3 tools/siapkan_streaming.py
+
+      - name: Kompilasi library native (armeabi-v7a, arm64-v8a, x86_64)
+        working-directory: ${{ env.APP_DIR }}/android
+        run: ./gradlew :xy_stream:assembleRelease --no-daemon --stacktrace
+
+      - name: Laporkan hasil AAR
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          aar=(native/xy_stream/build/outputs/aar/*.aar)
+          test ${#aar[@]} -gt 0 || { echo "AAR tidak dihasilkan"; exit 1; }
+          for f in "${aar[@]}"; do echo "$(basename "$f"): $(du -h "$f" | cut -f1)"; done
+          {
+            echo "## Native xy_stream"
+            echo ""
+            for f in "${aar[@]}"; do
+              echo "- \`$(basename "$f")\` — $(du -h "$f" | cut -f1)"
+            done
+            echo ""
+            echo "Java (XyHud, ReferralActivity, LiveLinkActivity, NativeStreaming) + ndkBuild lulus."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ------------------------------------------------------------------
+  # Agen PC Host Windows (Rust/egui native) — crate yang benar-benar dikirim.
+  # ------------------------------------------------------------------
+  agen-windows:
+    name: Agen Windows (cargo build)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Pasang toolchain Rust (stable-msvc)
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Bangun rilis native (cargo build --release --locked)
+        shell: pwsh
+        working-directory: agent-gui/src-native
+        run: |
+          cargo build --release --locked
+          $exe = Get-Item "target/release/xycloud-agent.exe" -ErrorAction SilentlyContinue
+          if (-not $exe) { throw "xycloud-agent.exe tidak ditemukan setelah cargo build" }
+          Write-Host "EXE:" $exe.FullName $exe.Length
+
+      - name: Smoke-test versi
+        shell: pwsh
+        working-directory: agent-gui/src-native
+        run: |
+          $p = Start-Process -FilePath .\target\release\xycloud-agent.exe -ArgumentList '--veri' `
+            -Wait -PassThru -NoNewWindow -RedirectStandardOutput ..\..\veri.txt
+          Get-Content ..\..\veri.txt
+          if ($p.ExitCode -ne 0) { throw "Smoke-test --veri gagal (exit $($p.ExitCode))" }
+          if (-not (Select-String -Path ..\..\veri.txt -Pattern 'XyCloudStore-Agent 1\.5\.' -Quiet)) {
+            throw "Output --veri tidak memuat versi yang diharapkan"
+          }
+          Remove-Item ..\..\veri.txt -Force -ErrorAction SilentlyContinue
+
+      - name: Ringkasan
+        shell: pwsh
+        run: |
+          $ukuran = (Get-Item agent-gui/src-native/target/release/xycloud-agent.exe).Length
+          "## Agen Windows`n`n- ``cargo build --release --locked``: lulus`n- Smoke-test ``--veri``: lulus`n- Ukuran exe: $([math]::Round($ukuran/1MB,2)) MB (tidak diunggah)" |
+            Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+  # ------------------------------------------------------------------
+  # Crate Tauri lama (v1.4) — sudah digantikan build native egui, tetapi
+  # `agent.rs` dipakai ulang keduanya lewat #[path]. Diperiksa sebagai info.
+  # ------------------------------------------------------------------
+  agen-tauri-legacy:
+    name: Agen Tauri legacy (info)
+    runs-on: windows-latest
+    timeout-minutes: 45
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Pasang toolchain Rust (stable-msvc)
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: cargo check crate Tauri legacy
+        shell: pwsh
+        working-directory: agent-gui/src-tauri
+        run: cargo check --locked
+
+  # ------------------------------------------------------------------
+  # Rangkuman satu tempat: gagal bila ada job wajib yang merah.
+  # ------------------------------------------------------------------
+  ringkasan:
+    name: Ringkasan verifikasi
+    if: always()
+    needs: [kualitas, api, dashboard, flutter, native-aar, agen-windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Susun laporan
+        env:
+          HASIL: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os
+          hasil = json.loads(os.environ["HASIL"])
+          baris = []
+          wajib_gagal = []
+          for nama, job in hasil.items():
+              kesimpulan = job.get("result", "unknown")
+              ikon = {"success": "PASS", "failure": "FAIL", "cancelled": "BATAL",
+                      "skipped": "LEWAT"}.get(kesimpulan, kesimpulan.upper())
+              baris.append(f"| {nama} | {ikon} |")
+              if kesimpulan not in {"success", "skipped"}:
+                  wajib_gagal.append(nama)
+          laporan = ["## Verifikasi build menyeluruh", "",
+                     "| Job | Hasil |", "|---|---|"] + baris + [""]
+          if wajib_gagal:
+              laporan.append(f"**Gagal:** {', '.join(wajib_gagal)}")
+          else:
+              laporan.append("**Seluruh komponen terkompilasi dan lulus uji.**")
+          laporan += ["",
+                      "Build rilis (APK bertanda tangan, exe agen, deploy Worker/Pages/"
+                      "Vercel) tetap manual dan hanya lewat izin pemilik.", ""]
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as fh:
+              fh.write("\n".join(laporan))
+          if wajib_gagal:
+              raise SystemExit(f"Job gagal: {', '.join(wajib_gagal)}")
+          print("Seluruh job wajib lulus.")
+          PY
