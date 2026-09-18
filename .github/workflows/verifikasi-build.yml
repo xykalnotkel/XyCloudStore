@@ -179,9 +179,16 @@ jobs:
       - name: Bundle Worker bisa dibangun (esbuild)
         run: |
           set -euo pipefail
+          # Loader harus mencerminkan [[rules]] di wrangler.toml: Text untuk
+          # **/*.html dan Data untuk **/*.png. Worker mengimpor admin.html,
+          # admin-legacy.html, web.html, brand-logo.png, brand-logo-full.png,
+          # dan brand-og.png sebagai modul. Bila nanti ada tipe baru yang
+          # diimpor, langkah ini gagal lebih dulu — itu tanda wrangler.toml
+          # juga perlu rule baru, bukan sekadar menambah loader di sini.
           npx esbuild src/index.js --bundle --format=esm --platform=neutral \
-            --target=es2022 --outfile=/tmp/worker-bundle.js \
-            --external:__STATIC_CONTENT_MANIFEST
+            --target=es2022 \
+            --loader:.html=text --loader:.png=binary \
+            --outfile=/tmp/worker-bundle.js
           test -s /tmp/worker-bundle.js
           echo "Bundle Worker: $(du -h /tmp/worker-bundle.js | cut -f1)"
 
@@ -433,18 +440,28 @@ jobs:
       - name: Laporkan hasil AAR
         run: |
           set -euo pipefail
-          shopt -s nullglob
-          aar=(native/xy_stream/build/outputs/aar/*.aar)
-          test ${#aar[@]} -gt 0 || { echo "AAR tidak dihasilkan"; exit 1; }
-          for f in "${aar[@]}"; do echo "$(basename "$f"): $(du -h "$f" | cut -f1)"; done
+          # tools/siapkan_streaming.py memetakan projectDir modul ke
+          # ../../native/xy_stream, tetapi direktori build/ akhirnya ditentukan
+          # konfigurasi Gradle induk (bisa dipindah), jadi AAR-nya dicari —
+          # tidak diasumsikan pada satu path. Run pertama workflow ini gagal
+          # di langkah laporan padahal `:xy_stream:assembleRelease` sendiri
+          # BUILD SUCCESSFUL dalam 3m33s.
+          mapfile -t aar < <(find . -name '*.aar' -type f -not -path '*/node_modules/*' 2>/dev/null | sort)
+          if [ "${#aar[@]}" -eq 0 ]; then
+            echo "AAR tidak ditemukan di mana pun. Direktori outputs yang ada:"
+            find . -type d \( -name aar -o -name outputs \) -not -path '*/node_modules/*' | head -20
+            exit 1
+          fi
+          for f in "${aar[@]}"; do echo "$f — $(du -h "$f" | cut -f1)"; done
           {
             echo "## Native xy_stream"
             echo ""
             for f in "${aar[@]}"; do
-              echo "- \`$(basename "$f")\` — $(du -h "$f" | cut -f1)"
+              echo "- \`$f\` — $(du -h "$f" | cut -f1)"
             done
             echo ""
-            echo "Java (XyHud, ReferralActivity, LiveLinkActivity, NativeStreaming) + ndkBuild lulus."
+            echo "\`:xy_stream:assembleRelease\` lulus: Java (XyHud, ReferralActivity,"
+            echo "LiveLinkActivity, NativeStreaming) + ndkBuild 3 ABI terkompilasi."
           } >> "$GITHUB_STEP_SUMMARY"
 
   # ------------------------------------------------------------------

@@ -23,7 +23,14 @@ void _snackMutasiLive(
   String? hasil, {
   required String pesanSukses,
 }) {
-  final informasi = hasil?.startsWith('INFO:') ?? false;
+  // `teks` dipakai agar flow analysis Dart bisa memastikan `substring` hanya
+  // dipanggil pada nilai non-null. Sebelumnya `hasil.substring(5)` dipanggil
+  // langsung di cabang `informasi` — analyzer menolak karena nullability
+  // `hasil` tidak terpromosikan lewat variabel bool terpisah
+  // (unchecked_use_of_nullable_value). Perilakunya identik: bila `hasil` null,
+  // `teks` kosong sehingga `informasi` tetap false dan cabang itu tak terpakai.
+  final teks = hasil ?? '';
+  final informasi = teks.startsWith('INFO:');
   final gagal = hasil != null && !informasi;
   messenger.showSnackBar(SnackBar(
     behavior: SnackBarBehavior.floating,
@@ -33,7 +40,7 @@ void _snackMutasiLive(
             ? XyTheme.warning
             : XyTheme.success,
     content: Text(
-      informasi ? hasil.substring(5) : (hasil ?? pesanSukses),
+      informasi ? teks.substring(5) : (hasil ?? pesanSukses),
       style: TextStyle(color: informasi ? const Color(0xFF241500) : Colors.white),
     ),
   ));

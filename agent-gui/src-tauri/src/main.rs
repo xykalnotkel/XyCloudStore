@@ -1,6 +1,16 @@
 // ============================================================
 //  XyCloudStore — Agen PC Host (Tauri v2 / Rust, tanpa Python)
 // ============================================================
+// `#[path]` eksplisit ini wajib, bukan hiasan. Tanpa atribut path, modul
+// non-inline `agent` (berkas src/agent.rs) membuat direktori anaknya menjadi
+// `src/agent/`, sehingga `mod obs_live;` di dalam agent.rs dicari di
+// src/agent/obs_live.rs dan gagal dengan E0583 "file not found for module
+// `obs_live`". Dengan #[path], direktori modul tetap `src/` sehingga
+// src/obs_live.rs ditemukan — sama seperti crate native
+// (agent-gui/src-native) yang menyertakan agent.rs lewat
+// `#[path = "../../src-tauri/src/agent.rs"]`. Jadi kedua crate memakai berkas
+// agent.rs + obs_live.rs yang identik tanpa perlu memindahkan apa pun.
+#[path = "agent.rs"]
 mod agent;
 
 use agent::{Konfig, Logger};
