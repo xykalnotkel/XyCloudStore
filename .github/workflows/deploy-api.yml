@@ -76,17 +76,32 @@ jobs:
         working-directory: .
         run: |
           set -euo pipefail
+          # PENTING: endpoint kesehatan publik adalah `/health`, BUKAN
+          # `/api/health`. Di api/src/index.js route-nya `path === '/health'`
+          # (baris ~1829) dan hanya itu yang masuk allowlist tanpa autentikasi
+          # (baris ~2139). `/api/health` jatuh ke gerbang auth dan membalas
+          # HTTP 401, sehingga `curl --fail` di sini membuat seluruh deploy
+          # terlihat gagal padahal Worker dan migrasi sudah sukses.
+          # Diverifikasi 2026-09-18: /health -> 200 {"data":{"ok":true,...}},
+          #                              /api/health -> 401 {"error":"Unauthorized"}.
           curl --fail --silent --show-error --retry 4 --retry-delay 3 \
-            https://api.xycloud.my.id/api/health >/tmp/health.json
+            https://api.xycloud.my.id/health >/tmp/health.json
           curl --fail --silent --show-error --retry 4 --retry-delay 3 \
             https://api.xycloud.my.id/api/config >/tmp/config.json
           node - <<'NODE'
           const fs = require('fs');
-          for (const file of ['/tmp/health.json', '/tmp/config.json']) {
-            const body = JSON.parse(fs.readFileSync(file, 'utf8'));
-            if (!body || body.ok === false) throw new Error(`Smoke test gagal: ${file}`);
+          const health = JSON.parse(fs.readFileSync('/tmp/health.json', 'utf8'));
+          const config = JSON.parse(fs.readFileSync('/tmp/config.json', 'utf8'));
+          // /health  -> {"data":{"ok":true,"at":"..."}}
+          if (health?.data?.ok !== true) throw new Error('Smoke test gagal: /health tidak ok=true');
+          // /api/config -> {"data":{...}} ; pastikan pemeliharaan tidak aktif tak terduga
+          if (!config?.data || typeof config.data !== 'object') {
+            throw new Error('Smoke test gagal: /api/config tidak memuat data');
           }
-          console.log('Health dan config produksi dapat dibaca.');
+          const pemeliharaan = config.data.pemeliharaan?.aktif;
+          console.log(`Health OK pada ${health.data.at}`);
+          console.log(`Config OK; pemeliharaan aktif = ${pemeliharaan}`);
+          console.log(`Provider login: google=${config.data.providers?.google} facebook=${config.data.providers?.facebook}`);
           NODE
 
       - name: Ringkasan aman
