@@ -442,9 +442,6 @@ class _LoginScreenState extends State<LoginScreen> {
                           ? String.fromCharCodes(
                               kode.runes.map((r) => 0x1F1E6 + r - 65))
                           : '\u{1F310}';
-                      final namaNegara = kon.negaraNama.isNotEmpty
-                          ? kon.negaraNama
-                          : 'Indonesia';
                       return Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 10),
                         child: Text.rich(

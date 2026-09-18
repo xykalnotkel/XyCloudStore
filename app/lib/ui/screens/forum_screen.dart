@@ -737,7 +737,7 @@ class _ForumDetailScreenState extends State<ForumDetailScreen> {
       foto: s.user?.foto,
       isi: text,
       admin: false,
-      dibuat: DateTime.now().toIso8601String(),
+      dibuat: DateTime.now(),
       balasKe: _reply?.id,
       suka: 0,
       tier: s.user?.tier ?? 'basic',

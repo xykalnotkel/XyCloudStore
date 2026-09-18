@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/format.dart';
+import '../../core/motion.dart';
 import '../../core/pengaturan.dart';
 import '../../core/theme.dart';
 import '../../data/native_stream.dart';
@@ -623,9 +624,9 @@ class _SesiScreenState extends State<SesiScreen> {
                   ramGb: 16,
                   storageGb: 256,
                   hargaPerJam: widget.order.durasiJam > 0
-                      ? (widget.order.harga ~/ widget.order.durasiJam)
+                      ? (widget.order.total ~/ widget.order.durasiJam)
                       : 10000,
-                  hargaPerHari: widget.order.harga * 8,
+                  hargaPerHari: widget.order.total * 8,
                   region: 'Jakarta',
                   unitTersedia: 1,
                   totalUnit: 1,
@@ -1186,7 +1187,7 @@ class _PanelBillingCyberindo extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              _itemStat('Tarif Billing', rupiah(order.harga)),
+              _itemStat('Tarif Billing', rupiah(order.total)),
               _itemStat('Paket Akun', 'Personal Member'),
               _itemStat('Billing Server', 'Cyberindo Gac v2.9'),
             ],
@@ -1211,7 +1212,7 @@ class _PanelBillingCyberindo extends StatelessWidget {
                     child: const Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.add_time_rounded, size: 15, color: Colors.white),
+                        Icon(Icons.more_time_rounded, size: 15, color: Colors.white),
                         SizedBox(width: 5),
                         Text(
                           'Perpanjang',

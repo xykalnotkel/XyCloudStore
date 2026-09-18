@@ -138,14 +138,14 @@ class _Baris extends StatelessWidget {
       Navigator.push(
         context,
         xyRoute(DmChatScreen(
-          lawanId: notif.refId!,
-          namaLawan: notif.aktor ?? 'Pengguna',
+          userId: notif.refId!,
+          nama: notif.aktor ?? 'Pengguna',
         )),
       );
       return;
     }
     if (notif.refJenis == 'livestream' || notif.jenis == 'livestream') {
-      Navigator.push(context, xyRoute(const LivestreamScreen()));
+      Navigator.push(context, xyRoute(const XyLiveScreen()));
       return;
     }
     if (notif.refJenis == 'order' || notif.refJenis == 'sewa' || notif.jenis == 'order') {

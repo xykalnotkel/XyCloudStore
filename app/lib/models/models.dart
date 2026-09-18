@@ -1322,6 +1322,21 @@ class DmPesan {
 
   bool dariSaya(String sayaId) => dariId == sayaId;
   DateTime get tanggal => DateTime.fromMillisecondsSinceEpoch(waktu);
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'dari_id': dariId,
+    'ke_id': keId,
+    'teks': teks,
+    'audio': audio,
+    'durasi': durasi,
+    'gambar': gambar,
+    'tipe': tipe,
+    'dibaca': dibaca ? 1 : 0,
+    'waktu': waktu,
+    'dari_nama': dariNama,
+    'dari_foto': dariFoto,
+  };
 }
 
 
