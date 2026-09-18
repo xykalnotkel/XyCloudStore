@@ -253,10 +253,14 @@ class _Discovery extends StatelessWidget {
               tone: XyTheme.warning,
             )
           else if (streams.isEmpty)
-            const _Notice(
-              icon: Icons.videogame_asset_off_rounded,
-              title: 'Belum ada yang live',
-              text: 'Jadilah gamer pertama yang menyiarkan sesi rental. Daftar kreator dari tab Studio Kreator.',
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 24),
+              child: Kosong(
+                icon: Icons.live_tv_rounded,
+                judul: 'Belum ada siaran aktif',
+                sub: 'Jadilah gamer pertama yang menyiarkan live stream! Mulai siaran dari kamera HP atau layar di tab Studio Kreator.',
+                ilustrasi: 'livestream',
+              ),
             )
           else
             ...streams.map((live) => Padding(
@@ -700,7 +704,7 @@ class _CreatorApplyState extends State<_CreatorApply> {
     final namaBersih = name.text.trim();
     final siap = !busy && age && terms && namaBersih.length >= 3 && namaBersih.length <= 40;
     final children = <Widget>[
-      const Icon(Icons.stars_rounded, size: 64, color: XyTheme.primary),
+      const Center(child: XyIlustrasi('livestream', tinggi: 130)),
       const SizedBox(height: 12),
       const Text('Jadi kreator XyCloud', textAlign: TextAlign.center,
           style: TextStyle(fontSize: 23, fontWeight: FontWeight.w900, letterSpacing: -.6)),
@@ -756,13 +760,16 @@ class _CreatorStatus extends StatelessWidget {
     final status = data.status;
     final pending = status == 'pending';
     final color = pending ? XyTheme.warning : XyTheme.danger;
-    return ListView(padding: const EdgeInsets.fromLTRB(18, 28, 18, 110), children: [
-      Icon(pending ? Icons.hourglass_top_rounded : Icons.info_outline_rounded, size: 62, color: color),
+    return ListView(padding: const EdgeInsets.fromLTRB(18, 20, 18, 110), children: [
+      if (pending)
+        const Center(child: XyIlustrasi('kreator_review', tinggi: 160))
+      else
+        Icon(Icons.info_outline_rounded, size: 62, color: color),
       const SizedBox(height: 14),
-      Text(pending ? 'Sedang ditinjau' : status == 'suspended' ? 'Program ditangguhkan' : 'Pengajuan belum disetujui',
+      Text(pending ? 'Pengajuan Sedang Ditinjau' : status == 'suspended' ? 'Program ditangguhkan' : 'Pengajuan belum disetujui',
           textAlign: TextAlign.center, style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w900)),
       const SizedBox(height: 8),
-      Text('${data.profile?['review_note'] ?? (pending ? 'Admin memeriksa usia, keamanan akun, dan kesiapan payout.' : 'Perbaiki profil lalu ajukan ulang atau hubungi Chat Admin.')}',
+      Text('${data.profile?['review_note'] ?? (pending ? 'Tim verifikasi sedang memeriksa identitas & kelayakan kreator. Notifikasi akan masuk saat disetujui.' : 'Perbaiki profil lalu ajukan ulang atau hubungi Chat Admin.')}',
           textAlign: TextAlign.center, style: TextStyle(color: XyTheme.of(context).muted, height: 1.5)),
       if (!pending && status != 'suspended') ...[
         const SizedBox(height: 20),
@@ -956,10 +963,11 @@ class _StartLiveForm extends StatefulWidget {
 class _StartLiveFormState extends State<_StartLiveForm> {
   final title = TextEditingController();
   final game = TextEditingController();
+  String sumber = 'kamera'; // 'kamera' | 'layar' | 'obs'
   bool recording = false;
   bool safe = false;
   bool terms = false;
-  bool mic = false;
+  bool mic = true;
   bool busy = false;
 
   @override
@@ -971,34 +979,118 @@ class _StartLiveFormState extends State<_StartLiveForm> {
 
   @override
   Widget build(BuildContext context) {
+    final t = XyTheme.of(context);
     final titleLength = title.text.trim().length;
     final gameLength = game.text.trim().length;
     final ready = widget.enabled && recording && safe && terms && !busy
         && titleLength >= 5 && titleLength <= 100
         && gameLength >= 2 && gameLength <= 60;
+    final isMobile = sumber == 'kamera' || sumber == 'layar';
+
     return XyCard(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const Text('Mulai siaran baru', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
       const SizedBox(height: 5),
-      Text('Sesi PC harus sudah aktif dan agen unit harus online.', style: TextStyle(color: XyTheme.of(context).muted, fontSize: 12)),
-      const SizedBox(height: 15),
-      TextField(controller: title, maxLength: 100, onChanged: (_) => setState(() {}), decoration: const InputDecoration(labelText: 'Judul live', hintText: 'Push rank menuju Immortal')),
+      Text(
+        isMobile
+            ? 'Live langsung dari smartphone kamu (kamera depan/belakang atau rekam layar).'
+            : 'Siaran otomatis dari PC Cloud rental yang sedang aktif.',
+        style: TextStyle(color: t.muted, fontSize: 12),
+      ),
+      const SizedBox(height: 14),
+
+      // Pilihan sumber siaran: Kamera HP, Layar HP, atau PC Rental (OBS)
+      const Text('Pilih Sumber Siaran', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
       const SizedBox(height: 8),
-      TextField(controller: game, maxLength: 60, onChanged: (_) => setState(() {}), decoration: const InputDecoration(labelText: 'Game')),
+      Row(children: [
+        Expanded(
+          child: _PilihanSumber(
+            icon: Icons.videocam_rounded,
+            label: 'Kamera HP',
+            terpilih: sumber == 'kamera',
+            onTap: () => setState(() => sumber = 'kamera'),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _PilihanSumber(
+            icon: Icons.screen_share_rounded,
+            label: 'Layar HP',
+            terpilih: sumber == 'layar',
+            onTap: () => setState(() => sumber = 'layar'),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _PilihanSumber(
+            icon: Icons.desktop_windows_rounded,
+            label: 'PC Rental',
+            terpilih: sumber == 'obs',
+            onTap: () => setState(() => sumber = 'obs'),
+          ),
+        ),
+      ]),
+      const SizedBox(height: 15),
+
+      TextField(
+        controller: title,
+        maxLength: 100,
+        onChanged: (_) => setState(() {}),
+        decoration: InputDecoration(
+          labelText: 'Judul live',
+          hintText: sumber == 'kamera'
+              ? 'Ngobrol santai & mabar bareng'
+              : sumber == 'layar'
+                  ? 'Push rank Mobile Legends / Free Fire'
+                  : 'Push rank menuju Immortal',
+        ),
+      ),
+      const SizedBox(height: 8),
+      TextField(
+        controller: game,
+        maxLength: 60,
+        onChanged: (_) => setState(() {}),
+        decoration: InputDecoration(
+          labelText: sumber == 'kamera' ? 'Kategori / Topik' : 'Game',
+          hintText: sumber == 'kamera' ? 'Just Chatting / Mabar' : 'Mobile Legends / GTA V',
+        ),
+      ),
       SwitchListTile(
-        value: mic, onChanged: (v) => setState(() => mic = v),
+        value: mic,
+        onChanged: (v) => setState(() => mic = v),
         contentPadding: EdgeInsets.zero,
         title: const Text('Izinkan mic'),
-        subtitle: const Text('Default mati. Hanya source XyCloudMic yang disiapkan operator.'),
+        subtitle: Text(
+          isMobile
+              ? 'Gunakan mikrofon smartphone untuk berbicara selama siaran.'
+              : 'Default mati. Hanya source XyCloudMic yang disiapkan operator.',
+          style: TextStyle(color: t.muted, fontSize: 11.5),
+        ),
       ),
-      CheckboxListTile(value: recording, onChanged: (v) => setState(() => recording = v == true),
-          contentPadding: EdgeInsets.zero, controlAffinity: ListTileControlAffinity.leading,
-          title: const Text('Saya setuju siaran direkam maksimal 30 hari untuk moderasi.')),
-      CheckboxListTile(value: safe, onChanged: (v) => setState(() => safe = v == true),
-          contentPadding: EdgeInsets.zero, controlAffinity: ListTileControlAffinity.leading,
-          title: const Text('Game fullscreen sudah terbuka; tidak ada data pribadi di layar.')),
-      CheckboxListTile(value: terms, onChanged: (v) => setState(() => terms = v == true),
-          contentPadding: EdgeInsets.zero, controlAffinity: ListTileControlAffinity.leading,
-          title: const Text('Saya menyetujui aturan siaran dan larangan konten.')),
+      CheckboxListTile(
+        value: recording,
+        onChanged: (v) => setState(() => recording = v == true),
+        contentPadding: EdgeInsets.zero,
+        controlAffinity: ListTileControlAffinity.leading,
+        title: const Text('Saya setuju siaran direkam maksimal 30 hari untuk moderasi.'),
+      ),
+      CheckboxListTile(
+        value: safe,
+        onChanged: (v) => setState(() => safe = v == true),
+        contentPadding: EdgeInsets.zero,
+        controlAffinity: ListTileControlAffinity.leading,
+        title: Text(
+          isMobile
+              ? 'Tidak menampilkan password, chat pribadi, atau data sensitif di kamera/layar.'
+              : 'Game fullscreen sudah terbuka; tidak ada data pribadi di layar PC.',
+        ),
+      ),
+      CheckboxListTile(
+        value: terms,
+        onChanged: (v) => setState(() => terms = v == true),
+        contentPadding: EdgeInsets.zero,
+        controlAffinity: ListTileControlAffinity.leading,
+        title: const Text('Saya menyetujui aturan siaran dan larangan konten.'),
+      ),
       Align(
         alignment: Alignment.centerLeft,
         child: TextButton.icon(
@@ -1017,26 +1109,115 @@ class _StartLiveFormState extends State<_StartLiveForm> {
         ),
       const SizedBox(height: 8),
       GradientButton(
-        label: busy ? 'Menyiapkan OBS…' : 'Mulai Live', icon: Icons.live_tv_rounded,
+        label: busy
+            ? (isMobile ? 'Menyiapkan live HP…' : 'Menyiapkan OBS…')
+            : (isMobile ? 'Mulai Live HP' : 'Mulai Live OBS'),
+        icon: isMobile ? Icons.sensors_rounded : Icons.live_tv_rounded,
         onPressed: ready ? () async {
-          if (context.read<AppState>().orderAktif == null) {
+          if (!isMobile && context.read<AppState>().orderAktif == null) {
             final go = await showDialog<bool>(context: context, builder: (c) => AlertDialog(
               title: const Text('Belum ada sesi PC'),
-              content: const Text('Sewa dan mulai sesi PC terlebih dahulu. Livestream hanya berjalan selama lease aktif.'),
-              actions: [TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Nanti')),
-                FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Lihat pesanan'))],
+              content: const Text('Sewa dan mulai sesi PC terlebih dahulu untuk siaran OBS. Atau pilih mode Kamera HP / Layar HP.'),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Nanti')),
+                FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Lihat pesanan')),
+              ],
             ));
-            if (go == true && context.mounted) Navigator.push(context, MaterialPageRoute(builder: (_) => const OrderListScreen()));
+            if (go == true && context.mounted) {
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const OrderListScreen()));
+            }
             return;
           }
           setState(() => busy = true);
-          final e = await context.read<AppState>().mulaiLivestream(title: title.text.trim(), game: game.text.trim(), mic: mic);
+          final judul = title.text.trim();
+          final namaGame = game.text.trim();
+          final e = await context.read<AppState>().mulaiLivestream(
+            title: judul,
+            game: namaGame,
+            mic: mic,
+            sumber: sumber,
+          );
           if (!mounted) return;
           setState(() => busy = false);
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e ?? 'OBS sedang menyiapkan siaran.')));
+          if (e == null) {
+            if (isMobile) {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => MobileBroadcastLiveScreen(
+                    title: judul,
+                    game: namaGame,
+                    sumber: sumber,
+                    mic: mic,
+                  ),
+                ),
+              );
+            } else {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('OBS sedang menyiapkan siaran di PC rental.')),
+              );
+            }
+          } else {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e)));
+          }
         } : null,
       ),
     ]));
+  }
+}
+
+class _PilihanSumber extends StatelessWidget {
+  const _PilihanSumber({
+    required this.icon,
+    required this.label,
+    required this.terpilih,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool terpilih;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
+        decoration: BoxDecoration(
+          color: terpilih ? XyTheme.primary.withOpacity(0.12) : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: terpilih ? XyTheme.primary : Colors.white.withOpacity(0.2),
+            width: terpilih ? 2 : 1,
+          ),
+        ),
+        child: Column(
+          children: [
+            Icon(
+              icon,
+              size: 22,
+              color: terpilih ? XyTheme.primary : XyTheme.of(context).muted,
+            ),
+            const SizedBox(height: 5),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: terpilih ? FontWeight.w800 : FontWeight.w600,
+                  color: terpilih ? XyTheme.primary : XyTheme.of(context).ink,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -1110,4 +1291,477 @@ class _Badge extends StatelessWidget {
     decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(99)),
     child: Text(text, style: const TextStyle(color: Colors.white, fontSize: 9.5, fontWeight: FontWeight.w800, letterSpacing: .3)),
   );
+}
+
+/// ============================================================
+/// Layar Broadcast Live Mobile (Kamera HP & Rekam Layar)
+/// Kontrol HUD berbentuk BULAT (Circle) dengan outline BORDER SAJA
+/// ============================================================
+
+class MobileBroadcastLiveScreen extends StatefulWidget {
+  const MobileBroadcastLiveScreen({
+    super.key,
+    required this.title,
+    required this.game,
+    required this.sumber,
+    required this.mic,
+  });
+
+  final String title;
+  final String game;
+  final String sumber; // 'kamera' | 'layar'
+  final bool mic;
+
+  @override
+  State<MobileBroadcastLiveScreen> createState() => _MobileBroadcastLiveScreenState();
+}
+
+class _MobileBroadcastLiveScreenState extends State<MobileBroadcastLiveScreen> {
+  late bool _micAktif;
+  bool _kameraDepan = true;
+  bool _flashAktif = false;
+  bool _tampilChat = true;
+  int _detik = 0;
+  int _penonton = 12;
+  Timer? _timer;
+
+  final List<Map<String, String>> _pesanChat = [
+    {'nama': 'DimasGamer', 'teks': 'Halo bang! Semangat livenya 🔥'},
+    {'nama': 'RinaPutri', 'teks': 'Keren banget grafisnya lancar!'},
+    {'nama': 'XyMember', 'teks': 'Gass push rank bang!'},
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _micAktif = widget.mic;
+    _timer = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (!mounted) return;
+      setState(() {
+        _detik++;
+        if (_detik % 7 == 0) {
+          _penonton += (_detik % 14 == 0 ? -1 : 2);
+          if (_penonton < 1) _penonton = 1;
+        }
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  String _formatDurasi(int dtk) {
+    final m = (dtk ~/ 60).toString().padLeft(2, '0');
+    final s = (dtk % 60).toString().padLeft(2, '0');
+    final j = (dtk ~/ 3600);
+    return j > 0 ? '$j:$m:$s' : '$m:$s';
+  }
+
+  Future<void> _akhiriSiaran() async {
+    final konfirmasi = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Akhiri Siaran?'),
+        content: const Text('Siaran live akan dihentikan untuk semua penonton.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Lanjut Live')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFEF4444)),
+            onPressed: () => Navigator.pop(c, true),
+            child: const Text('Akhiri Sekarang'),
+          ),
+        ],
+      ),
+    );
+    if (konfirmasi == true && mounted) {
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Siaran langsung telah diakhiri.')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return WillPopScope(
+      onWillPop: () async {
+        await _akhiriSiaran();
+        return false;
+      },
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: Stack(
+          children: [
+            // Latar Belakang Viewfinder Kamera atau Layar
+            Positioned.fill(
+              child: widget.sumber == 'kamera'
+                  ? Container(
+                      decoration: BoxDecoration(
+                        gradient: RadialGradient(
+                          center: Alignment.center,
+                          radius: 1.2,
+                          colors: [
+                            const Color(0xFF1E1B2E),
+                            Colors.black,
+                          ],
+                        ),
+                      ),
+                      child: Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              _kameraDepan
+                                  ? Icons.face_rounded
+                                  : Icons.camera_rear_rounded,
+                              size: 72,
+                              color: Colors.white.withOpacity(0.35),
+                            ),
+                            const SizedBox(height: 12),
+                            Text(
+                              _kameraDepan
+                                  ? 'Kamera Depan Aktif'
+                                  : 'Kamera Belakang Aktif',
+                              style: TextStyle(
+                                color: Colors.white.withOpacity(0.65),
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Video broadcast sedang ditransmisikan realtime',
+                              style: TextStyle(
+                                color: Colors.white.withOpacity(0.35),
+                                fontSize: 11,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    )
+                  : Container(
+                      color: const Color(0xFF0F0B1E),
+                      child: Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              width: 80,
+                              height: 80,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: const Color(0xFF7C3AED).withOpacity(0.6),
+                                  width: 2,
+                                ),
+                              ),
+                              child: const Icon(
+                                Icons.screen_share_rounded,
+                                size: 36,
+                                color: Color(0xFFA78BFA),
+                              ),
+                            ),
+                            const SizedBox(height: 14),
+                            const Text(
+                              'Menyiarkan Layar Smartphone',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              'Buka game atau aplikasi apa pun di HP kamu sekarang.',
+                              style: TextStyle(
+                                color: Colors.white.withOpacity(0.6),
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+            ),
+
+            // Bilah Atas: Live Status, Durasi, Penonton
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  child: Row(
+                    children: [
+                      // Badge Live
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFDC2626),
+                          borderRadius: BorderRadius.circular(20),
+                          boxShadow: [
+                            BoxShadow(
+                              color: const Color(0xFFDC2626).withOpacity(0.5),
+                              blurRadius: 8,
+                            ),
+                          ],
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: const [
+                            Icon(Icons.fiber_manual_record_rounded, size: 10, color: Colors.white),
+                            SizedBox(width: 4),
+                            Text(
+                              'LIVE',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+
+                      // Durasi
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.4),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: Colors.white.withOpacity(0.2)),
+                        ),
+                        child: Text(
+                          _formatDurasi(_detik),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontFamily: 'monospace',
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+
+                      // Penonton
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.4),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: Colors.white.withOpacity(0.2)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.remove_red_eye_rounded, size: 12, color: Colors.white),
+                            const SizedBox(width: 5),
+                            Text(
+                              '$_penonton',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Spacer(),
+
+                      // Judul & Kategori
+                      Flexible(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Text(
+                              widget.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            Text(
+                              widget.game,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: Colors.white.withOpacity(0.65),
+                                fontSize: 10.5,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
+            // Live Chat Overlay (Kiri Bawah)
+            if (_tampilChat)
+              Positioned(
+                left: 16,
+                bottom: 96,
+                width: MediaQuery.of(context).size.width * 0.72,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: _pesanChat.map((msg) {
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 6),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.45),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Colors.white.withOpacity(0.12)),
+                      ),
+                      child: RichText(
+                        text: TextSpan(
+                          children: [
+                            TextSpan(
+                              text: '${msg['nama']}: ',
+                              style: const TextStyle(
+                                color: Color(0xFFA78BFA),
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            TextSpan(
+                              text: msg['teks'] ?? '',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ),
+
+            // Bilah Kontrol HUD Bawah: SEMUA TOMBOL BULAT & OUTLINE BORDER SAJA
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      // 1. Mic Toggle (Bulat, Outline Border)
+                      _hudBulat(
+                        icon: _micAktif ? Icons.mic_rounded : Icons.mic_off_rounded,
+                        tooltip: _micAktif ? 'Mute Mic' : 'Nyalakan Mic',
+                        aktif: _micAktif,
+                        onTap: () => setState(() => _micAktif = !_micAktif),
+                      ),
+
+                      // 2. Kamera Switch (Bulat, Outline Border)
+                      if (widget.sumber == 'kamera')
+                        _hudBulat(
+                          icon: Icons.flip_camera_ios_rounded,
+                          tooltip: 'Putar Kamera',
+                          onTap: () => setState(() => _kameraDepan = !_kameraDepan),
+                        ),
+
+                      // 3. Flashlight (Bulat, Outline Border)
+                      if (widget.sumber == 'kamera' && !_kameraDepan)
+                        _hudBulat(
+                          icon: _flashAktif ? Icons.flash_on_rounded : Icons.flash_off_rounded,
+                          tooltip: 'Flash',
+                          aktif: _flashAktif,
+                          onTap: () => setState(() => _flashAktif = !_flashAktif),
+                        ),
+
+                      // 4. Chat Toggle (Bulat, Outline Border)
+                      _hudBulat(
+                        icon: _tampilChat ? Icons.chat_bubble_rounded : Icons.chat_bubble_outline_rounded,
+                        tooltip: 'Toggle Chat',
+                        aktif: _tampilChat,
+                        onTap: () => setState(() => _tampilChat = !_tampilChat),
+                      ),
+
+                      // 5. Akhiri Live (Bulat, Outline Border Merah)
+                      _hudBulat(
+                        icon: Icons.stop_rounded,
+                        tooltip: 'Akhiri Siaran',
+                        warnaKhusus: const Color(0xFFEF4444),
+                        onTap: _akhiriSiaran,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Tombol HUD Streaming: Bulat (Circle), Border Only (Outline), Tanpa Kotak Solid
+  Widget _hudBulat({
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback onTap,
+    bool aktif = false,
+    Color? warnaKhusus,
+  }) {
+    final borderColor = warnaKhusus ?? (aktif ? const Color(0xFFA78BFA) : Colors.white.withOpacity(0.80));
+    final iconColor = warnaKhusus ?? (aktif ? const Color(0xFFA78BFA) : Colors.white);
+
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        customBorder: const CircleBorder(),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          width: 50,
+          height: 50,
+          // BULAT (BoxShape.circle) & CUKUP BORDER AJA (outline border minimalis)
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: warnaKhusus != null
+                ? warnaKhusus.withOpacity(0.12)
+                : (aktif ? const Color(0x33A78BFA) : Colors.white.withOpacity(0.06)),
+            border: Border.all(
+              color: borderColor,
+              width: 1.8,
+            ),
+            boxShadow: aktif
+                ? [
+                    BoxShadow(
+                      color: (warnaKhusus ?? const Color(0xFF7C3AED)).withOpacity(0.4),
+                      blurRadius: 10,
+                    )
+                  ]
+                : null,
+          ),
+          child: Icon(
+            icon,
+            size: 22,
+            color: iconColor,
+          ),
+        ),
+      ),
+    );
+  }
 }

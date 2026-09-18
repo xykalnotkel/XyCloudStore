@@ -651,9 +651,10 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     required String title,
     required String game,
     required bool mic,
+    String sumber = 'kamera',
   }) async {
     try {
-      await _repo.liveStart(title: title, game: game, micConsent: mic);
+      await _repo.liveStart(title: title, game: game, micConsent: mic, sumber: sumber);
       await muatLive(senyap: true);
       return null;
     } catch (e) {
@@ -1975,6 +1976,17 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     } catch (e) {
       error = '$e';
       notifyListeners();
+      return null;
+    }
+  }
+
+  Future<Map<String, dynamic>?> antreSewa(String planId, int jam) async {
+    try {
+      final res = await _repo.antreSewa(planId: planId, jam: jam);
+      unawaited(muatNotifikasi());
+      return res;
+    } catch (e) {
+      error = '$e';
       return null;
     }
   }

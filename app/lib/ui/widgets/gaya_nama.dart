@@ -141,14 +141,20 @@ class _GayaNamaState extends State<GayaNama>
                   ));
             });
       case 'neon':
+        final gelap = Theme.of(context).brightness == Brightness.dark;
         return Text(nama,
             maxLines: widget.maxLines,
             style: _dasar.copyWith(
-              color: const Color(0xFF6BF3FF),
-              shadows: const [
-                Shadow(color: Color(0xAA22D3EE), blurRadius: 12),
-                Shadow(color: Color(0x668B5CF6), blurRadius: 22),
-              ],
+              color: gelap ? const Color(0xFF6BF3FF) : const Color(0xFF0284C7),
+              shadows: gelap
+                  ? const [
+                      Shadow(color: Color(0xAA22D3EE), blurRadius: 12),
+                      Shadow(color: Color(0x668B5CF6), blurRadius: 22),
+                    ]
+                  : const [
+                      Shadow(color: Color(0x440284C7), blurRadius: 8),
+                      Shadow(color: Color(0x337C3AED), blurRadius: 16),
+                    ],
             ));
       case 'pelangi':
         return AnimatedBuilder(

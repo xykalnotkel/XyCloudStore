@@ -286,11 +286,11 @@ class _ProfilScreenState extends State<ProfilScreen> {
               ),
 
               // ---------- grup Komunitas ----------
-              const SectionHeader('Komunitas'),
+              const SectionHeader('Komunitas & Sosial'),
               XyBarisMenu(
-                ikon: Icons.forum_outlined,
-                judul: 'Mengikuti & Pesan',
-                sub: 'Teman yang diikuti, pengikut, dan pesan langsung',
+                ikon: Icons.people_alt_outlined,
+                judul: 'Pesan & Pertemanan',
+                sub: 'Teman yang diikuti, pengikut, dan pesan langsung (DM)',
                 onTap: () => Navigator.push(context, xyRoute(const FollowsScreen())),
               ),
               XyBarisMenu(

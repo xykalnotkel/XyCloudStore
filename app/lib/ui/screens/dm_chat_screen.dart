@@ -11,6 +11,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:record/record.dart';
 
+import '../../core/cache.dart';
 import '../../core/kompres.dart';
 import '../../core/motion.dart';
 import '../../core/theme.dart';
@@ -67,10 +68,27 @@ class _DmChatScreenState extends State<DmChatScreen> {
     _appState = context.read<AppState>();
     _dmRevisi = _appState.dmRevisi;
     _appState.addListener(_saatRealtime);
-    _muat();
+    _bacaSinggahanLaluMuat();
     // WebSocket adalah jalur utama; polling jarang ini hanya menutup celah saat
     // koneksi perangkat/proxy tidak mendukung upgrade.
     _poll = Timer.periodic(const Duration(seconds: 30), (_) => _muat(sunyi: true));
+  }
+
+  Future<void> _bacaSinggahanLaluMuat() async {
+    // Tampilkan pesan tersimpan langsung saat layar dibuka — tidak ada delay spinner.
+    try {
+      final lama = await Cache.daftar('dm_${widget.userId}');
+      if (lama.isNotEmpty && mounted) {
+        final parsed = lama.map((e) => DmPesan.fromJson(Map<String, dynamic>.from(e))).toList();
+        if (parsed.isNotEmpty && mounted) {
+          setState(() {
+            _pesan = parsed;
+            _memuat = false;
+          });
+        }
+      }
+    } catch (_) {}
+    if (mounted) await _muat(sunyi: _pesan.isNotEmpty);
   }
 
   void _saatRealtime() {
@@ -110,6 +128,7 @@ class _DmChatScreenState extends State<DmChatScreen> {
         _memuat = false;
         _galat = null;
       });
+      unawaited(Cache.simpan('dm_${widget.userId}', daftar.map((m) => m.toJson()).toList()));
       if (adaBaru || daftar.any((m) => !m.dariSaya(s.user?.id ?? '') && !m.dibaca)) {
         unawaited(s.repo.dmBaca(widget.userId).catchError((_) => <String, dynamic>{}));
       }
@@ -325,11 +344,12 @@ class _DmChatScreenState extends State<DmChatScreen> {
                       aksi: GradientButton(label: 'Coba Lagi', onPressed: _muat),
                     )
                   : _pesan.isEmpty
-                      ? Kosong(
+                      ? const Kosong(
                           icon: Icons.forum_outlined,
                           judul: 'Mulai percakapan',
                           sub:
                               'Kirim pesan, gambar, atau tahan tombol mic untuk pesan suara.',
+                          ilustrasi: 'pesan',
                         )
                       : ListView.builder(
                           controller: _scroll,

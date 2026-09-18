@@ -50,6 +50,7 @@ abstract class XyRepository {
   Future<bool> ubahFavorit(String produkId);
   Future<List<Ulasan>> ulasanPaket(String planId);
   Future<void> kirimUlasanPaket({required String planId, required int rating, String? komentar, String? orderId});
+  Future<Map<String, dynamic>> antreSewa({required String planId, required int jam});
   Future<Map<String, dynamic>> dataSaya();
 
   /// Dokumen legal: 'syarat' atau 'privasi'.
@@ -138,6 +139,7 @@ abstract class XyRepository {
     required String title,
     required String game,
     required bool micConsent,
+    String sumber = 'kamera',
   });
   Future<String> liveWatch(String id);
   Future<Map<String, dynamic>> liveTip(String id, {
@@ -332,6 +334,13 @@ class RemoteRepository implements XyRepository {
         if (komentar != null) 'komentar': komentar,
         if (orderId != null) 'order_id': orderId,
       });
+
+  @override
+  Future<Map<String, dynamic>> antreSewa({required String planId, required int jam}) async =>
+      Map<String, dynamic>.from(await api.post('/sewa/antre', {
+        'plan_id': planId,
+        'durasi_jam': jam,
+      }));
 
   @override
   Future<Map<String, dynamic>> dataSaya() async => Map<String, dynamic>.from(await api.get('/me/data'));
@@ -594,10 +603,12 @@ class RemoteRepository implements XyRepository {
     required String title,
     required String game,
     required bool micConsent,
+    String sumber = 'kamera',
   }) async => LivestreamItem.fromJson(Map<String, dynamic>.from(
       await api.post('/live/start', {
         'title': title,
         'game': game,
+        'sumber': sumber,
         'mic_consent': micConsent,
         'recording_consent': true,
         'safe_scene_ack': true,
@@ -892,6 +903,20 @@ class MockRepository implements XyRepository {
   }) async {}
 
   @override
+  Future<Map<String, dynamic>> antreSewa({required String planId, required int jam}) async => {
+        'ok': true,
+        'antrean': {
+          'id': 'q_mock',
+          'plan_id': planId,
+          'durasi_jam': jam,
+          'nomor': 1,
+          'prioritas_label': 'VIP Priority',
+          'estimasi_menit': 20,
+        },
+        'pesan': 'Kamu berhasil masuk antrean unit PC!'
+      };
+
+  @override
   Future<Map<String, dynamic>> dataSaya() => _delay({'profil': const {}}, 300);
 
   @override
@@ -1084,7 +1109,7 @@ class MockRepository implements XyRepository {
       _delay({'ok': true, 'status': 'pending'}, 350);
 
   @override
-  Future<LivestreamItem> liveStart({required String title, required String game, required bool micConsent}) async =>
+  Future<LivestreamItem> liveStart({required String title, required String game, required bool micConsent, String sumber = 'kamera'}) async =>
       _delay(LivestreamItem(
         id: 'live_demo_baru', creatorId: MockData.user.id,
         creatorName: MockData.user.nama, title: title, game: game,

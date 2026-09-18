@@ -81,6 +81,18 @@ class PengaturanScreen extends StatelessWidget {
           XyBarisMenu(ikon:Icons.text_fields_rounded,judul:'Teks & Gerakan',sub:'Ukuran teks dan animasi halaman',tujuan:const OpsiTampilanScreen()),
           XyBarisMenu(ikon:Icons.sports_esports_rounded,judul:'Streaming & Kontrol',sub:'Resolusi, FPS, bitrate, gamepad, dan keyboard',tujuan:const OpsiStreamingScreen()),
           const _Judul('Aplikasi'),
+          XyBarisMenu(
+            ikon: Icons.chat_bubble_outline_rounded,
+            judul: 'Komunitas & Percakapan',
+            sub: 'Izin DM, tanda dibaca, dan filter keamanan',
+            tujuan: const PengaturanChatScreen(),
+          ),
+          XyBarisMenu(
+            ikon: Icons.volume_up_outlined,
+            judul: 'Suara & Getaran',
+            sub: 'Efek suara tombol, audio feedback, dan haptic',
+            tujuan: const SuaraGetaranScreen(),
+          ),
           XyBarisMenu(ikon:Icons.emoji_emotions_outlined,judul:'Stiker & Penyimpanan',sub:'Koleksi otomatis, folder internal, dan cache',tujuan:const StikerLibraryScreen()),
           XyBarisMenu(
             ikon: Icons.notifications_none_rounded,
@@ -456,6 +468,34 @@ class _UbahProfilScreenState extends State<UbahProfilScreen> {
   double? _progresBanner; // 0..1; null = tidak sedang unggah
   String _tahapBanner = '';
 
+  /// Fase setelah byte selesai: server mengonversi video → GIF. Progress bar
+  /// jadi indeterminat dan penghitung detik berjalan, supaya tidak terlihat
+  /// "mentok 90%" (laporan pemilik 2026-09-18).
+  bool _konversiBanner = false;
+  int _detikKonversi = 0;
+  Timer? _timerKonversi;
+
+  void _mulaiFaseKonversi() {
+    if (_konversiBanner) return;
+    _konversiBanner = true;
+    _detikKonversi = 0;
+    _timerKonversi?.cancel();
+    _timerKonversi = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (!mounted) {
+        t.cancel();
+        return;
+      }
+      setState(() => _detikKonversi++);
+    });
+  }
+
+  void _akhirFaseKonversi() {
+    _timerKonversi?.cancel();
+    _timerKonversi = null;
+    _konversiBanner = false;
+    _detikKonversi = 0;
+  }
+
   /// Salinan aturan validasi username dari server (Batch I) supaya umpan
   /// balik instan tanpa menunggu jaringan; keputusan akhir tetap di server.
   static final RegExp _formatUsername = RegExp(r'^[a-z0-9_.]{3,20}$');
@@ -479,6 +519,7 @@ class _UbahProfilScreenState extends State<UbahProfilScreen> {
 
   @override
   void dispose() {
+    _timerKonversi?.cancel();
     _scrollProfil.dispose();
     _nama.dispose();
     _phone.dispose();
@@ -653,25 +694,44 @@ class _UbahProfilScreenState extends State<UbahProfilScreen> {
     });
     final dataUri = 'data:$mime;base64,${base64Encode(bytes)}';
     final mulai = DateTime.now();
-    final galat = await context.read<AppState>().unggahBannerMedia(
+    String? galat;
+    try {
+      galat = await context
+          .read<AppState>()
+          .unggahBannerMedia(
       dataUri,
       onProgress: (terkirim, total) {
         if (!mounted) return;
-        final p = total <= 0 ? 0.0 : (terkirim / total).clamp(0.0, .9);
-        final tahap = p >= .899
-            ? 'Mengunggah… tunggu server konversi video → GIF'
-            : 'Mengunggah ${(terkirim / 1048576).toStringAsFixed(1)} / ${(total / 1048576).toStringAsFixed(1)} MB';
+        // Byte selesai = masuk fase konversi server: bar indeterminat +
+        // penghitung detik, bukan angka persen yang berhenti di 90%.
+        if (total > 0 && terkirim >= total) {
+          _mulaiFaseKonversi();
+          setState(() {
+            _progresBanner = null;
+            _tahapBanner =
+                'Berkas selesai diunggah — server sedang mengonversi video → GIF…';
+          });
+          return;
+        }
+        final p = total <= 0 ? 0.0 : (terkirim / total).clamp(0.0, .89);
         setState(() {
           _progresBanner = p;
-          _tahapBanner = tahap;
+          _tahapBanner =
+              'Mengunggah ${(terkirim / 1048576).toStringAsFixed(1)} / ${(total / 1048576).toStringAsFixed(1)} MB';
         });
       },
-    );
+          ).timeout(const Duration(seconds: 240));
+    } on TimeoutException {
+      _akhirFaseKonversi();
+      galat =
+          'Konversi melebihi 4 menit tanpa respons. Server mungkin masih bekerja — muat ulang profil untuk mengecek, atau pakai video yang lebih pendek.';
+    }
     if (!mounted) return;
     final detik = DateTime.now().difference(mulai).inMilliseconds / 1000;
     setState(() {
       _sibukBanner = false;
       _progresBanner = null;
+      _akhirFaseKonversi();
       pesan = galat;
     });
     if (galat == null) {
@@ -811,7 +871,7 @@ class _UbahProfilScreenState extends State<UbahProfilScreen> {
           ),
           const SizedBox(height: 6),
           Text(
-            'Bingkai premium (Aurora, Permata, Api, Galaksi, Sakura, Sirkuit, Sayap, Petir) khusus Pro/VIP — Mahkota Raja & Naga Emas eksklusif VIP. Terlihat oleh semua orang di profil, leaderboard, dan komunitas.',
+            'Pilihan bingkai avatar: Polos, Gradasi Ungu/Emas/Neon, Cyberpunk, Hologram, Kristal Es, Pelangi RGB, Permata Ruby, Zamrud Hijau, Sakura, Sirkuit, Sayap, Petir, serta Mahkota Raja & Naga Emas. Tampil konsisten di profil, feed, pesan, dan leaderboard.',
             style: TextStyle(color: t.muted, fontSize: 11.5, height: 1.5),
           ),
           const SizedBox(height: 18),
@@ -820,21 +880,21 @@ class _UbahProfilScreenState extends State<UbahProfilScreen> {
           if (widget.fokus == FokusProfil.identitas) ...[
           // ---------- nama ----------
           XyLabel(namaTerkunci
-              ? 'Nama Tampilan (bisa diganti lagi ${_tanggalBoleh(u?.namaDiubahPada, 7)})'
-              : 'Nama Tampilan'),
+              ? 'Nama Tampilan / Display Name (bisa diganti lagi ${_tanggalBoleh(u?.namaDiubahPada, 7)})'
+              : 'Nama Tampilan (Display Name)'),
           TextField(
             controller: _nama,
             readOnly: namaTerkunci,
             textCapitalization: TextCapitalization.words,
             decoration: InputDecoration(
-              hintText: 'Nama yang tampil di komunitas',
+              hintText: 'Nama yang dilihat pengguna lain di feed & komunitas',
               prefixIcon: const Icon(Icons.person_outline_rounded),
               suffixIcon: namaTerkunci
                   ? Icon(Icons.lock_rounded, size: 18, color: t.muted)
                   : null,
               helperText: namaTerkunci
-                  ? 'Nama tampilan hanya bisa diganti 7 hari sekali (sisa $sisaNama hari).'
-                  : 'Maksimal diganti 7 hari sekali setelah disimpan.',
+                  ? 'Display name hanya bisa diganti 7 hari sekali (sisa $sisaNama hari).'
+                  : 'Nama tampilan publik. Maksimal diganti 7 hari sekali setelah disimpan.',
               helperMaxLines: 2,
             ),
           ),
@@ -1230,12 +1290,13 @@ class _UbahProfilScreenState extends State<UbahProfilScreen> {
             ]),
           ),
           // Progres unggah banner: progress bar + persen + tahap (jelas).
-          if (_progresBanner != null) ...[
+          if (_progresBanner != null || _konversiBanner) ...[
             const SizedBox(height: 12),
             ClipRRect(
               borderRadius: BorderRadius.circular(XyRadius.pill),
               child: LinearProgressIndicator(
-                value: _progresBanner,
+                // Fase konversi: indeterminat (value null) + penghitung detik.
+                value: _konversiBanner ? null : _progresBanner,
                 minHeight: 8,
                 backgroundColor: t.lineSoft,
                 valueColor: const AlwaysStoppedAnimation<Color>(XyTheme.primary),
@@ -1248,7 +1309,10 @@ class _UbahProfilScreenState extends State<UbahProfilScreen> {
                   child: Text(_tahapBanner,
                       style: TextStyle(color: t.muted, fontSize: 11.5)),
                 ),
-                Text('${(_progresBanner! * 100).toStringAsFixed(0)}%',
+                Text(
+                    _konversiBanner
+                        ? '${_detikKonversi} dtk'
+                        : '${(_progresBanner! * 100).toStringAsFixed(0)}%',
                     style: const TextStyle(
                         fontWeight: FontWeight.w800,
                         color: XyTheme.primary,
@@ -2352,9 +2416,193 @@ class _ModePrivasiScreenState extends State<ModePrivasiScreen> {
             ]),
           ),
           const SizedBox(height: 14),
-          Text(
-              'Catatan: perlindungan diterapkan instan tanpa perlu memulai ulang aplikasi.',
-              style: TextStyle(color: XyTheme.of(context).muted, fontSize: 11.5)),
+              Text(
+                  'Catatan: perlindungan diterapkan instan tanpa perlu memulai ulang aplikasi.',
+                  style: TextStyle(color: XyTheme.of(context).muted, fontSize: 11.5)),
+            ],
+          ),
+        );
+      }
+    }
+
+/// Layar pengaturan preferensi chat, DM, dan feed komunitas
+class PengaturanChatScreen extends StatefulWidget {
+  const PengaturanChatScreen({super.key});
+
+  @override
+  State<PengaturanChatScreen> createState() => _PengaturanChatScreenState();
+}
+
+class _PengaturanChatScreenState extends State<PengaturanChatScreen> {
+  Future<void> _set(String key, dynamic value) async {
+    await PengaturanLokal.set(key, value);
+    if (mounted) setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = PengaturanLokal.nilai;
+    final t = XyTheme.of(context);
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Komunitas & Percakapan')),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(20, 14, 20, 30),
+        children: [
+          const _Judul('Pesan Langsung (DM)'),
+          XyCard(
+            child: Column(
+              children: [
+                SwitchListTile(
+                  value: p['dm_hanya_teman'] != true,
+                  contentPadding: EdgeInsets.zero,
+                  secondary: const Icon(Icons.people_alt_outlined, color: XyTheme.primary),
+                  title: const Text('Terima DM dari Semua Orang', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5)),
+                  subtitle: Text(
+                    p['dm_hanya_teman'] == true
+                        ? 'Hanya pengguna yang kamu ikuti yang dapat mengirimkan DM.'
+                        : 'Siapa saja di komunitas dapat mengirimkan pesan ke akunmu.',
+                    style: TextStyle(color: t.muted, fontSize: 11.5),
+                  ),
+                  onChanged: (v) => _set('dm_hanya_teman', !v),
+                ),
+                const Divider(),
+                SwitchListTile(
+                  value: p['tanda_dibaca'] != false,
+                  contentPadding: EdgeInsets.zero,
+                  secondary: const Icon(Icons.done_all_rounded, color: XyTheme.primary),
+                  title: const Text('Kirim Tanda Dibaca', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5)),
+                  subtitle: Text(
+                    'Pengirim akan tahu saat kamu sudah membuka dan membaca pesan mereka.',
+                    style: TextStyle(color: t.muted, fontSize: 11.5),
+                  ),
+                  onChanged: (v) => _set('tanda_dibaca', v),
+                ),
+                const Divider(),
+                SwitchListTile(
+                  value: p['notif_dm_popup'] != false,
+                  contentPadding: EdgeInsets.zero,
+                  secondary: const Icon(Icons.mark_chat_unread_outlined, color: XyTheme.primary),
+                  title: const Text('Notifikasi Suara Pesan Baru', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5)),
+                  subtitle: Text(
+                    'Bunyikan nada saat ada pesan obrolan atau balasan komentar baru.',
+                    style: TextStyle(color: t.muted, fontSize: 11.5),
+                  ),
+                  onChanged: (v) => _set('notif_dm_popup', v),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          const _Judul('Feed & Media Komunitas'),
+          XyCard(
+            child: Column(
+              children: [
+                SwitchListTile(
+                  value: p['filter_konten_aman'] != false,
+                  contentPadding: EdgeInsets.zero,
+                  secondary: const Icon(Icons.shield_outlined, color: XyTheme.primary),
+                  title: const Text('Sensor Kata Kurang Pantas', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5)),
+                  subtitle: Text(
+                    'Secara otomatis menyamarkan kata kasar di feed dan komentar publik.',
+                    style: TextStyle(color: t.muted, fontSize: 11.5),
+                  ),
+                  onChanged: (v) => _set('filter_konten_aman', v),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Layar pengaturan suara efek dan getaran haptic aplikasi
+class SuaraGetaranScreen extends StatefulWidget {
+  const SuaraGetaranScreen({super.key});
+
+  @override
+  State<SuaraGetaranScreen> createState() => _SuaraGetaranScreenState();
+}
+
+class _SuaraGetaranScreenState extends State<SuaraGetaranScreen> {
+  Future<void> _set(String key, dynamic value) async {
+    await PengaturanLokal.set(key, value);
+    if (mounted) setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = PengaturanLokal.nilai;
+    final t = XyTheme.of(context);
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Suara & Getaran')),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(20, 14, 20, 30),
+        children: [
+          const _Judul('Audio Aplikasi'),
+          XyCard(
+            child: Column(
+              children: [
+                SwitchListTile(
+                  value: p['suara_efek'] != false,
+                  contentPadding: EdgeInsets.zero,
+                  secondary: const Icon(Icons.volume_up_outlined, color: XyTheme.primary),
+                  title: const Text('Efek Suara Tombol', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5)),
+                  subtitle: Text(
+                    'Bunyi klik halus saat menekan tombol utama dan konfirmasi.',
+                    style: TextStyle(color: t.muted, fontSize: 11.5),
+                  ),
+                  onChanged: (v) => _set('suara_efek', v),
+                ),
+                const Divider(),
+                SwitchListTile(
+                  value: p['suara_transaksi'] != false,
+                  contentPadding: EdgeInsets.zero,
+                  secondary: const Icon(Icons.account_balance_wallet_outlined, color: XyTheme.primary),
+                  title: const Text('Suara Transaksi Sukses', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5)),
+                  subtitle: Text(
+                    'Mainkan notifikasi audio saat pembayaran atau topup saldo berhasil.',
+                    style: TextStyle(color: t.muted, fontSize: 11.5),
+                  ),
+                  onChanged: (v) => _set('suara_transaksi', v),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          const _Judul('Getaran Haptic'),
+          XyCard(
+            child: Column(
+              children: [
+                SwitchListTile(
+                  value: p['haptic_global'] != false,
+                  contentPadding: EdgeInsets.zero,
+                  secondary: const Icon(Icons.vibration_rounded, color: XyTheme.primary),
+                  title: const Text('Getaran Sentuh (Haptic Feedback)', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5)),
+                  subtitle: Text(
+                    'Umpan balik getar responsif saat mengetuk elemen interaktif.',
+                    style: TextStyle(color: t.muted, fontSize: 11.5),
+                  ),
+                  onChanged: (v) => _set('haptic_global', v),
+                ),
+                const Divider(),
+                SwitchListTile(
+                  value: p['vibration_hud'] != false,
+                  contentPadding: EdgeInsets.zero,
+                  secondary: const Icon(Icons.sports_esports_outlined, color: XyTheme.primary),
+                  title: const Text('Getaran HUD & Tombol Streaming', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5)),
+                  subtitle: Text(
+                    'Sensasi taktil saat menekan tombol HUD game di layar streaming.',
+                    style: TextStyle(color: t.muted, fontSize: 11.5),
+                  ),
+                  onChanged: (v) => _set('vibration_hud', v),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );

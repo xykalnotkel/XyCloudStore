@@ -455,8 +455,14 @@ class _LoginScreenState extends State<LoginScreen> {
                                 height: 1.6),
                             children: [
                               const TextSpan(
-                                  text:
-                                      'Dengan masuk atau mendaftar, kamu menyetujui '),
+                                  text: 'Dengan login akun di '),
+                              TextSpan(
+                                  text: 'Indonesia $bendera',
+                                  style: const TextStyle(
+                                      color: XyTheme.primary,
+                                      fontWeight: FontWeight.w800)),
+                              const TextSpan(
+                                  text: ', Kamu menyetujui '),
                               TextSpan(
                                   text: 'Ketentuan Layanan',
                                   style: const TextStyle(
@@ -470,9 +476,8 @@ class _LoginScreenState extends State<LoginScreen> {
                                       color: XyTheme.primary,
                                       fontWeight: FontWeight.w700),
                                   recognizer: _tapPrivasi),
-                              TextSpan(
-                                  text:
-                                      '. Akun kamu berasal dari $bendera $namaNegara (terdeteksi otomatis dari jaringan).'),
+                              const TextSpan(
+                                  text: ' XyCloudStore.'),
                             ],
                           ),
                           textAlign: TextAlign.center,

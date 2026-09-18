@@ -664,6 +664,8 @@ CREATE TABLE IF NOT EXISTS dm (
 );
 CREATE INDEX IF NOT EXISTS idx_dm_dari ON dm(dari_id, waktu);
 CREATE INDEX IF NOT EXISTS idx_dm_ke   ON dm(ke_id, waktu);
+CREATE INDEX IF NOT EXISTS idx_dm_percakapan ON dm(dari_id, ke_id, waktu DESC);
+CREATE INDEX IF NOT EXISTS idx_dm_percakapan_balik ON dm(ke_id, dari_id, waktu DESC);
 CREATE TABLE IF NOT EXISTS simpan_post (
   post_id TEXT NOT NULL,
   user_id TEXT NOT NULL,
@@ -1102,3 +1104,18 @@ INSERT OR IGNORE INTO setelan(kunci,nilai,diperbarui) VALUES('livestream_max_tip
 INSERT OR IGNORE INTO setelan(kunci,nilai,diperbarui) VALUES('livestream_min_payout','100000',CURRENT_TIMESTAMP);
 INSERT OR IGNORE INTO setelan(kunci,nilai,diperbarui) VALUES('livestream_max_minutes','240',CURRENT_TIMESTAMP);
 INSERT OR IGNORE INTO setelan(kunci,nilai,diperbarui) VALUES('livestream_max_concurrent','2',CURRENT_TIMESTAMP);
+
+CREATE TABLE IF NOT EXISTS antrean_sewa (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  plan_id TEXT NOT NULL,
+  durasi_jam INTEGER NOT NULL DEFAULT 1,
+  prioritas INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'menunggu',
+  estimasi_menit INTEGER NOT NULL DEFAULT 30,
+  dibuat TEXT NOT NULL DEFAULT (datetime('now')),
+  dipanggil_pada TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_antrean_sewa_plan_status ON antrean_sewa(plan_id, status, prioritas DESC, dibuat ASC);
+

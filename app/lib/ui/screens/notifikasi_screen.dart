@@ -7,8 +7,12 @@ import '../../models/models.dart';
 import '../../providers/app_state.dart';
 import '../widgets/common.dart';
 import '../widgets/lembar.dart';
+import 'dm_chat_screen.dart';
 import 'forum_screen.dart';
+import 'livestream_screen.dart';
+import 'order_list_screen.dart';
 import 'profil_publik_screen.dart';
+import 'wallet_screen.dart';
 
 /// ============================================================
 ///  Pusat pemberitahuan
@@ -99,6 +103,8 @@ class _Baris extends StatelessWidget {
         'sistem' => (Icons.verified_user_rounded, XyTheme.primary),
         'order' => (Icons.receipt_long_rounded, XyTheme.success),
         'wallet' => (Icons.account_balance_wallet_rounded, XyTheme.success),
+        'dm' => (Icons.chat_bubble_rounded, XyTheme.primary),
+        'livestream' => (Icons.live_tv_rounded, XyTheme.violet),
         _ => (Icons.notifications_rounded, XyTheme.of(context).muted),
       };
 
@@ -108,7 +114,7 @@ class _Baris extends StatelessWidget {
     if (!context.mounted) return;
 
     // Audit 2026-09-18: notifikasi sosial (mis. "mulai mengikuti kamu")
-    // membawa ke profil aktornya — sebelumnya ketukan tidak berbuat apa-apa.
+    // membawa ke profil aktornya.
     if (notif.refJenis == 'profil' && notif.refId != null) {
       Navigator.push(
           context, xyRoute(ProfilPublikScreen(userId: notif.refId!)));
@@ -126,6 +132,29 @@ class _Baris extends StatelessWidget {
           Navigator.push(context, xyRoute(ForumDetailScreen(post: lagi.first)));
         }
       }
+      return;
+    }
+    if ((notif.refJenis == 'dm' || notif.jenis == 'dm') && notif.refId != null) {
+      Navigator.push(
+        context,
+        xyRoute(DmChatScreen(
+          lawanId: notif.refId!,
+          namaLawan: notif.aktor ?? 'Pengguna',
+        )),
+      );
+      return;
+    }
+    if (notif.refJenis == 'livestream' || notif.jenis == 'livestream') {
+      Navigator.push(context, xyRoute(const LivestreamScreen()));
+      return;
+    }
+    if (notif.refJenis == 'order' || notif.refJenis == 'sewa' || notif.jenis == 'order') {
+      Navigator.push(context, xyRoute(const OrderListScreen()));
+      return;
+    }
+    if (notif.refJenis == 'wallet' || notif.refJenis == 'topup' || notif.jenis == 'wallet') {
+      Navigator.push(context, xyRoute(const WalletScreen()));
+      return;
     }
   }
 

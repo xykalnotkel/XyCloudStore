@@ -106,7 +106,10 @@ class _XyCardState extends State<XyCard> {
           border: widget.border ? Border.all(color: t.line) : null,
           boxShadow: widget.elevated ? (_down ? XyTheme.shadowXs : XyTheme.shadowSm) : null,
         ),
-        child: RepaintBoundary(child: widget.child),
+        child: DefaultTextStyle.merge(
+          style: TextStyle(color: t.ink),
+          child: RepaintBoundary(child: widget.child),
+        ),
       ),
     );
 

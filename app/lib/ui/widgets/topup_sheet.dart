@@ -38,7 +38,7 @@ class _SheetTopup extends StatefulWidget {
 }
 
 class _SheetTopupState extends State<_SheetTopup> {
-  static const List<int> pilihan = [25000, 50000, 100000, 250000, 500000, 1000000];
+  static const List<int> pilihan = [10000, 25000, 50000, 100000, 250000, 500000, 1000000];
 
   late int nominal;
   final _lain = TextEditingController();
@@ -218,12 +218,46 @@ class _SheetTopupState extends State<_SheetTopup> {
 
   // ---------------- langkah 1: pilih nominal ----------------
   List<Widget> _langkahPilih(AppState s) => [
-        const Text('Isi Saldo',
-            style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700, letterSpacing: -.8)),
-        const SizedBox(height: 6),
-        Text('Minimal ${rupiah(s.konfigurasi.minTopup)}. Saldo dipakai untuk sewa PC dan beli akun.',
-            style:  TextStyle(color: XyTheme.of(context).muted, fontSize: 13, height: 1.5)),
-        const SizedBox(height: 20),
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [const Color(0xFF1E1B2E), XyTheme.primaryDark],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: XyTheme.glow(XyTheme.primary, .18),
+          ),
+          child: Row(
+            children: [
+              const XyIlustrasi('topup', tinggi: 76),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Top Up Saldo Akun',
+                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16)),
+                    const SizedBox(height: 4),
+                    Text('Saldo saat ini: ${rupiah(s.user?.saldo ?? 0)}',
+                        style: const TextStyle(color: Color(0xFFD8C9FF), fontSize: 12.5, fontWeight: FontWeight.w700)),
+                    const SizedBox(height: 3),
+                    const Text('Otomatis masuk 24/7 • QRIS & Virtual Account',
+                        style: TextStyle(color: Colors.white70, fontSize: 10.5)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 18),
+        const Text('Pilih Nominal Saldo',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, letterSpacing: -.4)),
+        const SizedBox(height: 4),
+        Text('Minimal ${rupiah(s.konfigurasi.minTopup)}. Saldo dapat dipakai untuk sewa PC dan beli akun digital.',
+            style:  TextStyle(color: XyTheme.of(context).muted, fontSize: 12.5, height: 1.4)),
+        const SizedBox(height: 14),
         Wrap(
           spacing: 10,
           runSpacing: 10,
@@ -237,7 +271,7 @@ class _SheetTopupState extends State<_SheetTopup> {
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 180),
                 width: (MediaQuery.of(context).size.width - 60) / 2,
-                padding: const EdgeInsets.symmetric(vertical: 15),
+                padding: const EdgeInsets.symmetric(vertical: 14),
                 decoration: BoxDecoration(
                   color: aktif ? XyTheme.primary : XyTheme.of(context).surface,
                   borderRadius: BorderRadius.circular(XyRadius.tombol),
@@ -248,7 +282,7 @@ class _SheetTopupState extends State<_SheetTopup> {
                   child: Text(rupiah(n),
                       style: TextStyle(
                         fontWeight: FontWeight.w700,
-                        fontSize: 14.5,
+                        fontSize: 14,
                         color: aktif ? Colors.white : XyTheme.of(context).ink,
                       )),
                 ),
@@ -322,20 +356,11 @@ class _SheetTopupState extends State<_SheetTopup> {
   List<Widget> _langkahSukses() {
     final t = dibuat!;
     return [
-      const SizedBox(height: 30),
-      Center(
-        child: Container(
-          width: 84,
-          height: 84,
-          decoration: BoxDecoration(
-            gradient: XyTheme.gradPrimary,
-            shape: BoxShape.circle,
-            boxShadow: XyTheme.glow(XyTheme.primary, .3),
-          ),
-          child: const Icon(Icons.check_rounded, color: Colors.white, size: 44),
-        ),
+      const SizedBox(height: 10),
+      const Center(
+        child: XyIlustrasi('sukses', tinggi: 140),
       ),
-      const SizedBox(height: 18),
+      const SizedBox(height: 14),
       const Center(
         child: Text('Saldo Bertambah!',
             style: TextStyle(
@@ -347,7 +372,7 @@ class _SheetTopupState extends State<_SheetTopup> {
             style:
                 TextStyle(color: XyTheme.of(context).muted, fontSize: 13.5)),
       ),
-      const SizedBox(height: 26),
+      const SizedBox(height: 24),
       GradientButton(
         label: 'Selesai',
         icon: Icons.check_circle_rounded,

@@ -18,6 +18,7 @@ import '../../models/models.dart';
 import '../../providers/app_state.dart';
 import '../widgets/common.dart';
 import 'profil_publik_screen.dart';
+import 'follows_screen.dart';
 import '../widgets/error_state.dart';
 import '../widgets/lembar.dart';
 
@@ -90,10 +91,15 @@ class _ForumScreenState extends State<ForumScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Komunitas'),
+        title: const Text('Feed Komunitas'),
         actions: [
           IconButton(
-            tooltip: hanyaSimpan ? 'Tampilkan semua diskusi' : 'Hanya yang disimpan',
+            tooltip: 'Pesan & Pertemanan',
+            onPressed: () => Navigator.push(context, xyRoute(const FollowsScreen())),
+            icon: const Icon(Icons.people_alt_outlined),
+          ),
+          IconButton(
+            tooltip: hanyaSimpan ? 'Tampilkan semua postingan' : 'Hanya yang disimpan',
             onPressed: () => setState(() => hanyaSimpan = !hanyaSimpan),
             icon: Icon(
                 hanyaSimpan
@@ -270,7 +276,7 @@ class _AjakanTulis extends StatelessWidget {
           ),
           const SizedBox(width: 12),
           Expanded(
-            child: Text('Mau tanya atau berbagi tips? Tulis di sini...',
+            child: Text('Ada yang ingin dibagikan? Posting apa saja ke Feed…',
                 style: TextStyle(
                     color: XyTheme.of(context).muted, fontSize: 13.2)),
           ),
@@ -715,22 +721,52 @@ class _ForumDetailScreenState extends State<ForumDetailScreen> {
 
   Future<void> _kirim() async {
     final text = _balas.text.trim();
-    final stickerUntukDisimpan=_stiker;
-    final pemilik=context.read<AppState>().user?.id;
+    final stickerUntukDisimpan = _stiker;
+    final s = context.read<AppState>();
+    final pemilik = s.user?.id;
     if (_mengirim || (text.isEmpty && _stiker == null)) return;
     setState(() => _mengirim = true);
-    final pesan = await context.read<AppState>().balasForum(
+
+    // Optimistic update: langsung masukkan balasan ke tampilan agar tidak terasa lambat.
+    final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
+    final balasanOpt = ForumBalasan(
+      id: tempId,
+      postId: widget.post.id,
+      userId: pemilik ?? '',
+      nama: s.user?.nama ?? 'Saya',
+      foto: s.user?.foto,
+      isi: text,
+      admin: false,
+      dibuat: DateTime.now().toIso8601String(),
+      balasKe: _reply?.id,
+      suka: 0,
+      tier: s.user?.tier ?? 'basic',
+      gayaNama: s.user?.gayaNama,
+      bingkai: s.user?.bingkai,
+      stiker: _stiker?.stiker,
+    );
+    setState(() {
+      _balasan = [..._balasan, balasanOpt];
+    });
+
+    final pesan = await s.balasForum(
         widget.post.id, text,
         balasKe: _reply?.id, stiker: _stiker?.toPayload());
     if (!mounted) return;
     setState(() => _mengirim = false);
     if (pesan != null) {
+      // Rollback bila gagal kirim
+      setState(() {
+        _balasan.removeWhere((x) => x.id == tempId);
+      });
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text(pesan)));
       return;
     }
-    if(stickerUntukDisimpan!=null&&pemilik!=null&&PengaturanLokal.nilai['stickerAutoSave']!=false){
-      unawaited(StikerStore.untuk(pemilik).simpan(stickerUntukDisimpan.stiker,bytes:stickerUntukDisimpan.bytes).then((_){}).catchError((e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Komentar terkirim, tetapi stiker belum tersimpan lokal. Periksa kapasitas koleksi.')));}));
+    if (stickerUntukDisimpan != null && pemilik != null && PengaturanLokal.nilai['stickerAutoSave'] != false) {
+      unawaited(StikerStore.untuk(pemilik).simpan(stickerUntukDisimpan.stiker, bytes: stickerUntukDisimpan.bytes).then((_) {}).catchError((e) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Komentar terkirim, tetapi stiker belum tersimpan lokal.')));
+      }));
     }
     _balas.clear();
     setState(() {
@@ -999,6 +1035,11 @@ class _ForumDetailScreenState extends State<ForumDetailScreen> {
                                   ? null
                                   : () {
                                       setState(() => _reply = b);
+                                      if (_balas.text.isEmpty) {
+                                        final targetNama = s.namaPengguna(b.userId, b.nama);
+                                        _balas.text = '@$targetNama ';
+                                        _balas.selection = TextSelection.collapsed(offset: _balas.text.length);
+                                      }
                                       _fokusBalas.requestFocus();
                                     },
                               style: TextButton.styleFrom(
@@ -1363,18 +1404,31 @@ class _FormTulisState extends State<_FormTulis> {
   }
 
   Future<void> _kirim() async {
+    final isiTeks = _isi.text.trim();
+    if (isiTeks.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Tuliskan sesuatu untuk dibagikan ke feed.')));
+      return;
+    }
+    String judulTeks = _judul.text.trim();
+    if (judulTeks.isEmpty) {
+      judulTeks = isiTeks.split('\n')[0].trim();
+      if (judulTeks.length > 70) judulTeks = '${judulTeks.substring(0, 67)}...';
+      if (judulTeks.length < 5) judulTeks = '$judulTeks • Feed';
+    }
+
     setState(() => proses = true);
     final s = context.read<AppState>();
     final pesan = sunting
         ? await s.suntingForum(
             id: widget.postLama!.id,
-            judul: _judul.text.trim(),
-            isi: _isi.text.trim(),
+            judul: judulTeks,
+            isi: isiTeks,
             kategori: kategori,
           )
         : await s.buatForum(
-            judul: _judul.text.trim(),
-            isi: _isi.text.trim(),
+            judul: judulTeks,
+            isi: isiTeks,
             kategori: kategori,
             gambar: gambar,
           );
@@ -1389,7 +1443,7 @@ class _FormTulisState extends State<_FormTulis> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
           content: Text(
-              sunting ? 'Diskusi diperbarui.' : 'Diskusi kamu sudah tayang.')),
+              sunting ? 'Postingan diperbarui.' : 'Postingan kamu sudah tayang di Feed.')),
     );
   }
 
@@ -1399,11 +1453,11 @@ class _FormTulisState extends State<_FormTulis> {
 
     return Scaffold(
       appBar:
-          AppBar(title: Text(sunting ? 'Sunting Diskusi' : 'Tulis Diskusi')),
+          AppBar(title: Text(sunting ? 'Sunting Post' : 'Buat Post Feed')),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(20, 14, 20, 30),
         children: [
-          const Text('Kategori',
+          const Text('Topik Feed',
               style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5)),
           const SizedBox(height: 10),
           Wrap(
@@ -1432,29 +1486,29 @@ class _FormTulisState extends State<_FormTulis> {
               );
             }).toList(),
           ),
-          const SizedBox(height: 20),
-          const Text('Judul',
+          const SizedBox(height: 18),
+          const Text('Isi postingan feed',
+              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5)),
+          const SizedBox(height: 9),
+          TextField(
+            controller: _isi,
+            maxLines: 8,
+            textCapitalization: TextCapitalization.sentences,
+            decoration: const InputDecoration(
+              hintText:
+                  'Apa yang sedang kamu pikirkan? Tulis apa saja, tanya jawab, tips, atau info mabar…',
+              alignLabelWithHint: true,
+            ),
+          ),
+          const SizedBox(height: 18),
+          const Text('Judul (opsional)',
               style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5)),
           const SizedBox(height: 9),
           TextField(
             controller: _judul,
             textCapitalization: TextCapitalization.sentences,
             decoration: const InputDecoration(
-                hintText: 'Tulis judul yang jelas, minimal 5 karakter'),
-          ),
-          const SizedBox(height: 18),
-          const Text('Isi diskusi',
-              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5)),
-          const SizedBox(height: 9),
-          TextField(
-            controller: _isi,
-            maxLines: 9,
-            textCapitalization: TextCapitalization.sentences,
-            decoration: const InputDecoration(
-              hintText:
-                  'Ceritakan detailnya di sini. Semakin jelas, semakin mudah dibantu.',
-              alignLabelWithHint: true,
-            ),
+                hintText: 'Boleh dikosongkan — otomatis dari kalimat pertama'),
           ),
           if (!sunting) ...[
             const SizedBox(height: 16),
@@ -1464,13 +1518,13 @@ class _FormTulisState extends State<_FormTulis> {
                   gambar == null ? Icons.image_outlined : Icons.check_rounded,
                   size: 18),
               label: Text(gambar == null
-                  ? 'Tambah Gambar (opsional)'
-                  : 'Gambar siap dikirim'),
+                  ? 'Tambah Foto / Gambar (opsional)'
+                  : 'Foto siap dibagikan'),
             ),
           ],
           const SizedBox(height: 22),
           GradientButton(
-            label: sunting ? 'Simpan Perubahan' : 'Kirim Diskusi',
+            label: sunting ? 'Simpan Perubahan' : 'Bagikan ke Feed',
             icon: sunting ? Icons.check_rounded : Icons.send_rounded,
             loading: proses,
             onPressed: proses ? null : _kirim,

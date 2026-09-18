@@ -189,6 +189,8 @@ class XyTheme {
         seedColor: primary,
         primary: primary,
         surface: surface,
+        onSurface: ink,
+        onSurfaceVariant: inkSoft,
         brightness: Brightness.light,
       ),
       // Latar aurora global digambar di MaterialApp.builder (Batch I);
@@ -205,15 +207,21 @@ class XyTheme {
     return base.copyWith(
       textTheme: text.copyWith(
         displayLarge: text.displayLarge
-            ?.copyWith(fontWeight: FontWeight.w700, letterSpacing: -1),
+            ?.copyWith(color: ink, fontWeight: FontWeight.w700, letterSpacing: -1),
         headlineMedium: text.headlineMedium
-            ?.copyWith(fontWeight: FontWeight.w700, letterSpacing: -1),
+            ?.copyWith(color: ink, fontWeight: FontWeight.w700, letterSpacing: -1),
         titleLarge: text.titleLarge
-            ?.copyWith(fontWeight: FontWeight.w700, letterSpacing: -.5),
+            ?.copyWith(color: ink, fontWeight: FontWeight.w700, letterSpacing: -.5),
         titleMedium: text.titleMedium
-            ?.copyWith(fontWeight: FontWeight.w600, letterSpacing: -.1),
-        bodyMedium: text.bodyMedium?.copyWith(height: 1.55),
-        labelLarge: text.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+            ?.copyWith(color: ink, fontWeight: FontWeight.w600, letterSpacing: -.1),
+        titleSmall: text.titleSmall
+            ?.copyWith(color: ink, fontWeight: FontWeight.w600),
+        bodyLarge: text.bodyLarge?.copyWith(color: ink),
+        bodyMedium: text.bodyMedium?.copyWith(color: ink, height: 1.55),
+        bodySmall: text.bodySmall?.copyWith(color: inkSoft),
+        labelLarge: text.labelLarge?.copyWith(color: ink, fontWeight: FontWeight.w700),
+        labelMedium: text.labelMedium?.copyWith(color: inkSoft),
+        labelSmall: text.labelSmall?.copyWith(color: muted),
       ),
       appBarTheme: const AppBarTheme(
         backgroundColor: Colors.transparent,

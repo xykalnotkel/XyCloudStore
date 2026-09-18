@@ -9,6 +9,8 @@ import '../../models/models.dart';
 import '../../providers/app_state.dart';
 import '../widgets/common.dart';
 import '../widgets/lembar.dart';
+import 'checkout_sewa_screen.dart';
+import 'cs_screen.dart';
 import 'opsi_screen.dart';
 
 /// Real GameStream protocol runs inside this APK's native renderer, not a browser/other app.
@@ -603,6 +605,58 @@ class _SesiScreenState extends State<SesiScreen> {
                               color: Colors.white, fontWeight: FontWeight.w700))
                     ],
                   ])),
+          const SizedBox(height: 16),
+          // ---------- PANEL BILLING CYBERINDO (VM Integration) ----------
+          _PanelBillingCyberindo(
+            sesi: s,
+            order: widget.order,
+            selesai: selesai,
+            onPerpanjang: () {
+              final plans = context.read<AppState>().plans;
+              final targetPlan = plans.firstWhere(
+                (pl) => pl.id == widget.order.planId,
+                orElse: () => PcPlan(
+                  id: widget.order.planId,
+                  nama: widget.order.planNama,
+                  cpu: 'Intel Xeon / Core i7',
+                  gpu: 'NVIDIA RTX',
+                  ramGb: 16,
+                  storageGb: 256,
+                  hargaPerJam: widget.order.durasiJam > 0
+                      ? (widget.order.harga ~/ widget.order.durasiJam)
+                      : 10000,
+                  hargaPerHari: widget.order.harga * 8,
+                  region: 'Jakarta',
+                  unitTersedia: 1,
+                  totalUnit: 1,
+                  tag: 'Cyberindo',
+                  gambar: '',
+                ),
+              );
+              Navigator.push(
+                context,
+                xyRoute(CheckoutSewaScreen(plan: targetPlan)),
+              );
+            },
+            onPanggilOperator: () => Navigator.push(context, xyRoute(const CsScreen())),
+            onRestartVm: () async {
+              final yakin = await konfirmasi(
+                context,
+                judul: 'Restart PC VM Cyberindo?',
+                pesan:
+                    'Sistem operasi VM akan dimuat ulang oleh agen Cyberindo. Streaming akan menyambung kembali otomatis dalam 1–2 menit.',
+                tombolYa: 'Restart Sekarang',
+                ikon: Icons.restart_alt_rounded,
+              );
+              if (yakin && mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Perintah restart telah dikirim ke agen PC VM Cyberindo.'),
+                  ),
+                );
+              }
+            },
+          ),
           const SizedBox(height: 18),
           if (_loading || s?.status == 'menyiapkan')
             XyCard(
@@ -915,4 +969,325 @@ class _SesiScreenState extends State<SesiScreen> {
               style: TextStyle(fontSize: 12, color: p.muted, height: 1.6)),
         ]));
   }
+}
+
+/// Panel Status & Kontrol Billing Cyber Indo VM
+class _PanelBillingCyberindo extends StatelessWidget {
+  const _PanelBillingCyberindo({
+    required this.sesi,
+    required this.order,
+    required this.selesai,
+    required this.onPerpanjang,
+    required this.onPanggilOperator,
+    required this.onRestartVm,
+  });
+
+  final SesiMain? sesi;
+  final RentOrder order;
+  final bool selesai;
+  final VoidCallback onPerpanjang;
+  final VoidCallback onPanggilOperator;
+  final VoidCallback onRestartVm;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = XyTheme.of(context);
+    final idSuffix = (order.id.hashCode.abs() % 30 + 1).toString().padLeft(2, '0');
+    final sisaWaktuTeks = sesi?.berakhir != null && !selesai
+        ? durasiSisa(sesi!.berakhir!)
+        : (selesai ? 'Waktu Habis' : '${order.durasiJam} Jam');
+
+    final sisaMenit = sesi?.berakhir != null
+        ? sesi!.berakhir!.difference(DateTime.now()).inMinutes
+        : 999;
+    final hampirHabis = !selesai && sisaMenit >= 0 && sisaMenit <= 10;
+
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF0F172A), Color(0xFF1E293B)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: hampirHabis
+              ? const Color(0xFFEF4444).withOpacity(0.6)
+              : const Color(0xFF38BDF8).withOpacity(0.35),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: (hampirHabis ? const Color(0xFFEF4444) : const Color(0xFF0284C7)).withOpacity(0.18),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (hampirHabis) ...[
+            Container(
+              margin: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.all(11),
+              decoration: BoxDecoration(
+                color: const Color(0xFFEF4444).withOpacity(0.15),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFEF4444).withOpacity(0.4)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.timer_outlined, color: Color(0xFFEF4444), size: 20),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'PERINGATAN SISA WAKTU BILLING',
+                          style: TextStyle(
+                            color: Color(0xFFEF4444),
+                            fontSize: 11,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 0.4,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Waktu bermain tersisa $sisaMenit menit! Perpanjang billing sekarang agar PC tidak tertutup otomatis.',
+                          style: const TextStyle(color: Colors.white, fontSize: 11, height: 1.35),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          // Header Cyber Indo
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3.5),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFF0284C7), Color(0xFF2563EB)],
+                  ),
+                  borderRadius: BorderRadius.circular(7),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.computer_rounded, size: 13, color: Colors.white),
+                    SizedBox(width: 5),
+                    Text(
+                      'CYBER INDO BILLING v2.9',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 0.6,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Spacer(),
+              Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(
+                  color: selesai ? const Color(0xFFEF4444) : const Color(0xFF22C55E),
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: (selesai ? const Color(0xFFEF4444) : const Color(0xFF22C55E))
+                          .withOpacity(0.6),
+                      blurRadius: 6,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                selesai ? 'Billing Berakhir' : 'Online / Gac Server',
+                style: TextStyle(
+                  color: selesai ? const Color(0xFFEF4444) : const Color(0xFF22C55E),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+
+          // Baris PC ID & Status Sisa Waktu Billing
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Terminal / PC ID',
+                        style: TextStyle(color: Colors.white60, fontSize: 11.5, fontWeight: FontWeight.w500)),
+                    const SizedBox(height: 3),
+                    Text(
+                      'PC-CYBERINDO #$idSuffix',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: -.3,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      order.planNama,
+                      style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11.5),
+                    ),
+                  ],
+                ),
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  const Text('Sisa Waktu Billing',
+                      style: TextStyle(color: Colors.white60, fontSize: 11.5, fontWeight: FontWeight.w500)),
+                  const SizedBox(height: 2),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0369A1).withOpacity(0.35),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFF38BDF8).withOpacity(0.4)),
+                    ),
+                    child: Text(
+                      sisaWaktuTeks,
+                      style: const TextStyle(
+                        color: Color(0xFF38BDF8),
+                        fontSize: 16.5,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: .5,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 14),
+          const Divider(color: Colors.white12, height: 1),
+          const SizedBox(height: 12),
+
+          // Detail Spek Billing
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              _itemStat('Tarif Billing', rupiah(order.harga)),
+              _itemStat('Paket Akun', 'Personal Member'),
+              _itemStat('Billing Server', 'Cyberindo Gac v2.9'),
+            ],
+          ),
+
+          const SizedBox(height: 16),
+
+          // Tombol Kontrol Billing Cyber Indo
+          Row(
+            children: [
+              Expanded(
+                child: Pressable(
+                  onTap: onPerpanjang,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 9),
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFF0284C7), Color(0xFF2563EB)],
+                      ),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.add_time_rounded, size: 15, color: Colors.white),
+                        SizedBox(width: 5),
+                        Text(
+                          'Perpanjang',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Pressable(
+                  onTap: onPanggilOperator,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 9),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: Colors.white24),
+                    ),
+                    child: const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.headset_mic_rounded, size: 15, color: Colors.white),
+                        SizedBox(width: 5),
+                        Text(
+                          'Panggil Operator',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Pressable(
+                onTap: onRestartVm,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.06),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.white24),
+                  ),
+                  child: const Icon(Icons.restart_alt_rounded, size: 16, color: Colors.white70),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _itemStat(String label, String value) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: const TextStyle(color: Colors.white54, fontSize: 10)),
+          const SizedBox(height: 2),
+          Text(
+            value,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 11.5,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      );
 }

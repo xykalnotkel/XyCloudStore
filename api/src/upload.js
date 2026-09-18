@@ -66,7 +66,7 @@ async function tandaTangan(params, secret) {
  * `signParams` = parameter yang ikut ditandatangani (mis. folder, format, public_id);
  * timestamp otomatis ikut ditandatangani.
  */
-async function kirimUnggah(env, endpoint, { folder, timestamp, signParams = {}, file, resourceType }) {
+async function kirimUnggah(env, endpoint, { folder, timestamp, signParams = {}, file, resourceType, extra = {} }) {
   const waktu = String(timestamp ?? Math.floor(Date.now() / 1000));
   const params = { ...signParams, timestamp: waktu };
   const signature = await tandaTangan(params, env.CLOUDINARY_SECRET);
@@ -77,6 +77,8 @@ async function kirimUnggah(env, endpoint, { folder, timestamp, signParams = {}, 
   for (const k of Object.keys(params)) form.append(k, String(params[k]));
   form.append('signature', signature);
   if (resourceType) form.append('resource_type', resourceType);
+  // Parameter tak bertanda tangan (mis. eager) untuk permintaan khusus.
+  for (const [k, v] of Object.entries(extra)) form.append(k, String(v));
   return fetch(endpoint, { method: 'POST', body: form });
 }
 
@@ -308,9 +310,18 @@ export async function unggahVideoBanner(env, { dataUri, folder = 'xycloudstore/b
   const timestamp = Math.floor(Date.now() / 1000);
   let mp4Id = null;
   try {
+    // Transformasi GIF banner: 20 FPS (halus, tidak lambat/patah-patah),
+    // dipotong 6 detik awal (looping ringkas & mulus tanpa jeda akhir menit),
+    // lebar 480px batas proporsional, dan kompresi lossy agar ringan.
+    const transformBannerGif = 'f_gif,fps_20,du_6.0,so_0,w_480,c_limit,fl_lossy';
+
     // 1) Unggah video (resource video; format asli dipertahankan).
     const r = await kirimUnggah(env, `https://api.cloudinary.com/v1_1/${env.CLOUDINARY_CLOUD}/video/upload`, {
       folder, timestamp, signParams: { folder }, file: dataUri, resourceType: 'video',
+      // GIF derivasi dibuat EAGER saat unggah, sehingga fase konversi tidak
+      // menunggu derivasi on-demand yang bisa memakan puluhan detik
+      // (penyebab UI klien terlihat mentok di 90%).
+      extra: { eager: transformBannerGif },
     });
     const j = await r.json();
     if (!r.ok || j.error) return { ok: false, alasan: j.error?.message || `HTTP ${r.status}` };
@@ -325,8 +336,12 @@ export async function unggahVideoBanner(env, { dataUri, folder = 'xycloudstore/b
     }
 
     // 3) Ambil byte GIF hasil transformasi f_gif, lalu unggah ulang sebagai
-    //    aset image/gif mandiri (public_id berakhiran .gif).
-    const gifSumber = String(j.secure_url).replace('/video/upload/', '/video/upload/f_gif,fps_12,w_480,c_limit/');
+    //    aset image/gif mandiri (public_id berakhiran .gif). Utamakan URL
+    //    eager (sudah jadi saat unggah); fallback ke derivasi on-demand.
+    const eagerUrl = Array.isArray(j.eager) && j.eager[0]?.secure_url ? String(j.eager[0].secure_url) : '';
+    const gifSumber = eagerUrl.startsWith('http')
+      ? eagerUrl
+      : String(j.secure_url).replace('/video/upload/', `/video/upload/${transformBannerGif}/`);
     let gifBytes = null;
     // Derivasi f_gif dibuat on-demand oleh Cloudinary; permintaan pertama
     // bisa datang sebelum aset siap. Coba ulang sebentar dan validasi

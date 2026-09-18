@@ -45,7 +45,13 @@ class BannerProfil extends StatelessWidget {
               ? CachedNetworkImage(
                   imageUrl: media!.gif,
                   fit: BoxFit.cover,
-                  fadeInDuration: const Duration(milliseconds: 200),
+                  fadeInDuration: Duration.zero,
+                  fadeOutDuration: Duration.zero,
+                  imageBuilder: (context, imageProvider) => Image(
+                    image: imageProvider,
+                    fit: BoxFit.cover,
+                    gaplessPlayback: true,
+                  ),
                   placeholder: (_, __) => DecoratedBox(decoration: BoxDecoration(gradient: grad)),
                   errorWidget: (_, __, ___) =>
                       DecoratedBox(decoration: BoxDecoration(gradient: grad)),
