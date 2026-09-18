@@ -204,41 +204,41 @@ jobs:
           fi
           if [ "${{ github.event.inputs.signed_resmi }}" = "true" ]; then
             cat > ../dist-uji/README-PENTING.txt <<'TXT'
-            APK UJI INTERNAL — TANDA TANGAN RESMI, TETAP BUKAN RILIS
-            ========================================================
+          APK UJI INTERNAL — TANDA TANGAN RESMI, TETAP BUKAN RILIS
+          ========================================================
 
-            Ditandatangani dengan keystore RESMI XyCloudStore (secrets repo
-            ini), sehingga BISA dipasang menimpa instalasi rilis resmi di
-            perangkat tanpa uninstall dulu.
+          Ditandatangani dengan keystore RESMI XyCloudStore (secrets repo
+          ini), sehingga BISA dipasang menimpa instalasi rilis resmi di
+          perangkat tanpa uninstall dulu.
 
-            Tetapi ini TETAP build uji, bukan rilis:
-            1. Tidak dibuatkan GitHub Release, tidak diregistrasi ke server,
-               tidak muncul di halaman /unduh, tidak memicu popup pembaruan.
-            2. JANGAN dibagikan ke pengguna akhir.
-            3. Jika perangkat masih memakai APK uji bertanda tangan DEBUG,
-               uninstall dulu sekali (tanda tangan debug != resmi).
+          Tetapi ini TETAP build uji, bukan rilis:
+          1. Tidak dibuatkan GitHub Release, tidak diregistrasi ke server,
+             tidak muncul di halaman /unduh, tidak memicu popup pembaruan.
+          2. JANGAN dibagikan ke pengguna akhir.
+          3. Jika perangkat masih memakai APK uji bertanda tangan DEBUG,
+             uninstall dulu sekali (tanda tangan debug != resmi).
 
-            Rilis publik tetap dibangun di repo XyCloudStore-build.
-            TXT
+          Rilis publik tetap dibangun di repo XyCloudStore-build.
+          TXT
           else
             cat > ../dist-uji/README-PENTING.txt <<'TXT'
-            APK UJI INTERNAL — BUKAN RILIS
-            ==============================
+          APK UJI INTERNAL — BUKAN RILIS
+          ==============================
 
-            Ditandatangani dengan KUNCI DEBUG, bukan keystore rilis XyCloudStore.
+          Ditandatangani dengan KUNCI DEBUG, bukan keystore rilis XyCloudStore.
 
-            Konsekuensinya:
-            1. TIDAK BISA dipasang menimpa aplikasi XyCloudStore yang sudah
-               terpasang dari rilis resmi (tanda tangan berbeda ->
-               INSTALL_FAILED_UPDATE_INCOMPATIBLE). Uninstall dulu, data lokal
-               aplikasi akan hilang; saldo & riwayat tetap aman di server.
-            2. JANGAN dibagikan ke pengguna. Ini hanya untuk uji fungsi.
-            3. Tidak terdaftar di server, tidak muncul di halaman /unduh, dan
-               tidak akan memicu popup pembaruan.
+          Konsekuensinya:
+          1. TIDAK BISA dipasang menimpa aplikasi XyCloudStore yang sudah
+             terpasang dari rilis resmi (tanda tangan berbeda ->
+             INSTALL_FAILED_UPDATE_INCOMPATIBLE). Uninstall dulu, data lokal
+             aplikasi akan hilang; saldo & riwayat tetap aman di server.
+          2. JANGAN dibagikan ke pengguna. Ini hanya untuk uji fungsi.
+          3. Tidak terdaftar di server, tidak muncul di halaman /unduh, dan
+             tidak akan memicu popup pembaruan.
 
-            Rilis resmi tetap dibangun di repo XyCloudStore-build dengan
-            keystore pemilik, setelah izin eksplisit.
-            TXT
+          Rilis resmi tetap dibangun di repo XyCloudStore-build dengan
+          keystore pemilik, setelah izin eksplisit.
+          TXT
           fi
           (cd ../dist-uji && sha256sum ./*.apk ./README-PENTING.txt > SHA256SUMS.txt && cat SHA256SUMS.txt)
           ls -lh ../dist-uji
