@@ -992,7 +992,6 @@ class _PanelBillingCyberindo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final t = XyTheme.of(context);
     final idSuffix = (order.id.hashCode.abs() % 30 + 1).toString().padLeft(2, '0');
     final sisaWaktuTeks = sesi?.berakhir != null && !selesai
         ? durasiSisa(sesi!.berakhir!)

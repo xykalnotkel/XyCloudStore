@@ -546,7 +546,6 @@ class _PanelPinState extends State<_PanelPin> {
   final _konfirmasi = TextEditingController();
   final _kode = TextEditingController();
   bool _sibuk = false;
-  bool _kodeTerkirim = false;
   String? _galat;
 
   /// True setelah pengguna memilih jalur kode email (akun sosial).
@@ -567,7 +566,6 @@ class _PanelPinState extends State<_PanelPin> {
       if (!mounted) return;
       setState(() {
         _sibuk = false;
-        _kodeTerkirim = true;
         _sosialDiteksi = true;
         _galat = null;
       });
