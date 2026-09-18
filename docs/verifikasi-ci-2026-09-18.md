@@ -152,16 +152,124 @@ tool yang bisa diulang:
 
 Keduanya exit 1 bila ada masalah nyata, sehingga bisa jadi gerbang.
 
-## 6. Langkah berikutnya
+## 6. Hasil run
 
-1. Jalankan workflow ini dan **perbaiki galat kompilasi** yang muncul — inilah
-   nilai utamanya: Dart/Java/Rust yang belum pernah dikompilasi hampir pasti
-   menyimpan galat seperti `bec7308` dan `39012d7`.
-2. Setelah hijau, jalankan build rilis sesungguhnya di `XyCloudStore-build`
-   (butuh `SOURCE_DEPLOY_KEY` + keystore). Repo build itu masih **0 run**.
-3. Putuskan nasib varian tema `rilis_popup` (§3): tambah aset atau pangkas daftar.
-4. Pertimbangkan cache Cargo (`Swatinem/rust-cache`, dipaku SHA) dan cache
-   Gradle/NDK untuk memangkas durasi setelah workflow terbukti stabil.
-5. Ketatkan gerbang secara bertahap: `flutter analyze` tanpa
-   `--no-fatal-warnings` (input `ketat=true` sudah tersedia), lalu
+### Run #1 — `35351919422` (commit `b255e13`) → failure, 5,6 menit
+
+Run pertama langsung membuktikan celah itu nyata. Tiga job hijau
+(`kualitas`, `dashboard`, `agen-windows`) dan dua galat kompilasi **nyata**
+ketemu:
+
+| Job | Hasil | Keterangan |
+|---|---|---|
+| `kualitas` | ✅ | kedua tool audit baru lulus di runner |
+| `dashboard` | ✅ | `tsc` + static export |
+| `agen-windows` | ✅ | `cargo build --release --locked` + smoke-test `--veri` → **`obs_live.rs` (1.405 baris baru) terkompilasi** |
+| `flutter` | ❌ | **error Dart nyata** — lihat di bawah |
+| `agen-tauri-legacy` | ❌ | **error Rust nyata** — lihat di bawah |
+| `api` | ❌ | langkah esbuild workflow ini sendiri yang salah (bukan galat source) |
+| `native-aar` | ❌ | Gradle **BUILD SUCCESSFUL 3m33s**; yang gagal langkah laporan AAR (path salah) |
+
+**Galat 1 — Dart** (`app/lib/ui/screens/livestream_screen.dart:36`):
+
+```
+error • The method 'substring' can't be unconditionally invoked because the
+        receiver can be 'null' • unchecked_use_of_nullable_value
+```
+
+`_snackMutasiLive()` memanggil `hasil.substring(5)` pada parameter
+`String? hasil`. Flow analysis Dart tidak bisa mempromosikan nullability
+lewat variabel bool terpisah (`informasi`), jadi cabang itu tetap dianggap
+mungkin null. Ini satu-satunya **error** dari 309 isu analyze; sisanya info
+dan warning. Diperbaiki dengan `final teks = hasil ?? '';` lalu
+`teks.startsWith('INFO:')` / `teks.substring(5)` — perilaku identik, tanpa
+operator `!`. Berkas ini bagian dari batch livestream (`3f93be7`) yang masuk
+dengan `[skip ci]`.
+
+**Galat 2 — Rust** (`agent-gui/src-tauri/src/main.rs`):
+
+```
+error[E0583]: file not found for module `obs_live`
+  --> src\agent.rs:15:1
+   = help: to create the module `obs_live`, create file "src\agent\obs_live.rs"
+```
+
+Penyebabnya aturan resolusi modul Rust: modul non-inline `agent`
+(berkas `src/agent.rs`) membuat direktori anak `src/agent/`, sehingga
+`mod obs_live;` di dalam `agent.rs` dicari di `src/agent/obs_live.rs`.
+Crate **native** tidak kena masalah ini karena menyertakan `agent.rs` lewat
+`#[path = "../../src-tauri/src/agent.rs"]`, yang membuat direktori modulnya
+tetap `src-tauri/src/`. Diperbaiki dengan satu baris di crate Tauri:
+`#[path = "agent.rs"] mod agent;` — kedua crate kini memakai berkas yang sama
+tanpa memindahkan apa pun.
+
+Dua kegagalan sisanya adalah galat pada workflow verifikasi ini sendiri dan
+sudah diperbaiki:
+
+- **esbuild** butuh `--loader:.html=text --loader:.png=binary` karena Worker
+  mengimpor `admin.html`, `admin-legacy.html`, `web.html`, dan tiga PNG brand
+  sebagai modul sesuai `[[rules]]` di `wrangler.toml`. Loader sengaja
+  dicerminkan persis dari `wrangler.toml`, bukan ditambah bebas, supaya impor
+  tipe baru tanpa rule ikut merah.
+- **Laporan AAR** mencari berkas dengan `find`, bukan mengasumsikan
+  `native/xy_stream/build/outputs/aar/`. Path warisan `native-check.yml` itu
+  memang keliru: Gradle menaruh keluaran di
+  `app/build/xy_stream/outputs/aar/xy_stream-release.aar`.
+
+### Run #2 — `35352787231` (commit `1ffa8e4`) → **success**, ~7 menit
+
+Seluruh 8 job hijau. Angka terverifikasi dari log runner:
+
+| Komponen | Hasil terukur |
+|---|---|
+| Aplikasi Flutter | `flutter analyze` **0 error** (308 isu tersisa = info/warning), `flutter test` lulus, `app-release.apk` **80,5 MB** — `id.xycloud.xycloud_order`, versionCode 26, versionName **3.8.0**, label `XyCloudStore` |
+| Native `xy_stream` | `:xy_stream:assembleRelease` **BUILD SUCCESSFUL 3m58s**, `xy_stream-release.aar` **4,2 MB** (3 ABI via ndkBuild) |
+| Agen Windows | `cargo build --release --locked` → `xycloud-agent.exe` **12.013.568 byte**, `--veri` → `XyCloudStore-Agent 1.5.5-rust` |
+| Agen Tauri legacy | `cargo check --locked` lulus setelah perbaikan `#[path]` |
+| API Worker | **65/65** test lulus, bundle esbuild **1,4 MB** |
+| Dashboard | `tsc --noEmit` lulus, static export **58 route HTML** (sama dengan klaim audit 2026-09-17) |
+| Kualitas | `py_compile` 14 tool, YAML valid, migrasi 0001–0021, skema D1 konsisten, aset lengkap, secret bersih |
+
+Kesimpulan: **v3.8.0+26 terbukti bisa dikompilasi end-to-end** — Dart, Kotlin,
+Java native + NDK, dan Rust — tanpa satu pun secret. Yang belum terverifikasi
+hanyalah penandatanganan rilis dan perilaku di perangkat nyata.
+
+## 7. Langkah berikutnya
+
+1. **Build rilis sesungguhnya** di `XyCloudStore-build` (butuh
+   `SOURCE_DEPLOY_KEY` + keystore). Repo build itu masih **0 run**; sekarang
+   ada dasar yang jauh lebih aman untuk menekannya karena kompilasi sudah
+   terbukti hijau.
+2. **Job `agen-tauri-legacy` masih `continue-on-error`.** Setelah terbukti
+   hijau di run #2, layak dinaikkan jadi job wajib (hapus
+   `continue-on-error`) atau crate Tauri-nya sekalian dihapus — README sudah
+   menyatakan v1.5 native menggantikannya.
+3. **Utang lint Flutter: 308 isu** (mayoritas `prefer_const_constructors`,
+   `curly_braces_in_flow_control_structures`, beberapa `unused_field` dan
+   `use_build_context_synchronously`). Tidak menggagalkan build, tetapi
+   `unused_field` di `transfer_sheet.dart:549` (`_kodeTerkirim`) layak
+   diperiksa — bisa jadi logika yang belum tersambung.
+4. Putuskan nasib varian tema `rilis_popup` (§3): tambah asetnya atau pangkas
+   daftar `supported`.
+5. Pertimbangkan cache Cargo (`Swatinem/rust-cache`, dipaku SHA) dan cache
+   Gradle/NDK bila durasi mulai terasa; saat ini ~7 menit dengan cache Flutter
+   bawaan action.
+6. Ketatkan gerbang bertahap: jalankan dispatch dengan input `ketat=true`
+   untuk membuat warning Flutter ikut menggagalkan, lalu
    `cek_referensi_aset.py --strict-varian`.
+
+## 8. Catatan operasional: workflow baru harus ada di `main`
+
+GitHub **hanya mendaftarkan** workflow yang berkasnya ada di branch default.
+Run pertama workflow ini harus dipicu lewat `workflow_dispatch` setelah PR #1
+di-merge ke `main`: selama berkasnya hanya ada di branch `ci/verifikasi-build`,
+push ke branch itu **tidak** memicu run, `pull_request` juga tidak, dan
+`POST /actions/workflows/verifikasi-build.yml/dispatches` dibalas **404**.
+Tidak ada check suite Actions yang dibuat sama sekali, jadi gejalanya mudah
+dikira "Actions mati" — padahal `actions/permissions` melaporkan
+`enabled: true`.
+
+Implikasinya untuk repo ini: pemicu `push: branches: [ci/**]` baru berguna
+**setelah** `verifikasi-build.yml` ada di `main`. Sekarang sudah ada, jadi
+branch `ci/**` berikutnya akan memicu run otomatis.
+
