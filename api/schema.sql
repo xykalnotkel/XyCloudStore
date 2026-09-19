@@ -75,8 +75,10 @@ CREATE TABLE akun_stok (
   produk_id  TEXT NOT NULL,
   email      TEXT NOT NULL,
   password   TEXT NOT NULL,
+  detail     TEXT,
   terpakai   INTEGER NOT NULL DEFAULT 0,
-  user_id    TEXT
+  user_id    TEXT,
+  dibuat     TEXT
 );
 
 -- ------------------------------------------------------------

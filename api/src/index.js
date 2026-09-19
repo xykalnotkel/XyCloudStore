@@ -7831,8 +7831,8 @@ async function statistikPublik(env) {
         const dmId = uid('dm_');
         const waktu = new Date().toISOString();
         await env.DB.prepare(`
-          INSERT INTO dm_pesan (id, pengirim_id, penerima_id, teks, status, dibuat)
-          VALUES (?, ?, ?, ?, 'terkirim', ?)
+          INSERT INTO dm (id, dari_id, ke_id, teks, audio, durasi, gambar, tipe, dibaca, waktu)
+          VALUES (?, ?, ?, ?, NULL, 0, NULL, 'teks', 0, ?)
         `).bind(dmId, me.sub, s.user_id, `[Balas Story] ${pesan}`, waktu).run();
         return json({ ok: true, pesan_id: dmId }, 201, env);
       }
