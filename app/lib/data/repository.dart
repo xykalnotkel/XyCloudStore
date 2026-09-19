@@ -181,7 +181,7 @@ abstract class XyRepository {
     String privasi = 'teman',
     String? gayaTeks,
     String? warnaTeks,
-    double? ukuranTeks,
+    num? ukuranTeks,
     String? alignTeks,
     String? bgType,
     String? bgWarna,
@@ -189,10 +189,10 @@ abstract class XyRepository {
     bool? teksBg,
     String? teksBgWarna,
     String? label,
-    double? trimStart,
-    double? trimEnd,
+    num? trimStart,
+    num? trimEnd,
     String? filter,
-    double? durasiVideo,
+    num? durasiVideo,
   });
   Future<void> hapusStory(String id);
   Future<Map<String, dynamic>> likeStory(String id);
@@ -779,7 +779,7 @@ class RemoteRepository implements XyRepository {
     String privasi = 'teman',
     String? gayaTeks,
     String? warnaTeks,
-    double? ukuranTeks,
+    num? ukuranTeks,
     String? alignTeks,
     String? bgType,
     String? bgWarna,
@@ -787,10 +787,10 @@ class RemoteRepository implements XyRepository {
     bool? teksBg,
     String? teksBgWarna,
     String? label,
-    double? trimStart,
-    double? trimEnd,
+    num? trimStart,
+    num? trimEnd,
     String? filter,
-    double? durasiVideo,
+    num? durasiVideo,
   }) async {
     final res = await api.post('/stories', {
       'teks': teks,
@@ -1404,7 +1404,7 @@ class MockRepository implements XyRepository {
     String privasi = 'teman',
     String? gayaTeks,
     String? warnaTeks,
-    double? ukuranTeks,
+    num? ukuranTeks,
     String? alignTeks,
     String? bgType,
     String? bgWarna,
@@ -1412,10 +1412,10 @@ class MockRepository implements XyRepository {
     bool? teksBg,
     String? teksBgWarna,
     String? label,
-    double? trimStart,
-    double? trimEnd,
+    num? trimStart,
+    num? trimEnd,
     String? filter,
-    double? durasiVideo,
+    num? durasiVideo,
   }) =>
       _delay(
         StoryItem(
