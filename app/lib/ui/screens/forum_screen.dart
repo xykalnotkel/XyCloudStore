@@ -1,10 +1,11 @@
+import 'dart:async';
+import 'dart:convert';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../core/pengaturan.dart';
 import '../../data/stiker_store.dart';
 import '../widgets/waktu_relatif.dart';
 import '../widgets/bingkai_profil.dart';
 import '../widgets/gaya_nama.dart';
-import 'dart:async';
 import '../../models/stiker.dart';
 import '../../core/komentar_thread.dart';
 import '../widgets/stiker_picker.dart';
@@ -15,6 +16,7 @@ import '../../core/format.dart';
 import '../../core/kompres.dart';
 import '../../core/motion.dart';
 import '../../core/theme.dart';
+import '../../core/waktu.dart';
 import '../../models/models.dart';
 import '../../providers/app_state.dart';
 import '../widgets/common.dart';
@@ -160,7 +162,7 @@ class _ForumScreenState extends State<ForumScreen> {
             showModalBottomSheet(
               context: context,
               isScrollControlled: true,
-              backgroundColor: XyTheme.of(context).card,
+              backgroundColor: XyTheme.of(context).surfaceHigh,
               shape: const RoundedRectangleBorder(
                 borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
               ),
@@ -1935,8 +1937,13 @@ class _DialogLihatStoryState extends State<_DialogLihatStory>
                               icon: const Icon(Icons.delete_outline_rounded,
                                   color: Colors.white70),
                               onPressed: () async {
-                                final yakin = await konfirmasi(context,
-                                    judul: 'Hapus story ini?');
+                                final yakin = await konfirmasi(
+                                  context,
+                                  judul: 'Hapus Story',
+                                  pesan: 'Story ini akan dihapus permanen dan tidak dapat dipulihkan.',
+                                  tombolYa: 'Hapus',
+                                  bahaya: true,
+                                );
                                 if (yakin && mounted) {
                                   widget.onHapus();
                                   Navigator.pop(context);
@@ -2109,8 +2116,8 @@ class _SheetBuatStoryState extends State<_SheetBuatStory> {
                   final f = await GaleriPicker.pilihGambar(context);
                   if (f != null && mounted) {
                     final bytes = await f.readAsBytes();
-                    final kompres = await Kompres.gambar(bytes, maxSisi: 1080, kualitas: 75);
-                    setState(() => _mediaDataUri = 'data:image/jpeg;base64,${base64Encode(kompres)}');
+                    final uri = await Kompres.dataUri(bytes, f.name, maxSisi: 1080, kualitas: 75);
+                    setState(() => _mediaDataUri = uri);
                   }
                 },
               ),
