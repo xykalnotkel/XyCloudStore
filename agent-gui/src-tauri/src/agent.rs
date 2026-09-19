@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 mod obs_live;
 
-pub const VERSI: &str = "1.5.7-rust";
+pub const VERSI: &str = "1.5.8-rust";
 
 /// Batch L: semua proses anak (powershell/cmd/reg/where/sunshine) dibuat
 /// dengan CREATE_NO_WINDOW supaya tidak ada jendela konsol hitam yang
@@ -44,6 +44,8 @@ pub struct Konfig {
     pub user: String,
     pub sandi: String,
     pub server: String,
+    #[serde(default)]
+    pub stream_host: Option<String>,
 }
 
 pub type Logger = Arc<dyn Fn(&str) + Send + Sync>;

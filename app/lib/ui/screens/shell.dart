@@ -168,7 +168,7 @@ class _XyShellState extends State<XyShell> {
   static const _items = [
     (Icons.grid_view_rounded, Icons.grid_view_rounded, 'Beranda'),
     (Icons.desktop_windows_outlined, Icons.desktop_windows_rounded, 'Sewa PC'),
-    (Icons.storefront_outlined, Icons.storefront_rounded, 'Akun'),
+    (Icons.storefront_outlined, Icons.storefront_rounded, 'Toko'),
     (Icons.dynamic_feed_outlined, Icons.dynamic_feed_rounded, 'Feed'),
     (Icons.person_outline_rounded, Icons.person_rounded, 'Profil'),
   ];

@@ -89,17 +89,18 @@ class ApiClient {
       final kiriman = http.StreamedRequest('POST', _uri(path))
         ..headers.addAll(_headers)
         ..contentLength = bytes.length;
-      await Future<void>(() async {
-        const chunkBytes = 64 * 1024;
-        for (var i = 0; i < bytes.length; i += chunkBytes) {
-          final akhir = (i + chunkBytes > bytes.length) ? bytes.length : i + chunkBytes;
-          kiriman.sink.add(bytes.sublist(i, akhir));
-          sudah += (akhir - i);
-          onProgress?.call(sudah, bytes.length);
-        }
-        await kiriman.sink.close();
-      });
-      final resp = await _http.send(kiriman).timeout(Duration(seconds: timeoutDetik));
+
+      final respFuture = _http.send(kiriman).timeout(Duration(seconds: timeoutDetik));
+      const chunkBytes = 64 * 1024;
+      for (var i = 0; i < bytes.length; i += chunkBytes) {
+        final akhir = (i + chunkBytes > bytes.length) ? bytes.length : i + chunkBytes;
+        kiriman.sink.add(bytes.sublist(i, akhir));
+        sudah += (akhir - i);
+        onProgress?.call(sudah, bytes.length);
+        await Future.delayed(const Duration(milliseconds: 10));
+      }
+      await kiriman.sink.close();
+      final resp = await respFuture;
       final bodyTeks = await resp.stream.bytesToString();
       if (sesi != null && sesi != _token) throw ApiException(401, 'Sesi telah berubah.');
       return _parse(http.Response(bodyTeks, resp.statusCode,

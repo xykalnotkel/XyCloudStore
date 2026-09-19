@@ -59,6 +59,7 @@ const List<BingkaiInfo> daftarBingkai = [
 const Set<String> _idAsetAi = {
   'api', 'galaksi', 'sakura', 'sirkuit', 'sayap', 'petir', 'mahkota', 'naga',
   'celestial', 'sakura_angin',
+  'inferno', 'matrix', 'samurai', 'nebula', 'phantom',
 };
 
 /// Cincin gradasi statis untuk bingkai non-animasi.

@@ -31,6 +31,7 @@ import 'tier_screen.dart';
 import 'opsi_screen.dart';
 import 'hapus_akun_screen.dart';
 import 'stiker_library_screen.dart';
+import 'perangkat_screen.dart';
 
 /// ============================================================
 ///  Pengaturan: daftar utama dan halaman turunannya
@@ -47,23 +48,17 @@ class PengaturanScreen extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(20, 10, 20, 30),
         children: [
-          const _Judul('Akun'),
+          const _Judul('Akun & Keamanan'),
           XyBarisMenu(
-            ikon: Icons.badge_outlined,
-            judul: 'Identitas Profil',
-            sub: 'Nama, username, WhatsApp, bio, foto, dan tautan',
-            tujuan: const UbahProfilScreen(),
-          ),
-          const XyBarisMenu(
-            ikon: Icons.auto_awesome_rounded,
-            judul: 'Kustomisasi Profil',
-            sub: 'Badge, bingkai, lencana, style nama, banner, dan tema',
-            tujuan: KustomProfilScreen(),
+            ikon: Icons.devices_rounded,
+            judul: 'Perangkat Login',
+            sub: 'Daftar perangkat & riwayat sesi login aktif',
+            tujuan: const PerangkatScreen(),
           ),
           XyBarisMenu(
             ikon: Icons.lock_outline_rounded,
-            judul: 'Keamanan',
-            sub: 'Ganti password dan info sesi',
+            judul: 'Keamanan Akun',
+            sub: 'Ganti password dan info sesi aktif',
             tujuan: const KeamananScreen(),
           ),
           XyBarisMenu(
@@ -176,6 +171,24 @@ class PengaturanScreen extends StatelessWidget {
             sub: 'Refund sewa PC, akun digital, dan saldo',
             tujuan: const LegalScreen(jenis: 'refund'),
           ),
+          XyBarisMenu(
+            ikon: Icons.gavel_rounded,
+            judul: 'Panduan & Aturan Komunitas',
+            sub: 'Etika interaksi, postingan feed, dan larangan spam',
+            tujuan: const LegalScreen(jenis: 'komunitas'),
+          ),
+          XyBarisMenu(
+            ikon: Icons.live_tv_rounded,
+            judul: 'Ketentuan Kreator & Siaran',
+            sub: 'Aturan livestreaming, royalti, dan monetisasi',
+            tujuan: const LegalScreen(jenis: 'live'),
+          ),
+          XyBarisMenu(
+            ikon: Icons.workspace_premium_outlined,
+            judul: 'Lisensi Pihak Ketiga',
+            sub: 'Perangkat lunak open source yang digunakan',
+            tujuan: const LisensiScreen(),
+          ),
           const _Judul('Lainnya'),
           XyBarisMenu(
             ikon: Icons.help_outline_rounded,
@@ -229,6 +242,7 @@ class KustomProfilScreen extends StatelessWidget {
           BannerProfil(
             tema: u.banner,
             media: u.bannerMedia,
+            bingkai: u.bingkai,
             borderRadius: BorderRadius.circular(XyRadius.xl),
             child: SizedBox(
               height: 190,

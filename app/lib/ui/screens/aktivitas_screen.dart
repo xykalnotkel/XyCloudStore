@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../core/motion.dart';
 import '../../core/theme.dart';
 import '../../data/device_identity.dart';
 import '../../providers/app_state.dart';
 import '../widgets/common.dart';
+import 'perangkat_screen.dart';
 
 /// Aktivitas & Keamanan — audit login pribadi + device terdaftar
 class AktivitasScreen extends StatefulWidget {
@@ -126,6 +128,12 @@ class _AktivitasScreenState extends State<AktivitasScreen> {
                       ]),
                     ),
                   ]),
+                ),
+                const SizedBox(height: 12),
+                OutlinedButton.icon(
+                  onPressed: () => Navigator.push(context, xyRoute(const PerangkatScreen())),
+                  icon: const Icon(Icons.devices_rounded, size: 18),
+                  label: const Text('Kelola Semua Perangkat Login'),
                 ),
                 const SectionHeader('Riwayat Aktivitas'),
                 ...audit.map((a) => Padding(

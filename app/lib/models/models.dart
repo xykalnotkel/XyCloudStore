@@ -1710,6 +1710,9 @@ class StoryItem {
   final String teks;
   final String bgGradient; // 'ungu', 'emas', 'neon', 'senja', 'cyber'
   final String privasi; // 'teman', 'publik'
+  final int likes;
+  final int reposts;
+  final bool sudahLike;
   final DateTime dibuat;
   final DateTime berakhir;
   final bool punyaSaya;
@@ -1725,10 +1728,37 @@ class StoryItem {
     required this.teks,
     this.bgGradient = 'ungu',
     this.privasi = 'teman',
+    this.likes = 0,
+    this.reposts = 0,
+    this.sudahLike = false,
     required this.dibuat,
     required this.berakhir,
     this.punyaSaya = false,
   });
+
+  StoryItem copyWith({
+    int? likes,
+    int? reposts,
+    bool? sudahLike,
+  }) =>
+      StoryItem(
+        id: id,
+        userId: userId,
+        nama: nama,
+        foto: foto,
+        bingkai: bingkai,
+        mediaUrl: mediaUrl,
+        tipe: tipe,
+        teks: teks,
+        bgGradient: bgGradient,
+        privasi: privasi,
+        likes: likes ?? this.likes,
+        reposts: reposts ?? this.reposts,
+        sudahLike: sudahLike ?? this.sudahLike,
+        dibuat: dibuat,
+        berakhir: berakhir,
+        punyaSaya: punyaSaya,
+      );
 
   factory StoryItem.fromJson(Map<String, dynamic> j) => StoryItem(
         id: '${j['id'] ?? ''}',
@@ -1741,6 +1771,9 @@ class StoryItem {
         teks: '${j['teks'] ?? ''}',
         bgGradient: '${j['bg_gradient'] ?? 'ungu'}',
         privasi: '${j['privasi'] ?? 'teman'}',
+        likes: (j['likes'] as num?)?.toInt() ?? 0,
+        reposts: (j['reposts'] as num?)?.toInt() ?? 0,
+        sudahLike: j['sudah_like'] == true || j['sudah_like'] == 1,
         dibuat: DateTime.tryParse('${j['dibuat'] ?? ''}') ?? DateTime.now(),
         berakhir: DateTime.tryParse('${j['berakhir'] ?? ''}') ??
             DateTime.now().add(const Duration(hours: 24)),

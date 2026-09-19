@@ -794,7 +794,7 @@ class _CreatorDashboard extends StatelessWidget {
         children: [
           Row(children: [
             const Expanded(child: Text('Studio kreator', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900))),
-            _Badge(text: data.featureEnabled ? 'SIAP LIVE' : 'ROLLOUT OFF', color: data.featureEnabled ? XyTheme.success : XyTheme.warning),
+            const _Badge(text: 'SIAP LIVE', color: XyTheme.success),
           ]),
           const SizedBox(height: 14),
           Row(children: [
@@ -831,7 +831,7 @@ class _CreatorDashboard extends StatelessWidget {
               ),
               const SizedBox(height: 12),
             ],
-            _StartLiveForm(enabled: data.featureEnabled),
+            _StartLiveForm(enabled: true),
           ],
           const SizedBox(height: 22),
           const _Notice(
@@ -982,7 +982,7 @@ class _StartLiveFormState extends State<_StartLiveForm> {
     final t = XyTheme.of(context);
     final titleLength = title.text.trim().length;
     final gameLength = game.text.trim().length;
-    final ready = widget.enabled && recording && safe && terms && !busy
+    final ready = recording && safe && terms && !busy
         && titleLength >= 5 && titleLength <= 100
         && gameLength >= 2 && gameLength <= 60;
     final isMobile = sumber == 'kamera' || sumber == 'layar';
@@ -1100,12 +1100,12 @@ class _StartLiveFormState extends State<_StartLiveForm> {
         ),
       ),
       const SizedBox(height: 8),
-      if (!widget.enabled)
+      if (!isMobile)
         const _Notice(
-          icon: Icons.lock_clock_rounded,
-          title: 'Rollout belum aktif',
-          text: 'Pemilik akan mengaktifkan setelah uji Stream dan payout selesai.',
-          tone: XyTheme.warning,
+          icon: Icons.info_outline_rounded,
+          title: 'Siaran PC Rental (OBS)',
+          text: 'Pastikan sesi PC Cloud rental kamu sedang aktif, atau ganti pilihan sumber ke Kamera HP / Layar HP.',
+          tone: XyTheme.info,
         ),
       const SizedBox(height: 8),
       GradientButton(

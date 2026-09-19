@@ -854,18 +854,20 @@ class _SesiScreenState extends State<SesiScreen> {
                         ]),
                       ),
                   ] else ...[
-                    DropdownButtonFormField<int>(
-                        value: _appId,
-                        isExpanded: true,
-                        decoration: const InputDecoration(
-                            labelText: 'Aplikasi pada PC'),
-                        items: _apps
-                            .map((a) => DropdownMenuItem(
+                    XyDropdown<int>(
+                      label: 'Aplikasi pada PC',
+                      hint: 'Pilih aplikasi atau game…',
+                      prefixIcon: Icons.apps_rounded,
+                      value: _appId,
+                      options: _apps
+                          .map((a) => XyDropdownOption<int>(
                                 value: a['id'] as int,
-                                child: Text('${a['name']}',
-                                    overflow: TextOverflow.ellipsis)))
-                            .toList(),
-                        onChanged: (v) => setState(() => _appId = v)),
+                                label: '${a['name']}',
+                                icon: Icons.sports_esports_rounded,
+                              ))
+                          .toList(),
+                      onChanged: (v) => setState(() => _appId = v),
+                    ),
                     const SizedBox(height: 14),
                     GradientButton(
                         label:

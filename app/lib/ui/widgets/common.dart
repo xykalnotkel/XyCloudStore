@@ -6,6 +6,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../../core/theme.dart';
 import '../../data/realtime_service.dart';
 import 'latar_aurora.dart';
+export 'custom_dropdown.dart';
 
 // ============================================================
 //  Gambar jaringan dengan cache disk di perangkat
@@ -322,21 +323,36 @@ class Pill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final bool isDark = Theme.of(context).brightness == Brightness.dark;
+    final double lum = warna.computeLuminance();
+    // Cegah teks putih di latar putih/terang pada light mode
+    final Color teksWarna = solid
+        ? (lum > 0.65 ? (isDark ? XyTheme.inkGelap : XyTheme.ink) : Colors.white)
+        : (lum > 0.65 ? (isDark ? XyTheme.inkGelap : XyTheme.primaryDeep) : warna);
+    final Color bgWarna = solid
+        ? warna
+        : (lum > 0.75
+            ? (isDark ? Colors.white.withOpacity(0.12) : const Color(0xFFEEE8FA))
+            : warna.withOpacity(.12));
+    final Color borderWarna = solid
+        ? Colors.transparent
+        : (lum > 0.75 ? XyTheme.of(context).line : warna.withOpacity(.25));
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5.5),
       decoration: BoxDecoration(
-        color: solid ? warna : warna.withOpacity(.10),
+        color: bgWarna,
         borderRadius: BorderRadius.circular(XyRadius.pill),
-        border: solid ? null : Border.all(color: warna.withOpacity(.18)),
+        border: solid ? null : Border.all(color: borderWarna),
       ),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         if (icon != null) ...[
-          Icon(icon, size: 12.5, color: solid ? Colors.white : warna),
+          Icon(icon, size: 12.5, color: teksWarna),
           const SizedBox(width: 4),
         ],
         Text(teks,
             style: TextStyle(
-              color: solid ? Colors.white : warna,
+              color: teksWarna,
               fontSize: 11,
               fontWeight: FontWeight.w700,
               letterSpacing: .1,

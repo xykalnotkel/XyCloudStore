@@ -94,9 +94,9 @@ class HomeScreen extends StatelessWidget {
               BannerSlider(items: s.banners),
 
               SectionHeader(
-                'Akun Terlaris',
-                sub: 'Kredensial dikirim otomatis',
-                aksi: 'Semua',
+                'Produk & Akun Toko',
+                sub: 'Kredensial instan dikirim otomatis',
+                aksi: 'Ke Toko',
                 onAksi: () => Navigator.push(context, xyRoute(const AkunScreen())),
               ),
               ...s.produk.take(3).toList().asMap().entries.map(

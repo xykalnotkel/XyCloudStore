@@ -14,35 +14,46 @@ import { setInputLivestream } from './livestream.js';
  *
  * @returns {string|null} host (dengan port bila disebut) atau null bila tidak ada calon sah
  */
+export function isPrivateIp(h) {
+  if (!h) return false;
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(h)) {
+    const p = h.split('.').map(Number);
+    if (p[0] === 10) return true; // 10.0.0.0/8
+    if (p[0] === 172 && p[1] >= 16 && p[1] <= 31) return true; // 172.16.0.0/12
+    if (p[0] === 192 && p[1] === 168) return true; // 192.168.0.0/16
+    if (p[0] === 127) return true; // 127.0.0.0/8
+    if (p[0] === 169 && p[1] === 254) return true; // 169.254.0.0/16
+  }
+  return false;
+}
+
 export function normalisasiHostStream(raw, fallback){
   const portSah=p=>{if(p==null)return true;const n=Number(p);return Number.isInteger(n)&&n>=1&&n<=65535;};
-  /**
-   * Pisahkan `host` dan `:port` opsional.
-   * Tiga bentuk diterima: `host`, `host:port`, dan `[ipv6]:port` / `ipv6` polos.
-   * Bentuk yang dikembalikan selalu bisa diurai `NativeStreaming.address()`.
-   */
   const pisah=v=>{
     const t=String(v||'').trim();
     if(!t||/\s/.test(t))return null;
-    // [ipv6] atau [ipv6]:port — kurung siku dipertahankan supaya tidak ambigu
     const siku=/^\[([0-9a-fA-F:]{2,})\](?::(\d{1,5}))?$/.exec(t);
     if(siku)return portSah(siku[2])?{host:siku[1],port:siku[2]||null,siku:true}:null;
-    // IPv6 polos: lebih dari satu titik dua, hanya heksadesimal + ':' (tanpa port,
-    // karena tidak bisa dibedakan dari bagian alamat). Klien membungkusnya sendiri.
     if((t.match(/:/g)||[]).length>1)return /^[0-9a-fA-F:]{2,}$/.test(t)?{host:t,port:null}:null;
-    // host atau host:port
     const m=/^([^\s:]+)(?::(\d{1,5}))?$/.exec(t);
     if(!m||!portSah(m[2]))return null;
     return {host:m[1],port:m[2]||null};
   };
-  /** Host saja (tanpa port) harus IP atau FQDN, bukan nama mesin lokal. */
   const okHost=h=>{
     if(!h)return false;
-    if(/^\d{1,3}(\.\d{1,3}){3}$/.test(h))return h.split('.').every(o=>Number(o)<=255);   // IPv4
-    if(h.includes(':'))return /^[0-9a-fA-F:]{2,}$/.test(h);                              // IPv6
-    return h.includes('.')&&h.length<253&&/^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$/.test(h); // FQDN
+    if(/^\d{1,3}(\.\d{1,3}){3}$/.test(h))return h.split('.').every(o=>Number(o)<=255);
+    if(h.includes(':'))return /^[0-9a-fA-F:]{2,}$/.test(h);
+    return h.includes('.')&&h.length<253&&/^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$/.test(h);
   };
-  for(const calon of [raw,fallback]){
+
+  const rawP = pisah(raw);
+  const fbP = pisah(fallback);
+  let daftarCalon = [raw, fallback];
+  if (rawP && okHost(rawP.host) && isPrivateIp(rawP.host) && fbP && okHost(fbP.host) && !isPrivateIp(fbP.host)) {
+    daftarCalon = [fallback, raw];
+  }
+
+  for(const calon of daftarCalon){
     const p=pisah(calon);
     if(!p||!okHost(p.host))continue;
     const host=p.siku?`[${p.host}]`:p.host;

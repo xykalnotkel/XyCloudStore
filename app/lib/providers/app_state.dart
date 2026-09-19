@@ -1278,6 +1278,22 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
+  Future<List<Map<String, dynamic>>> muatDaftarPerangkat() async {
+    try {
+      return await _repo.daftarPerangkat();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<bool> cabutAksesPerangkat({String? deviceId}) async {
+    try {
+      return await _repo.cabutPerangkat(deviceId: deviceId);
+    } catch (_) {
+      return false;
+    }
+  }
+
   // ================= feed stories =================
   List<StoryItem> stories = [];
   bool storiesMemuat = false;
@@ -1319,10 +1335,68 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<String?> hapusStory(String id) async {
+    final idx = stories.indexWhere((s) => s.id == id);
+    StoryItem? cadangan;
+    if (idx >= 0) {
+      cadangan = stories.removeAt(idx);
+      notifyListeners();
+    }
     try {
       await _repo.hapusStory(id);
-      stories.removeWhere((s) => s.id == id);
+      return null;
+    } catch (e) {
+      if (cadangan != null) {
+        stories.insert(idx.clamp(0, stories.length), cadangan);
+        notifyListeners();
+      }
+      return _pesan(e);
+    }
+  }
+
+  Future<void> likeStory(String id) async {
+    final idx = stories.indexWhere((s) => s.id == id);
+    if (idx < 0) return;
+    final item = stories[idx];
+    final targetLike = !item.sudahLike;
+    final targetCount = targetLike ? item.likes + 1 : (item.likes > 0 ? item.likes - 1 : 0);
+    stories[idx] = item.copyWith(sudahLike: targetLike, likes: targetCount);
+    notifyListeners();
+    try {
+      final res = await _repo.likeStory(id);
+      if (res['likes'] != null) {
+        stories[idx] = stories[idx].copyWith(
+          likes: (res['likes'] as num).toInt(),
+          sudahLike: res['sudah_like'] == true,
+        );
+        notifyListeners();
+      }
+    } catch (_) {}
+  }
+
+  Future<String?> repostStory(String id) async {
+    final idx = stories.indexWhere((s) => s.id == id);
+    if (idx >= 0) {
+      final item = stories[idx];
+      stories[idx] = item.copyWith(reposts: item.reposts + 1);
       notifyListeners();
+    }
+    try {
+      await _repo.repostStory(id);
+      unawaited(muatStories());
+      return null;
+    } catch (e) {
+      if (idx >= 0 && idx < stories.length) {
+        final item = stories[idx];
+        stories[idx] = item.copyWith(reposts: math.max(0, item.reposts - 1));
+        notifyListeners();
+      }
+      return _pesan(e);
+    }
+  }
+
+  Future<String?> balasStory(String id, String pesan) async {
+    try {
+      await _repo.balasStory(id, pesan);
       return null;
     } catch (e) {
       return _pesan(e);
@@ -1332,6 +1406,49 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   // ================= forum komunitas =================
   List<ForumPost> forum = [];
   Set<String> forumDisukai = {};
+  Set<String> penggunaDiikuti = {};
+  bool _diikutiPernahDimuat = false;
+
+  Future<void> muatPenggunaDiikuti() async {
+    if (user == null) return;
+    try {
+      final list = await _repo.followsSaya(arah: 'mengikuti');
+      penggunaDiikuti = list.map((e) => e.id).toSet();
+      _diikutiPernahDimuat = true;
+      notifyListeners();
+    } catch (_) {}
+  }
+
+  Future<bool> toggleIkuti(String targetUserId) async {
+    if (user == null || targetUserId.isEmpty || targetUserId == user!.id) return false;
+    final sedangIkuti = penggunaDiikuti.contains(targetUserId);
+    if (sedangIkuti) {
+      penggunaDiikuti.remove(targetUserId);
+    } else {
+      penggunaDiikuti.add(targetUserId);
+    }
+    notifyListeners();
+    try {
+      final res = await _repo.ikuti(targetUserId, !sedangIkuti);
+      final hasilIkuti = res['ikuti'] == true || res['status'] == 'mengikuti';
+      if (hasilIkuti) {
+        penggunaDiikuti.add(targetUserId);
+      } else {
+        penggunaDiikuti.remove(targetUserId);
+      }
+      notifyListeners();
+      return hasilIkuti;
+    } catch (_) {
+      // rollback
+      if (sedangIkuti) {
+        penggunaDiikuti.add(targetUserId);
+      } else {
+        penggunaDiikuti.remove(targetUserId);
+      }
+      notifyListeners();
+      return sedangIkuti;
+    }
+  }
 
   /// Posting yang dibookmark pengguna (Batch D).
   Set<String> forumDisimpan = {};
@@ -1398,6 +1515,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         try {
           forumDisukai = (await _repo.forumSukaSaya()).toSet();
           unawaited(muatSimpanan());
+          unawaited(muatPenggunaDiikuti());
         } catch (_) {}
       }
     } catch (e) {
@@ -1668,7 +1786,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     user = null; orders = []; transaksi = []; chat = []; topupSaya = [];
     liveCatalog = const LiveCatalog(); creatorLive = null; liveGalat = null; creatorLiveGalat = null; liveMemuat = false;
     _livePayoutClientId = null; _livePayoutUserId = null;
-    forum = []; forumDisukai.clear(); balasanDisukai.clear();
+    forum = []; forumDisukai.clear(); balasanDisukai.clear(); penggunaDiikuti.clear();
     stories = [];
     forumRevisi = 0; dmRevisi = 0;
     notifikasi = []; notifBelum = 0; notifBelumDibaca = 0;
@@ -1935,6 +2053,41 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         break;
       case 'forum.hapus':
         forum.removeWhere((f) => f.id == '${e.payload['id']}');
+        break;
+      case 'story.baru':
+        try {
+          final st = StoryItem.fromJson(Map<String, dynamic>.from(e.payload));
+          final idx = stories.indexWhere((s) => s.id == st.id);
+          if (idx < 0) {
+            stories.insert(0, st);
+            notifyListeners();
+          }
+        } catch (_) {}
+        break;
+      case 'story.hapus':
+        stories.removeWhere((s) => s.id == '${e.payload['id']}');
+        notifyListeners();
+        break;
+      case 'story.like':
+        try {
+          final id = '${e.payload['id']}';
+          final idx = stories.indexWhere((s) => s.id == id);
+          if (idx >= 0) {
+            final likes = (e.payload['likes'] as num?)?.toInt() ?? (stories[idx].likes + 1);
+            stories[idx] = stories[idx].copyWith(likes: likes);
+            notifyListeners();
+          }
+        } catch (_) {}
+        break;
+      case 'story.repost':
+        try {
+          final id = '${e.payload['id']}';
+          final idx = stories.indexWhere((s) => s.id == id);
+          if (idx >= 0) {
+            stories[idx] = stories[idx].copyWith(reposts: stories[idx].reposts + 1);
+            notifyListeners();
+          }
+        } catch (_) {}
         break;
       case 'wallet.update':
         user = user?.copyWith(saldo: e.payload['saldo'] as int);

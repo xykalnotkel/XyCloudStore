@@ -310,9 +310,9 @@ export async function unggahVideoBanner(env, { dataUri, folder = 'xycloudstore/b
   const timestamp = Math.floor(Date.now() / 1000);
   let mp4Id = null;
   try {
-    // Transformasi GIF banner: 12 FPS (ringan & mulus), 5 detik awal,
-    // lebar 400px batas proporsional, dan kompresi lossy agar konversi cepat & hemat kuota.
-    const transformBannerGif = 'f_gif,fps_12,du_5.0,so_0,w_400,c_limit,fl_lossy';
+    // Transformasi GIF banner: 14 FPS, 4 detik awal, lebar 380px proporsional,
+    // lossy compression, dan loop tak terbatas (fl_animated, e_loop) agar animasi berputar terus.
+    const transformBannerGif = 'f_gif,fps_14,du_4.0,so_0,w_380,c_limit,fl_lossy,fl_animated,e_loop';
 
     // 1) Unggah video dengan eager transformation bertanda-tangan.
     // 'eager' wajib masuk signParams agar dihitung dalam signature Cloudinary.
@@ -328,9 +328,14 @@ export async function unggahVideoBanner(env, { dataUri, folder = 'xycloudstore/b
 
     // 2) Ambil URL GIF hasil transformasi eager.
     const eagerUrl = Array.isArray(j.eager) && j.eager[0]?.secure_url ? String(j.eager[0].secure_url) : '';
-    const gifSumber = eagerUrl.startsWith('http')
+    let gifSumber = eagerUrl.startsWith('http')
       ? eagerUrl
       : String(j.secure_url).replace('/video/upload/', `/video/upload/${transformBannerGif}/`);
+
+    // Pastikan ekstensi berakhiran .gif agar Cloudinary menyajikan header image/gif dan di-render sebagai animasi berulang oleh Flutter
+    if (!gifSumber.endsWith('.gif')) {
+      gifSumber = gifSumber.replace(/\.[a-zA-Z0-9]+$/, '.gif');
+    }
 
     // Catat aset video & GIF ke database
     await catatMedia(env, {

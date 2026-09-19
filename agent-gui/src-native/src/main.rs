@@ -93,6 +93,7 @@ struct Aplikasi {
     d_server: String,
     d_user: String,
     d_sandi: String,
+    d_stream_host: String,
     tampil_sandi: bool,
     autostart: bool,
     // Batch L: mode relay Tailscale (host tanpa IP publik — untuk testing).
@@ -100,7 +101,9 @@ struct Aplikasi {
     status_simpan: Option<(bool, String)>,
     // Mode --gui-tes: tutup otomatis setelah beberapa frame (smoke-test CI).
     tes_gui: bool,
+    keluar_total: bool,
     frame: u32,
+    logo_tex: Option<egui::TextureHandle>,
 }
 
 impl Aplikasi {
@@ -109,6 +112,16 @@ impl Aplikasi {
         let cfg = st.cfg();
         let autostart = agent::autostart_aktif();
         let mode_relay = agent::mode_relay_aktif();
+        let logo_tex = image::load_from_memory(include_bytes!("../../src-tauri/icons/icon.png"))
+            .ok()
+            .map(|img| {
+                let img = img.to_rgba8();
+                let size = [img.width() as usize, img.height() as usize];
+                let pixels = img.into_raw();
+                let color_image = egui::ColorImage::from_rgba_unmultiplied(size, &pixels);
+                cc.egui_ctx
+                    .load_texture("logo_xycloud", color_image, egui::TextureOptions::LINEAR)
+            });
         Self {
             ctx: cc.egui_ctx.clone(),
             st,
@@ -116,12 +129,15 @@ impl Aplikasi {
             d_server: cfg.server,
             d_user: cfg.user,
             d_sandi: cfg.sandi,
+            d_stream_host: cfg.stream_host.unwrap_or_default(),
             tampil_sandi: false,
             autostart,
             mode_relay,
             status_simpan: None,
             tes_gui,
+            keluar_total: false,
             frame: 0,
+            logo_tex,
         }
     }
 
@@ -131,6 +147,7 @@ impl Aplikasi {
         self.d_server = cfg.server;
         self.d_user = cfg.user;
         self.d_sandi = cfg.sandi;
+        self.d_stream_host = cfg.stream_host.unwrap_or_default();
     }
 
     fn simpan(&mut self) {
@@ -143,6 +160,11 @@ impl Aplikasi {
                 "https://api.xycloud.my.id".into()
             } else {
                 self.d_server.trim().into()
+            },
+            stream_host: if self.d_stream_host.trim().is_empty() {
+                None
+            } else {
+                Some(self.d_stream_host.trim().into())
             },
         };
         if k.kode.is_empty() {
@@ -368,6 +390,21 @@ impl Aplikasi {
         self.ctx.request_repaint();
     }
 
+    fn buka_web_sunshine(&self) {
+        #[cfg(windows)]
+        {
+            let _ = std::process::Command::new("cmd")
+                .args(["/C", "start", "https://localhost:47990"])
+                .spawn();
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = std::process::Command::new("xdg-open")
+                .arg("https://localhost:47990")
+                .spawn();
+        }
+    }
+
     fn mulai_loop(&self) {
         // Ambil konfig terbaru (memori → disk), sama seperti build Tauri.
         let cfg = {
@@ -439,6 +476,17 @@ impl eframe::App for Aplikasi {
                 return;
             }
         }
+
+        // Cegah agen terhenti jika jendela ditutup (tombol 'X') — minimalkan ke latar belakang
+        if !self.tes_gui && ctx.input(|i| i.viewport().close_requested()) {
+            if !self.keluar_total {
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+                log_gui("Jendela diminimalkan ke latar belakang. Agen tetap aktif melayani streaming.");
+                log_gui("Gunakan tombol 'Tutup Total' di antarmuka bila ingin menghentikan agen sepenuhnya.");
+            }
+        }
+
         if self
             .st
             .sinkron_draft
@@ -452,258 +500,365 @@ impl eframe::App for Aplikasi {
         ctx.request_repaint_after(std::time::Duration::from_millis(500));
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.add_space(10.0);
+            ui.add_space(8.0);
 
-            // ---------- kepala ----------
+            // ==================== HEADER ====================
             ui.horizontal(|ui| {
                 let (kotak, _) = ui.allocate_exact_size(
                     egui::vec2(38.0, 38.0),
                     egui::Sense::hover(),
                 );
-                ui.painter().rect(
-                    kotak,
-                    11.0,
-                    UNGU,
-                    egui::Stroke::new(1.4_f32, UNGU_LEMBUT),
-                );
-                ui.painter().text(
-                    kotak.center(),
-                    egui::Align2::CENTER_CENTER,
-                    "☁",
-                    egui::FontId::proportional(19.0),
-                    egui::Color32::WHITE,
-                );
-                ui.add_space(6.0);
+                if let Some(tex) = &self.logo_tex {
+                    ui.painter().image(
+                        tex.id(),
+                        kotak,
+                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                        egui::Color32::WHITE,
+                    );
+                } else {
+                    ui.painter().rect(
+                        kotak,
+                        10.0,
+                        UNGU,
+                        egui::Stroke::new(1.4_f32, UNGU_LEMBUT),
+                    );
+                    ui.painter().text(
+                        kotak.center(),
+                        egui::Align2::CENTER_CENTER,
+                        "XY",
+                        egui::FontId::proportional(16.0),
+                        egui::Color32::WHITE,
+                    );
+                }
+                ui.add_space(8.0);
                 ui.vertical(|ui| {
                     ui.label(
-                        egui::RichText::new("XyCloudStore Agent")
+                        egui::RichText::new("XyCloudStore Host Agent")
                             .strong()
-                            .size(17.0),
+                            .size(17.0)
+                            .color(egui::Color32::WHITE),
                     );
                     ui.label(
                         egui::RichText::new(format!(
-                            "v{VERSI} · native egui (tanpa Tauri/WebView)"
+                            "v{VERSI} · Native Host Controller"
                         ))
                         .size(11.0)
-                        .color(egui::Color32::GRAY),
+                        .color(egui::Color32::from_rgb(0x8B, 0x94, 0x9E)),
                     );
                 });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let (warna, teks) = if berjalan {
-                        (egui::Color32::from_rgb(0x34, 0xD3, 0x99), "●  Agen berjalan")
+                    let (bg, warna, teks) = if berjalan {
+                        (egui::Color32::from_rgb(0x06, 0x4E, 0x3B), egui::Color32::from_rgb(0x34, 0xD3, 0x99), "●  ONLINE / AKTIF")
                     } else if sibuk != Sibuk::Tidak {
-                        (UNGU_LEMBUT, "●  Sibuk…")
+                        (egui::Color32::from_rgb(0x37, 0x24, 0x61), UNGU_LEMBUT, "⟳  MEMPROSES…")
                     } else {
-                        (egui::Color32::GRAY, "●  Diam")
+                        (egui::Color32::from_rgb(0x21, 0x26, 0x2D), egui::Color32::from_rgb(0x8B, 0x94, 0x9E), "○  STANDBY")
                     };
-                    ui.label(egui::RichText::new(teks).color(warna).strong().size(12.0));
+                    egui::Frame::none()
+                        .fill(bg)
+                        .rounding(egui::Rounding::same(6.0))
+                        .inner_margin(egui::Margin::symmetric(9.0, 4.0))
+                        .show(ui, |ui| {
+                            ui.label(egui::RichText::new(teks).color(warna).strong().size(11.0));
+                        });
                 });
             });
 
-            ui.add_space(14.0);
+            ui.add_space(10.0);
 
-            // ---------- pengaturan (kartu quiet surface, tanpa separator) ----------
-            ui.label(egui::RichText::new("PENGATURAN UNIT").size(10.5)
-                .color(egui::Color32::from_rgb(0x8A, 0x84, 0x9E)).strong());
+            // ==================== 1. KENDALI UTAMA ====================
+            kartu(ui, |ui| {
+                ui.vertical(|ui| {
+                    let mati = sibuk != Sibuk::Tidak;
+                    if berjalan {
+                        let btn = ui.add(
+                            egui::Button::new(
+                                egui::RichText::new("⏹  HENTIKAN LAYANAN AGEN HOST")
+                                    .size(13.0)
+                                    .strong()
+                                    .color(egui::Color32::WHITE),
+                            )
+                            .fill(egui::Color32::from_rgb(0xDC, 0x26, 0x26))
+                            .min_size(egui::vec2(ui.available_width(), 38.0)),
+                        );
+                        if btn.clicked() {
+                            self.hentikan();
+                        }
+                        ui.add_space(4.0);
+                        ui.label(
+                            egui::RichText::new("● Layanan aktif: PC siap menerima streaming dari aplikasi HP penyewa.")
+                                .size(11.0)
+                                .color(egui::Color32::from_rgb(0x34, 0xD3, 0x99)),
+                        );
+                    } else {
+                        ui.add_enabled_ui(!mati, |ui| {
+                            let btn = ui.add(
+                                egui::Button::new(
+                                    egui::RichText::new("▶  MULAI LAYANAN AGEN HOST")
+                                        .size(13.0)
+                                        .strong()
+                                        .color(egui::Color32::WHITE),
+                                )
+                                .fill(UNGU)
+                                .min_size(egui::vec2(ui.available_width(), 38.0)),
+                            );
+                            if btn.clicked() {
+                                self.mulai_loop();
+                            }
+                        });
+                        ui.add_space(4.0);
+                        ui.label(
+                            egui::RichText::new("○ Layanan standby: klik tombol di atas untuk mulai menerima koneksi sewa.")
+                                .size(11.0)
+                                .color(egui::Color32::from_rgb(0x8B, 0x94, 0x9E)),
+                        );
+                    }
+                });
+            });
+
+            ui.add_space(10.0);
+
+            // ==================== 2. ALAT & DIAGNOSTIK ====================
+            ui.label(
+                egui::RichText::new("ALAT & DIAGNOSTIK ENGINE")
+                    .size(11.0)
+                    .color(egui::Color32::from_rgb(0x8B, 0x94, 0x9E))
+                    .strong(),
+            );
             ui.add_space(4.0);
             kartu(ui, |ui| {
-            egui::Grid::new("grid_cfg")
-                .num_columns(2)
-                .spacing([10.0, 8.0])
-                .show(ui, |ui| {
-                    ui.label("Kode unit");
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.d_kode)
-                            .desired_width(f32::INFINITY)
-                            .hint_text("contoh: UNIT-01"),
-                    );
-                    ui.end_row();
-
-                    ui.label("Server API");
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.d_server)
-                            .desired_width(f32::INFINITY)
-                            .hint_text("https://api.xycloud.my.id"),
-                    );
-                    ui.end_row();
-
-                    ui.label("User Sunshine");
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.d_user)
-                            .desired_width(f32::INFINITY)
-                            .hint_text("kosongkan = auto-setup"),
-                    );
-                    ui.end_row();
-
-                    ui.label("Sandi Sunshine");
-                    ui.horizontal(|ui| {
-                        ui.add(
-                            egui::TextEdit::singleline(&mut self.d_sandi)
-                                .password(!self.tampil_sandi)
-                                .desired_width(190.0)
-                                .hint_text("kosongkan = dipertahankan",
-                            ),
-                        );
-                        if ui.small_button("👁").clicked() {
-                            self.tampil_sandi = !self.tampil_sandi;
-                        }
-                    });
-                    ui.end_row();
-                });
-            });
-
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                if ui
-                    .add(egui::Button::new("💾  Simpan").min_size(egui::vec2(110.0, 32.0)))
-                    .clicked()
-                {
-                    self.simpan();
-                }
-                if let Some((ok, pesan)) = &self.status_simpan {
-                    ui.label(
-                        egui::RichText::new(pesan)
-                            .size(11.5)
-                            .color(if *ok {
-                                egui::Color32::from_rgb(0x34, 0xD3, 0x99)
-                            } else {
-                                egui::Color32::from_rgb(0xF8, 0x71, 0x71)
-                            }),
-                    );
-                }
-            });
-
-            ui.add_space(4.0);
-            let cb = ui.checkbox(
-                &mut self.autostart,
-                "Jalankan otomatis saat login Windows",
-            );
-            if cb.changed() {
-                let a = self.autostart;
-                self.toggle_autostart(a);
-            }
-
-            // Batch L: mode relay Tailscale — untuk TESTING di host tanpa
-            // IP publik (VM/CGNAT). Host dilaporkan memakai IP tailnet 100.x.
-            let cb2 = ui.checkbox(
-                &mut self.mode_relay,
-                "Mode Relay (Tailscale) — host dilaporkan pakai IP tailnet 100.x",
-            );
-            if cb2.changed() {
-                let aktif = self.mode_relay;
-                match agent::set_mode_relay(aktif) {
-                    Ok(_) => {
-                        if aktif {
-                            match agent::ip_tailscale() {
-                                Some(ip) => log_gui(&format!(
-                                    "Mode relay AKTIF — IP Tailscale terdeteksi: {ip}.                                      Penyewa harus tergabung di tailnet yang sama.                                      Hanya untuk testing, bukan produksi."
-                                )),
-                                None => log_gui(
-                                    "Mode relay AKTIF tapi IP Tailscale tidak ditemukan.                                      Pastikan Tailscale terpasang & login, lalu coba lagi.",
-                                ),
-                            }
-                        } else {
-                            log_gui("Mode relay dimatikan — kembali pakai IP publik.");
-                        }
-                    }
-                    Err(e) => log_gui(&format!("Gagal simpan mode relay: {e}")),
-                }
-            }
-
-            ui.add_space(12.0);
-
-            // ---------- kendali ----------
-            ui.label(egui::RichText::new("KENDALI AGEN").size(10.5)
-                .color(egui::Color32::from_rgb(0x8A, 0x84, 0x9E)).strong());
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
                 let mati = sibuk != Sibuk::Tidak;
                 ui.add_enabled_ui(!mati, |ui| {
-                    if ui
-                        .add(egui::Button::new("🔌  Uji koneksi").min_size(egui::vec2(120.0, 34.0)))
-                        .clicked()
-                    {
-                        self.uji_koneksi();
-                    }
-                    if ui
-                        .add(egui::Button::new("⚙  Setup Engine").min_size(egui::vec2(125.0, 34.0)))
-                        .clicked()
-                    {
-                        self.setup_engine();
-                    }
-                    if ui
-                        .add(egui::Button::new("🌐  Cek Port").min_size(egui::vec2(105.0, 34.0)))
-                        .clicked()
-                    {
-                        self.cek_port();
-                    }
-                    if ui
-                        .add(egui::Button::new("🔓  Auto-UPnP").min_size(egui::vec2(110.0, 34.0)))
-                        .clicked()
-                    {
-                        self.jalankan_upnp();
-                    }
-                });
-                if berjalan {
-                    if ui
-                        .add(
-                            egui::Button::new(
-                                egui::RichText::new("⏹  Hentikan").color(egui::Color32::WHITE),
+                    let lebar_setengah = (ui.available_width() - 8.0) * 0.5;
+                    ui.horizontal(|ui| {
+                        if ui
+                            .add(
+                                egui::Button::new("🔌  Uji Sunshine")
+                                    .min_size(egui::vec2(lebar_setengah, 32.0)),
                             )
-                            .fill(egui::Color32::from_rgb(0xB4, 0x23, 0x36))
-                            .min_size(egui::vec2(110.0, 34.0)),
-                        )
+                            .on_hover_text("Periksa API lokal Sunshine dan verifikasi kredensial")
+                            .clicked()
+                        {
+                            self.uji_koneksi();
+                        }
+                        if ui
+                            .add(
+                                egui::Button::new("⚙  Setup Engine")
+                                    .min_size(egui::vec2(lebar_setengah, 32.0)),
+                            )
+                            .on_hover_text("Unduh dan pasang Sunshine engine secara otomatis jika belum ada")
+                            .clicked()
+                        {
+                            self.setup_engine();
+                        }
+                    });
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        if ui
+                            .add(
+                                egui::Button::new("🌐  Cek Port Publik")
+                                    .min_size(egui::vec2(lebar_setengah, 32.0)),
+                            )
+                            .on_hover_text("Minta server menguji keterjangkauan port streaming dari internet")
+                            .clicked()
+                        {
+                            self.cek_port();
+                        }
+                        if ui
+                            .add(
+                                egui::Button::new("🔓  Auto-UPnP")
+                                    .min_size(egui::vec2(lebar_setengah, 32.0)),
+                            )
+                            .on_hover_text("Buka port otomatis di router via UPnP & Windows Firewall")
+                            .clicked()
+                        {
+                            self.jalankan_upnp();
+                        }
+                    });
+                });
+
+                // Badge hasil uji / setup.
+                badge_hasil(ui, "Uji koneksi", &self.st.hasil_uji.lock().unwrap());
+                badge_hasil(ui, "Setup engine", &self.st.hasil_setup.lock().unwrap());
+
+                if sibuk != Sibuk::Tidak {
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label(
+                            egui::RichText::new(match sibuk {
+                                Sibuk::Uji => "Menguji koneksi ke Sunshine…",
+                                Sibuk::Setup => "Setup otomatis berjalan (unduh/pasang Sunshine bisa beberapa menit)…",
+                                Sibuk::CekPort => "Server sedang memeriksa port streaming dari internet…",
+                                Sibuk::Upnp => "Membuka port via UPnP router & Windows Firewall…",
+                                Sibuk::Loop => "Agen berjalan…",
+                                Sibuk::Tidak => "",
+                            })
+                            .size(11.5)
+                            .color(UNGU_LEMBUT),
+                        );
+                    });
+                }
+
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui
+                        .add(egui::Button::new("🌐  Buka Web Sunshine (localhost:47990)").small())
+                        .on_hover_text("Buka panel Sunshine di browser default untuk pairing PIN & konfigurasi resolusi")
                         .clicked()
                     {
-                        self.hentikan();
+                        self.buka_web_sunshine();
                     }
-                } else {
-                    ui.add_enabled_ui(!mati, |ui| {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui
                             .add(
                                 egui::Button::new(
-                                    egui::RichText::new("▶  Mulai Agen").color(egui::Color32::WHITE),
+                                    egui::RichText::new("🚪  Tutup Total")
+                                        .color(egui::Color32::from_rgb(0xF8, 0x71, 0x71)),
                                 )
-                                .fill(UNGU)
-                                .min_size(egui::vec2(110.0, 34.0)),
+                                .small(),
                             )
+                            .on_hover_text("Hentikan agen dan tutup seluruh proses background")
                             .clicked()
                         {
-                            self.mulai_loop();
+                            self.keluar_total = true;
+                            self.hentikan();
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                         }
                     });
+                });
+            });
+
+            ui.add_space(10.0);
+
+            // ==================== 3. PENGATURAN UNIT ====================
+            ui.label(
+                egui::RichText::new("KONFIGURASI UNIT & KONEKSI")
+                    .size(11.0)
+                    .color(egui::Color32::from_rgb(0x8B, 0x94, 0x9E))
+                    .strong(),
+            );
+            ui.add_space(4.0);
+            kartu(ui, |ui| {
+                egui::Grid::new("grid_cfg")
+                    .num_columns(2)
+                    .spacing([12.0, 8.0])
+                    .show(ui, |ui| {
+                        ui.label("Kode Unit:");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.d_kode)
+                                .desired_width(f32::INFINITY)
+                                .hint_text("contoh: UNIT-01 / PC-RTX-01"),
+                        );
+                        ui.end_row();
+
+                        ui.label("Server API:");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.d_server)
+                                .desired_width(f32::INFINITY)
+                                .hint_text("https://api.xycloud.my.id"),
+                        );
+                        ui.end_row();
+
+                        ui.label("User Sunshine:");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.d_user)
+                                .desired_width(f32::INFINITY)
+                                .hint_text("kosongkan = auto-setup"),
+                        );
+                        ui.end_row();
+
+                        ui.label("Sandi Sunshine:");
+                        ui.horizontal(|ui| {
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.d_sandi)
+                                    .password(!self.tampil_sandi)
+                                    .desired_width(210.0)
+                                    .hint_text("kosongkan = dipertahankan"),
+                            );
+                            if ui.small_button(if self.tampil_sandi { "🔒" } else { "👁" }).clicked() {
+                                self.tampil_sandi = !self.tampil_sandi;
+                            }
+                        });
+                        ui.end_row();
+
+                        ui.label("Host / Relay:");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.d_stream_host)
+                                .desired_width(f32::INFINITY)
+                                .hint_text("kosongkan = auto IP publik, atau domain playit"),
+                        );
+                        ui.end_row();
+                    });
+
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    if ui
+                        .add(egui::Button::new("💾  Simpan Konfigurasi").min_size(egui::vec2(140.0, 30.0)))
+                        .clicked()
+                    {
+                        self.simpan();
+                    }
+                    if let Some((ok, pesan)) = &self.status_simpan {
+                        ui.label(
+                            egui::RichText::new(pesan)
+                                .size(11.5)
+                                .color(if *ok {
+                                    egui::Color32::from_rgb(0x34, 0xD3, 0x99)
+                                } else {
+                                    egui::Color32::from_rgb(0xF8, 0x71, 0x71)
+                                }),
+                        );
+                    }
+                });
+
+                ui.add_space(8.0);
+                let cb = ui.checkbox(
+                    &mut self.autostart,
+                    "Jalankan otomatis saat login Windows",
+                );
+                if cb.changed() {
+                    let a = self.autostart;
+                    self.toggle_autostart(a);
+                }
+
+                let cb2 = ui.checkbox(
+                    &mut self.mode_relay,
+                    "Mode Relay (Tailscale) — host dilaporkan pakai IP tailnet 100.x",
+                );
+                if cb2.changed() {
+                    let aktif = self.mode_relay;
+                    match agent::set_mode_relay(aktif) {
+                        Ok(_) => {
+                            if aktif {
+                                match agent::ip_tailscale() {
+                                    Some(ip) => log_gui(&format!(
+                                        "Mode relay AKTIF — IP Tailscale terdeteksi: {ip}. Penyewa harus tergabung di tailnet yang sama. Hanya untuk testing, bukan produksi."
+                                    )),
+                                    None => log_gui(
+                                        "Mode relay AKTIF tapi IP Tailscale tidak ditemukan. Pastikan Tailscale terpasang & login, lalu coba lagi.",
+                                    ),
+                                }
+                            } else {
+                                log_gui("Mode relay dimatikan — kembali pakai IP publik.");
+                            }
+                        }
+                        Err(e) => log_gui(&format!("Gagal simpan mode relay: {e}")),
+                    }
                 }
             });
 
-            // Badge hasil uji / setup.
-            badge_hasil(ui, "Uji koneksi", &self.st.hasil_uji.lock().unwrap());
-            badge_hasil(ui, "Setup engine", &self.st.hasil_setup.lock().unwrap());
+            ui.add_space(10.0);
 
-            if sibuk != Sibuk::Tidak {
-                ui.add_space(4.0);
-                ui.horizontal(|ui| {
-                    ui.spinner();
-                    ui.label(
-                        egui::RichText::new(match sibuk {
-                            Sibuk::Uji => "Menguji koneksi ke Sunshine…",
-                            Sibuk::Setup => "Setup otomatis berjalan (unduh/pasang Sunshine bisa beberapa menit)…",
-                            Sibuk::CekPort => "Server sedang memeriksa port streaming dari internet…",
-                            Sibuk::Upnp => "Membuka port via UPnP router & Windows Firewall…",
-                            Sibuk::Loop => "Agen berjalan…",
-                            Sibuk::Tidak => "",
-                        })
-                        .size(11.5)
-                        .color(UNGU_LEMBUT),
-                    );
-                });
-            }
-
-            ui.add_space(12.0);
-
-            // ---------- log ----------
+            // ==================== 4. LOG AKTIVITAS ====================
+            let log_len = self.st.log.lock().unwrap().len();
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("LOG AKTIVITAS").size(10.5)
-                    .color(egui::Color32::from_rgb(0x8A, 0x84, 0x9E)).strong());
+                ui.label(
+                    egui::RichText::new(format!("LOG AKTIVITAS ({log_len})"))
+                        .size(11.0)
+                        .color(egui::Color32::from_rgb(0x8B, 0x94, 0x9E))
+                        .strong(),
+                );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.small_button("Bersihkan").clicked() {
                         self.st.log.lock().unwrap().clear();
@@ -711,31 +866,34 @@ impl eframe::App for Aplikasi {
                 });
             });
             ui.add_space(4.0);
-            let tinggi = ui.available_height() - 4.0;
-            egui::ScrollArea::vertical()
-                .max_height(tinggi.max(80.0))
-                .stick_to_bottom(true)
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    let log = self.st.log.lock().unwrap();
-                    if log.is_empty() {
-                        ui.label(
-                            egui::RichText::new(
-                                "Belum ada aktivitas. Simpan kode unit → Setup Engine → Mulai Agen.",
-                            )
-                            .italics()
-                            .color(egui::Color32::GRAY),
-                        );
-                    }
-                    for baris in log.iter() {
-                        ui.label(
-                            egui::RichText::new(baris)
-                                .monospace()
-                                .size(11.3)
-                                .color(egui::Color32::from_rgb(0xC9, 0xC4, 0xD8)),
-                        );
-                    }
-                });
+
+            kartu(ui, |ui| {
+                let tinggi = ui.available_height() - 4.0;
+                egui::ScrollArea::vertical()
+                    .max_height(tinggi.max(90.0))
+                    .stick_to_bottom(true)
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        let log = self.st.log.lock().unwrap();
+                        if log.is_empty() {
+                            ui.label(
+                                egui::RichText::new(
+                                    "Belum ada aktivitas. Simpan kode unit → Setup Engine → Mulai Agen.",
+                                )
+                                .italics()
+                                .color(egui::Color32::from_rgb(0x8B, 0x94, 0x9E)),
+                            );
+                        }
+                        for baris in log.iter() {
+                            ui.label(
+                                egui::RichText::new(baris)
+                                    .monospace()
+                                    .size(11.0)
+                                    .color(egui::Color32::from_rgb(0xC9, 0xD1, 0xD9)),
+                            );
+                        }
+                    });
+            });
         });
     }
 }
@@ -764,22 +922,18 @@ fn badge_hasil(ui: &mut egui::Ui, judul: &str, hasil: &Option<Value>) {
 }
 
 fn terapkan_tema(ctx: &egui::Context) {
-    // Batch L: gaya "quiet surface" — latar tenang nyaris netral, kartu
-    // seksi lembut, sudut besar, TANPA garis pemisah keras. Ungu hanya
-    // untuk aksen (tombol utama & status), bukan latar.
     let mut v = egui::Visuals::dark();
-    v.panel_fill = egui::Color32::from_rgb(0x0F, 0x0E, 0x14);
-    v.window_fill = egui::Color32::from_rgb(0x14, 0x12, 0x1C);
+    v.panel_fill = egui::Color32::from_rgb(0x0D, 0x11, 0x17);
+    v.window_fill = egui::Color32::from_rgb(0x16, 0x1B, 0x22);
     v.widgets.noninteractive.bg_fill = v.panel_fill;
-    // separator/garis non-interaktif dibuat sangat samar (seamless).
     v.widgets.noninteractive.bg_stroke =
-        egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(0x1C, 0x1A, 0x26));
-    v.widgets.inactive.bg_fill = egui::Color32::from_rgb(0x1B, 0x19, 0x26);
-    v.widgets.inactive.bg_stroke = egui::Stroke::NONE;
-    v.widgets.inactive.rounding = egui::Rounding::same(10.0);
-    v.widgets.hovered.rounding = egui::Rounding::same(10.0);
-    v.widgets.hovered.bg_fill = egui::Color32::from_rgb(0x24, 0x21, 0x33);
-    v.widgets.active.rounding = egui::Rounding::same(10.0);
+        egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(0x21, 0x26, 0x2D));
+    v.widgets.inactive.bg_fill = egui::Color32::from_rgb(0x1B, 0x20, 0x2B);
+    v.widgets.inactive.bg_stroke = egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(0x30, 0x36, 0x3D));
+    v.widgets.inactive.rounding = egui::Rounding::same(8.0);
+    v.widgets.hovered.rounding = egui::Rounding::same(8.0);
+    v.widgets.hovered.bg_fill = egui::Color32::from_rgb(0x26, 0x2D, 0x3D);
+    v.widgets.active.rounding = egui::Rounding::same(8.0);
     v.widgets.active.bg_fill = UNGU;
     v.selection.bg_fill = UNGU.linear_multiply(0.35);
     v.hyperlink_color = UNGU_LEMBUT;
@@ -793,15 +947,15 @@ fn terapkan_tema(ctx: &egui::Context) {
     ctx.set_style(gaya);
 }
 
-/// Kartu seksi lembut (quiet surface): latar sedikit lebih terang dari
-/// panel, sudut membulat besar, tanpa garis tepi.
+/// Kartu rapi GitHub Dark: latar `#161B22`, garis tepi `#30363D`, sudut 10px.
 fn kartu<R>(
     ui: &mut egui::Ui,
     isi: impl FnOnce(&mut egui::Ui) -> R,
 ) -> egui::InnerResponse<R> {
     egui::Frame::none()
-        .fill(egui::Color32::from_rgb(0x17, 0x15, 0x21))
-        .rounding(egui::Rounding::same(14.0))
+        .fill(egui::Color32::from_rgb(0x16, 0x1B, 0x22))
+        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(0x30, 0x36, 0x3D)))
+        .rounding(egui::Rounding::same(10.0))
         .inner_margin(egui::Margin::symmetric(14.0, 12.0))
         .show(ui, isi)
 }
@@ -926,8 +1080,9 @@ fn gagal_mulai(tahap: &str, err: &dyn std::fmt::Display) -> ! {
 
 fn opsi_native() -> eframe::NativeOptions {
     let mut viewport = egui::ViewportBuilder::default()
-        .with_inner_size([460.0, 680.0])
-        .with_min_inner_size([400.0, 520.0]);
+        .with_inner_size([480.0, 720.0])
+        .with_min_inner_size([420.0, 560.0])
+        .with_title("XyCloudStore Host Agent");
     if let Some(ikon) = ikon_aplikasi() {
         viewport = viewport.with_icon(ikon);
     }

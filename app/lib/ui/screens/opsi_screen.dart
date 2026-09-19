@@ -229,17 +229,16 @@ class _OpsiStreamingScreenState extends State<OpsiStreamingScreen> {
 
   Widget _pilih(String title, String key, Map<dynamic, String> options) =>
       Padding(
-          padding: const EdgeInsets.only(bottom: 14),
-          child: DropdownButtonFormField<dynamic>(
-              value: PengaturanLokal.nilai[key],
-              isExpanded: true,
-              decoration: InputDecoration(labelText: title),
-              items:
-                  options.entries
-                      .map((e) =>
-                          DropdownMenuItem(value: e.key, child: Text(e.value)))
-                      .toList(),
-              onChanged: (v) => _set(key, v)));
+        padding: const EdgeInsets.only(bottom: 14),
+        child: XyDropdown<dynamic>(
+          label: title,
+          value: PengaturanLokal.nilai[key],
+          options: options.entries
+              .map((e) => XyDropdownOption<dynamic>(value: e.key, label: e.value))
+              .toList(),
+          onChanged: (v) => _set(key, v),
+        ),
+      );
 }
 
 class OpsiTampilanScreen extends StatefulWidget {

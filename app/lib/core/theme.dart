@@ -161,24 +161,20 @@ class XyTheme {
             offset: const Offset(0, 18)),
       ];
 
-  // ---------- palet gelap — MIDNIGHT AURORA (Batch I) ----------
-  // Direvisi agar mode gelap tidak "pasaran": indigo sangat dalam berlapis
-  // aurora violet (lihat widgets/latar_aurora.dart), permukaan kaca, dan
-  // garis tepi yang sedikit lebih terang supaya kartu terasa bercahaya.
-  static const Color bgGelap = Color(0xFF0D0224); // indigo nyaris hitam
-  static const Color bgGelap2 = Color(0xFF1B0745); // indigo tengah (hero/grad)
-  static const Color surfaceGelap = Color(0xFF170A33); // permukaan kartu
-  static const Color surfaceGelap2 = Color(0xFF211148); // permukaan terangkat
-  static const Color lineGelap = Color(0xFF332059); // tepi kaca (lebih terang)
-  static const Color inkGelap = Color(0xFFF2EDFF);
-  static const Color mutedGelap = Color(0xFFA99CC8);
+  // ---------- palet gelap — GITHUB DARK STYLE ----------
+  // Mengikuti preferensi pengguna: gaya solid, bersih, minimalis seperti
+  // GitHub Dark (#0D1117, #161B22, #30363D), membuang gradasi glassmorphism
+  // yang memberi kesan murahan.
+  static const Color bgGelap = Color(0xFF0D1117); // Canvas default GitHub
+  static const Color bgGelap2 = Color(0xFF161B22); // Canvas subtle GitHub
+  static const Color surfaceGelap = Color(0xFF161B22); // Permukaan kartu solid
+  static const Color surfaceGelap2 = Color(0xFF21262D); // Permukaan elevated/sheet
+  static const Color lineGelap = Color(0xFF30363D); // Border garis GitHub yang presisi
+  static const Color inkGelap = Color(0xFFF0F6FC); // Teks primer GitHub
+  static const Color mutedGelap = Color(0xFF8B949E); // Teks sekunder/muted GitHub
 
-  /// Gradasi kartu mode gelap: ungu sangat halus atas → bawah.
-  static const LinearGradient gradDarkCard = LinearGradient(
-    colors: [Color(0xFF1C0F3D), Color(0xFF150830)],
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-  );
+  /// Tanpa gradasi glassmorphism di kartu mode gelap — solid & crisp
+  static const LinearGradient? gradDarkCard = null;
 
   // ---------- tema ----------
   static ThemeData light() {
@@ -473,18 +469,18 @@ class XyPalette {
   /// Permukaan terangkat (sheet/dialog/nav) — sedikit lebih terang di gelap.
   Color get surfaceHigh => dark ? XyTheme.surfaceGelap2 : XyTheme.surface;
   Color get ink => dark ? XyTheme.inkGelap : XyTheme.ink;
-  Color get inkSoft => dark ? const Color(0xFFC9BDE0) : XyTheme.inkSoft;
-  Color get muted => dark ? const Color(0xFFA99CC8) : XyTheme.muted;
+  Color get inkSoft => dark ? const Color(0xFFC9D1D9) : XyTheme.inkSoft;
+  Color get muted => dark ? const Color(0xFF8B949E) : XyTheme.muted;
   Color get line => dark ? XyTheme.lineGelap : XyTheme.line;
-  Color get lineSoft => dark ? const Color(0xFF241447) : XyTheme.lineSoft;
-  Color get primarySoft => dark ? const Color(0xFF241447) : XyTheme.primarySoft;
+  Color get lineSoft => dark ? const Color(0xFF21262D) : XyTheme.lineSoft;
+  Color get primarySoft => dark ? const Color(0xFF1F242C) : XyTheme.primarySoft;
   Color get accent => dark ? XyTheme.lavender : XyTheme.primary;
-  LinearGradient get gradSoft => dark
-      ? const LinearGradient(colors: [Color(0xFF241447), Color(0xFF170A33)])
+  LinearGradient? get gradSoft => dark
+      ? null
       : XyTheme.gradSoft;
 
-  /// Gradasi kartu mode gelap (midnight aurora). Null di mode terang.
-  LinearGradient? get gradCard => dark ? XyTheme.gradDarkCard : null;
+  /// Tanpa gradasi di kartu mode gelap — clean solid GitHub style
+  LinearGradient? get gradCard => null;
 }
 
 

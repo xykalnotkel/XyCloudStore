@@ -261,66 +261,130 @@ class _ReferralScreenState extends State<ReferralScreen> {
                         ]),
                       ),
                     ],
-                    if (!sudahDiundang) ...[
-                      SectionHeader(punyaTiket ? 'Aktifkan undangan' : 'Menerima undangan?'),
-                      if (punyaTiket)
-                        XyCard(
-                          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                            const Text(
-                              'Tiket instalasi terdeteksi. Kode di bawah hanya untuk mencocokkan tautan—server tetap memeriksa unduhan, perangkat, akun baru, dan verifikasi email.',
-                              style: TextStyle(fontSize: 12.2, height: 1.5),
+                    if (sudahDiundang) ...[
+                      const SectionHeader('Status Referral'),
+                      XyCard(
+                        child: Row(children: [
+                          Container(
+                            width: 38,
+                            height: 38,
+                            decoration: BoxDecoration(
+                              color: XyTheme.success.withOpacity(0.12),
+                              shape: BoxShape.circle,
                             ),
-                            const SizedBox(height: 12),
+                            child: const Icon(Icons.check_circle_rounded, color: XyTheme.success, size: 22),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('Bonus Referral Aktif',
+                                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5)),
+                                const SizedBox(height: 2),
+                                Text('Kamu sudah menerima bonus pendaftaran melalui referral.',
+                                    style: TextStyle(color: XyTheme.of(context).muted, fontSize: 11.5)),
+                              ],
+                            ),
+                          ),
+                        ]),
+                      ),
+                    ] else if (punyaTiket) ...[
+                      const SectionHeader('Aktifkan Undangan Resmi'),
+                      XyCard(
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          const Row(children: [
+                            Icon(Icons.verified_rounded, color: XyTheme.success, size: 20),
+                            SizedBox(width: 8),
+                            Text('Tiket Undangan Resmi Terdeteksi',
+                                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+                          ]),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Aplikasi dipasang melalui tautan undangan resmi temanmu (${_kode.text.isEmpty ? 'resmi' : 'Kode: ' + _kode.text}). Tekan tombol di bawah untuk mengaktifkan bonus saldo Rp${rupiah(data!['bonusDiundang'] ?? 5000)}.',
+                            style: TextStyle(fontSize: 12.5, height: 1.5, color: XyTheme.of(context).inkSoft),
+                          ),
+                          const SizedBox(height: 14),
+                          SizedBox(
+                            width: double.infinity,
+                            child: GradientButton(
+                              label: 'Klaim Bonus Saldo Undangan',
+                              height: 48,
+                              loading: proses,
+                              onPressed: proses ? null : _pakaiKode,
+                            ),
+                          ),
+                          if (galat != null) ...[
+                            const SizedBox(height: 10),
                             Row(children: [
+                              const Icon(Icons.error_outline_rounded, size: 16, color: XyTheme.danger),
+                              const SizedBox(width: 8),
                               Expanded(
-                                child: TextField(
-                                  controller: _kode,
-                                  textCapitalization: TextCapitalization.characters,
-                                  decoration: const InputDecoration(
-                                    hintText: 'Kode dari tautan',
-                                    prefixIcon: Icon(Icons.card_giftcard_rounded),
-                                    contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 13),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              SizedBox(
-                                width: 112,
-                                child: GradientButton(
-                                  label: 'Aktifkan',
-                                  height: 48,
-                                  loading: proses,
-                                  onPressed: proses ? null : _pakaiKode,
-                                ),
+                                child: Text(galat!,
+                                    style: const TextStyle(
+                                        color: XyTheme.danger, fontSize: 12, fontWeight: FontWeight.w600)),
                               ),
                             ]),
-                            if (galat != null) ...[
-                              const SizedBox(height: 10),
-                              Row(children: [
-                                const Icon(Icons.error_outline_rounded, size: 16, color: XyTheme.danger),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(galat!,
-                                      style: const TextStyle(
-                                          color: XyTheme.danger, fontSize: 12, fontWeight: FontWeight.w600)),
-                                ),
-                              ]),
-                            ],
-                          ]),
-                        )
-                      else
-                        const XyCard(
-                          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                            Icon(Icons.link_rounded, color: XyTheme.primary),
-                            SizedBox(width: 11),
-                            Expanded(
-                              child: Text(
-                                'Minta temanmu mengirim tautan unduhan referral. Kode yang diketik tanpa mengunduh dan membuka aplikasi dari tautan itu tidak dapat menghasilkan bonus.',
-                                style: TextStyle(fontSize: 12.5, height: 1.55),
+                          ],
+                        ]),
+                      ),
+                    ] else ...[
+                      const SectionHeader('Menerima Undangan Teman?'),
+                      XyCard(
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Row(children: [
+                            Container(
+                              width: 36,
+                              height: 36,
+                              decoration: BoxDecoration(
+                                color: XyTheme.primary.withOpacity(0.12),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: const Icon(Icons.link_rounded, color: XyTheme.primary, size: 20),
+                            ),
+                            const SizedBox(width: 12),
+                            const Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text('Wajib Melalui Tautan Unduhan',
+                                      style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5)),
+                                  SizedBox(height: 2),
+                                  Text('Kebijakan Anti-Farming & Bot Akun',
+                                      style: TextStyle(fontSize: 11, color: XyTheme.warning)),
+                                ],
                               ),
                             ),
                           ]),
-                        ),
+                          const SizedBox(height: 12),
+                          Text(
+                            'Minta temanmu mengirim tautan unduhan referral. Kode yang diketik tanpa mengunduh dan membuka aplikasi dari tautan itu tidak dapat menghasilkan bonus demi mencegah farming akun dan akun palsu.',
+                            style: TextStyle(color: XyTheme.of(context).muted, fontSize: 12.3, height: 1.55),
+                          ),
+                          const SizedBox(height: 12),
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: XyTheme.of(context).surfaceHigh,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: XyTheme.of(context).line),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('Cara Mendapatkan Bonus:',
+                                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
+                                const SizedBox(height: 6),
+                                _LangkahUndangan('1', 'Buka tautan undangan yang dibagikan temanmu di browser.'),
+                                const SizedBox(height: 4),
+                                _LangkahUndangan('2', 'Unduh dan pasang APK XyCloudStore dari halaman tersebut.'),
+                                const SizedBox(height: 4),
+                                _LangkahUndangan('3', 'Buka aplikasi dari tombol aktivasi, daftar akun baru & verifikasi email.'),
+                              ],
+                            ),
+                          ),
+                        ]),
+                      ),
                     ],
 
                     // ---- daftar undangan ----
@@ -372,6 +436,50 @@ class _ReferralScreenState extends State<ReferralScreen> {
                       }),
                   ],
                 ),
+    );
+  }
+}
+
+class _LangkahUndangan extends StatelessWidget {
+  const _LangkahUndangan(this.nomor, this.teks);
+  final String nomor;
+  final String teks;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 18,
+          height: 18,
+          decoration: BoxDecoration(
+            color: XyTheme.primary.withOpacity(0.15),
+            shape: BoxShape.circle,
+          ),
+          child: Center(
+            child: Text(
+              nomor,
+              style: const TextStyle(
+                color: XyTheme.primary,
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            teks,
+            style: TextStyle(
+              fontSize: 11.5,
+              color: XyTheme.of(context).inkSoft,
+              height: 1.35,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

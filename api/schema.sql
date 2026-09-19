@@ -1127,6 +1127,8 @@ CREATE TABLE IF NOT EXISTS stories (
   teks TEXT,
   bg_gradient TEXT NOT NULL DEFAULT 'ungu',
   privasi TEXT NOT NULL DEFAULT 'teman',
+  likes INTEGER NOT NULL DEFAULT 0,
+  reposts INTEGER NOT NULL DEFAULT 0,
   dibuat TEXT NOT NULL,
   berakhir TEXT NOT NULL,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -1134,4 +1136,13 @@ CREATE TABLE IF NOT EXISTS stories (
 
 CREATE INDEX IF NOT EXISTS idx_stories_user_berakhir ON stories(user_id, berakhir);
 CREATE INDEX IF NOT EXISTS idx_stories_berakhir ON stories(berakhir);
+
+CREATE TABLE IF NOT EXISTS story_likes (
+  story_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  dibuat TEXT NOT NULL,
+  PRIMARY KEY (story_id, user_id),
+  FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
 

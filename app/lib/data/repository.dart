@@ -83,6 +83,8 @@ abstract class XyRepository {
   Future<Map<String, dynamic>> laporPengguna(String id, String alasan);
   Future<List<BisukanItem>> bisukanDaftar();
   Future<void> gantiPassword(String lama, String baru);
+  Future<List<Map<String, dynamic>>> daftarPerangkat();
+  Future<bool> cabutPerangkat({String? deviceId});
 
   // ---------- profil lengkap & dompet sosial (Batch I) ----------
   /// Unggah GIF/MP4 sebagai banner profil (server otomatis jadikan GIF).
@@ -173,6 +175,9 @@ abstract class XyRepository {
   Future<List<StoryItem>> ambilStories();
   Future<StoryItem> buatStory({required String teks, String? mediaUrl, String tipe = 'teks', String bgGradient = 'ungu', String privasi = 'teman'});
   Future<void> hapusStory(String id);
+  Future<Map<String, dynamic>> likeStory(String id);
+  Future<Map<String, dynamic>> repostStory(String id);
+  Future<void> balasStory(String id, String pesan);
 
   // ---------- pemberitahuan ----------
   Future<Map<String, dynamic>> notifikasi();
@@ -533,6 +538,23 @@ class RemoteRepository implements XyRepository {
   Future<void> gantiPassword(String lama, String baru) async =>
       api.post('/me/password', {'lama': lama, 'baru': baru});
 
+  @override
+  Future<List<Map<String, dynamic>>> daftarPerangkat() async {
+    final res = await api.get('/user/devices');
+    if (res is Map && res['devices'] is List) {
+      return (res['devices'] as List)
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+    }
+    return [];
+  }
+
+  @override
+  Future<bool> cabutPerangkat({String? deviceId}) async {
+    final res = await api.post('/user/devices/revoke', {'device_id': deviceId});
+    return res is Map && res['ok'] == true;
+  }
+
   // ---------- HUD streaming & preset komunitas (Batch P) ----------
   @override
   Future<List<HudPresetPublik>> hudPresetPublik({String urut = 'populer'}) async =>
@@ -748,6 +770,18 @@ class RemoteRepository implements XyRepository {
 
   @override
   Future<void> hapusStory(String id) async => api.delete('/stories/$id');
+
+  @override
+  Future<Map<String, dynamic>> likeStory(String id) async =>
+      Map<String, dynamic>.from(await api.post('/stories/$id/like', {}));
+
+  @override
+  Future<Map<String, dynamic>> repostStory(String id) async =>
+      Map<String, dynamic>.from(await api.post('/stories/$id/repost', {}));
+
+  @override
+  Future<void> balasStory(String id, String pesan) async =>
+      api.post('/stories/$id/komen', {'pesan': pesan});
 
   @override
   Future<Map<String, dynamic>> notifikasi() async =>
@@ -1068,6 +1102,21 @@ class MockRepository implements XyRepository {
   @override
   Future<void> gantiPassword(String lama, String baru) async {}
 
+  @override
+  Future<List<Map<String, dynamic>>> daftarPerangkat() => _delay(<Map<String, dynamic>>[
+        {
+          'device_id': 'mock-dev-1',
+          'kind': 'android',
+          'model': 'Samsung Galaxy S24 Ultra',
+          'first_login': DateTime.now().subtract(const Duration(days: 12)).toIso8601String(),
+          'last_seen': DateTime.now().toIso8601String(),
+          'is_current': true,
+        },
+      ], 200);
+
+  @override
+  Future<bool> cabutPerangkat({String? deviceId}) => _delay(true, 200);
+
   // ---------- HUD streaming & preset komunitas (Batch P) ----------
   @override
   Future<List<HudPresetPublik>> hudPresetPublik({String urut = 'populer'}) async =>
@@ -1327,6 +1376,17 @@ class MockRepository implements XyRepository {
 
   @override
   Future<void> hapusStory(String id) => _delay(null, 100);
+
+  @override
+  Future<Map<String, dynamic>> likeStory(String id) =>
+      _delay({'ok': true, 'likes': 1, 'sudah_like': true}, 100);
+
+  @override
+  Future<Map<String, dynamic>> repostStory(String id) =>
+      _delay({'ok': true, 'repost_id': 'st_rep'}, 100);
+
+  @override
+  Future<void> balasStory(String id, String pesan) => _delay(null, 100);
 
   @override
   Future<Map<String, dynamic>> notifikasi() => _delay({'daftar': const [], 'belumDibaca': 0}, 200);

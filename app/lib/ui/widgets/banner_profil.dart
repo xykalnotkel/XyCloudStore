@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/theme.dart';
 import '../../models/models.dart';
+import 'animasi_profil_epic.dart';
 
 /// ============================================================
 ///  Banner header profil (Batch I)
@@ -18,12 +19,14 @@ class BannerProfil extends StatelessWidget {
     super.key,
     this.tema,
     this.media,
+    this.bingkai,
     this.borderRadius,
     required this.child,
   });
 
   final String? tema;
   final BannerMedia? media;
+  final String? bingkai;
   final BorderRadius? borderRadius;
   final Widget child;
 
@@ -58,6 +61,11 @@ class BannerProfil extends StatelessWidget {
                 )
               : DecoratedBox(decoration: BoxDecoration(gradient: grad)),
         ),
+        // Efek animasi epik sinematik (naga emas, kobaran inferno, hujan matrix, tebasan samurai, nebula, dll)
+        if (bingkai != null && bingkai!.isNotEmpty)
+          Positioned.fill(
+            child: AnimasiProfilEpic(bingkai: bingkai),
+          ),
         // Scrim keterbacaan.
         Positioned.fill(
           child: IgnorePointer(

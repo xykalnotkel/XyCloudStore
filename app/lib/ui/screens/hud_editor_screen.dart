@@ -7,6 +7,7 @@ import '../../core/pengaturan.dart';
 import '../../core/theme.dart';
 import '../../data/native_stream.dart';
 import '../../models/models.dart';
+import '../widgets/custom_dropdown.dart';
 
 /// Editor HUD selalu dibuka landscape agar koordinat pratinjau sama dengan
 /// layar streaming native. Seluruh posisi relatif, sehingga preset tetap rapi
@@ -671,14 +672,29 @@ class _HudEditorScreenState extends State<HudEditorScreen> {
             divisions: 15,
             onChanged: (v) => _ubahTombol(p.copyWith(opacity: v)),
           ),
-          DropdownButtonFormField<String>(
+          XyDropdown<String>(
+            label: 'Cara Tekan',
             value: p.cara,
             isDense: true,
-            decoration: const InputDecoration(labelText: 'Cara tekan'),
-            items: const [
-              DropdownMenuItem(value: 'tahan', child: Text('Tahan (turun–lepas)')),
-              DropdownMenuItem(value: 'ketuk', child: Text('Ketuk sekali')),
-              DropdownMenuItem(value: 'toggle', child: Text('Toggle aktif/mati')),
+            options: const [
+              XyDropdownOption(
+                value: 'tahan',
+                label: 'Tahan (turun–lepas)',
+                icon: Icons.touch_app_rounded,
+                sub: 'Cocok untuk tombol gerak & aksi berkelanjutan',
+              ),
+              XyDropdownOption(
+                value: 'ketuk',
+                label: 'Ketuk sekali',
+                icon: Icons.ads_click_rounded,
+                sub: 'Satu sentuhan langsung eksekusi',
+              ),
+              XyDropdownOption(
+                value: 'toggle',
+                label: 'Toggle aktif/mati',
+                icon: Icons.toggle_on_rounded,
+                sub: 'Ketuk untuk mengunci tombol aktif',
+              ),
             ],
             onChanged: (v) {
               if (v != null) _ubahTombol(p.copyWith(cara: v));

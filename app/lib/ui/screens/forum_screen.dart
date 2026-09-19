@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../core/pengaturan.dart';
 import '../../data/stiker_store.dart';
@@ -111,16 +112,82 @@ class _ForumScreenState extends State<ForumScreen> {
                     : Icons.bookmark_border_rounded,
                 color: hanyaSimpan ? XyTheme.primary : null),
           ),
-          PopupMenuButton<String>(
-            tooltip: 'Urutkan diskusi',
+          IconButton(
+            tooltip: 'Urutkan postingan: $urut',
             icon: const Icon(Icons.swap_vert_rounded),
-            initialValue: urut,
-            onSelected: (v) => setState(() => urut = v),
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'Terbaru', child: Text('Terbaru')),
-              PopupMenuItem(value: 'Terpopuler', child: Text('Terpopuler (suka)')),
-              PopupMenuItem(value: 'Teramai', child: Text('Teramai (balasan)')),
-            ],
+            onPressed: () {
+              final pal = XyTheme.of(context);
+              showModalBottomSheet<void>(
+                context: context,
+                backgroundColor: Colors.transparent,
+                builder: (ctx) => Container(
+                  decoration: BoxDecoration(
+                    color: pal.surfaceHigh,
+                    borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+                    border: Border.all(color: pal.line),
+                  ),
+                  child: SafeArea(
+                    top: false,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const SizedBox(height: 10),
+                        Center(
+                          child: Container(
+                            width: 40,
+                            height: 4,
+                            decoration: BoxDecoration(
+                              color: pal.line,
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 20),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text('Urutkan Postingan',
+                                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                              IconButton(
+                                visualDensity: VisualDensity.compact,
+                                icon: const Icon(Icons.close_rounded, size: 20),
+                                onPressed: () => Navigator.pop(ctx),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Divider(height: 1, color: pal.line),
+                        ...[
+                          ('Terbaru', 'Diskusi paling baru diunggah', Icons.access_time_rounded),
+                          ('Terpopuler', 'Paling banyak disukai anggota', Icons.favorite_rounded),
+                          ('Teramai', 'Paling banyak mendapat balasan', Icons.forum_rounded),
+                        ].map((item) {
+                          final sel = item.$1 == urut;
+                          return ListTile(
+                            leading: Icon(item.$3, color: sel ? XyTheme.primary : pal.inkSoft),
+                            title: Text(item.$1,
+                                style: TextStyle(
+                                    fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
+                                    color: sel ? XyTheme.primary : pal.ink)),
+                            subtitle: Text(item.$2),
+                            trailing: sel
+                                ? const Icon(Icons.check_rounded, color: XyTheme.primary)
+                                : null,
+                            onTap: () {
+                              Navigator.pop(ctx);
+                              setState(() => urut = item.$1);
+                            },
+                          );
+                        }),
+                        const SizedBox(height: 14),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            },
           ),
           IconButton(
             tooltip: 'Muat ulang',
@@ -172,12 +239,13 @@ class _ForumScreenState extends State<ForumScreen> {
             );
           },
           onLihatStory: (st) {
-            showDialog(
-              context: context,
-              builder: (_) => _DialogLihatStory(
-                story: st,
-                onHapus: () => s.hapusStory(st.id),
-              ),
+            Navigator.push(
+              context,
+              xyRoute(StoryFullScreenViewer(
+                stories: s.stories,
+                awalIndex: s.stories.indexOf(st),
+                onHapus: (id) => s.hapusStory(id),
+              )),
             );
           },
         ),
@@ -480,6 +548,58 @@ class LencanaKhusus extends StatelessWidget {
       );
 }
 
+/// Tombol Ikuti / Mengikuti di samping nama penulis feed & komentar
+class _TombolIkuti extends StatelessWidget {
+  const _TombolIkuti({required this.userId});
+  final String userId;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = context.watch<AppState>();
+    if (s.user == null || userId.isEmpty || userId == s.user!.id) {
+      return const SizedBox.shrink();
+    }
+    final diikuti = s.penggunaDiikuti.contains(userId);
+    final pal = XyTheme.of(context);
+
+    return Pressable(
+      onTap: () => s.toggleIkuti(userId),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2.5),
+        decoration: BoxDecoration(
+          color: diikuti ? Colors.transparent : XyTheme.primary.withOpacity(0.12),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: diikuti ? pal.line : XyTheme.primary,
+            width: 1,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              diikuti ? Icons.check_rounded : Icons.person_add_alt_1_rounded,
+              size: 11,
+              color: diikuti ? pal.muted : XyTheme.primary,
+            ),
+            const SizedBox(width: 3),
+            Text(
+              diikuti ? 'Mengikuti' : 'Ikuti',
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+                color: diikuti ? pal.muted : XyTheme.primary,
+                letterSpacing: .1,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _KartuPost extends StatelessWidget {
   const _KartuPost({required this.post});
   final ForumPost post;
@@ -531,18 +651,33 @@ class _KartuPost extends StatelessWidget {
                       LencanaTier(post.tier),
                       if (post.badge != null) LencanaKhusus(post.badge!),
                       if (post.disematkan) ...[
-                        const SizedBox(width: 6),
+                        const SizedBox(width: 5),
                         const Icon(Icons.push_pin_rounded,
                             size: 13, color: XyTheme.primary),
                       ],
+                      if (post.userId.isNotEmpty && (s.user == null || post.userId != s.user!.id)) ...[
+                        const SizedBox(width: 8),
+                        _TombolIkuti(userId: post.userId),
+                      ],
                     ]),
-                    const SizedBox(height: 2),
-                    Text(tanggal(post.dibuat),
-                        style: TextStyle(
-                            color: XyTheme.of(context).muted, fontSize: 11)),
+                    const SizedBox(height: 3),
+                    Row(children: [
+                      Text(tanggal(post.dibuat),
+                          style: TextStyle(
+                              color: XyTheme.of(context).muted, fontSize: 11)),
+                      const SizedBox(width: 6),
+                      Text('•',
+                          style: TextStyle(
+                              color: XyTheme.of(context).muted, fontSize: 10)),
+                      const SizedBox(width: 6),
+                      Text(post.kategori,
+                          style: TextStyle(
+                              color: XyTheme.primary,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 11)),
+                    ]),
                   ]),
             ),
-            Pill(post.kategori, warna: XyTheme.violet),
           ]),
           const SizedBox(height: 12),
           Text(post.judul,
@@ -871,7 +1006,11 @@ class _ForumDetailScreenState extends State<ForumDetailScreen> {
                           Text(tanggal(p.dibuat),
                               style: TextStyle(color: pal.muted, fontSize: 11))
                         ]))),
-            LencanaTier(p.tier)
+            LencanaTier(p.tier),
+            if (p.userId.isNotEmpty && (s.user == null || p.userId != s.user!.id)) ...[
+              const SizedBox(width: 8),
+              _TombolIkuti(userId: p.userId),
+            ],
           ]),
           const SizedBox(height: 16),
           Pill(p.kategori),
@@ -944,24 +1083,39 @@ class _ForumDetailScreenState extends State<ForumDetailScreen> {
                     // seperti thread modern; pemisah cukup garis thread kiri.
                     Container(
                         width: double.infinity,
-                        padding: const EdgeInsets.fromLTRB(2, 2, 4, 4),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: pal.surface,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: pal.lineSoft),
+                        ),
                         child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Wrap(
-                                  crossAxisAlignment: WrapCrossAlignment.center,
-                                  spacing: 2,
-                                  runSpacing: 3,
-                                  children: [
-                                    GayaNama(nama,
-                                        gaya: b.gayaNama,
-                                        style: const TextStyle(
-                                            fontSize: 13,
-                                            fontWeight: FontWeight.w700)),
-                                    if (b.admin || b.tier != 'basic')
-                                      LencanaTier(b.admin ? 'admin' : b.tier),
-                                    if (b.badge != null) LencanaKhusus(b.badge!)
-                                  ]),
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.center,
+                                children: [
+                                  Expanded(
+                                    child: Wrap(
+                                        crossAxisAlignment: WrapCrossAlignment.center,
+                                        spacing: 4,
+                                        runSpacing: 3,
+                                        children: [
+                                          GayaNama(nama,
+                                              gaya: b.gayaNama,
+                                              style: const TextStyle(
+                                                  fontSize: 13,
+                                                  fontWeight: FontWeight.w700)),
+                                          if (b.admin || b.tier != 'basic')
+                                            LencanaTier(b.admin ? 'admin' : b.tier),
+                                          if (b.badge != null) LencanaKhusus(b.badge!),
+                                          if (b.userId.isNotEmpty && (s.user == null || b.userId != s.user!.id))
+                                            _TombolIkuti(userId: b.userId),
+                                        ]),
+                                  ),
+                                  WaktuRelatif(b.dibuat),
+                                ],
+                              ),
                               if (parent != null) ...[
                                 const SizedBox(height: 8),
                                 // Kutipan "membalas siapa" bergaya chip dengan
@@ -1013,7 +1167,7 @@ class _ForumDetailScreenState extends State<ForumDetailScreen> {
                                         ]))
                               ],
                               if (b.isi.isNotEmpty) ...[
-                                const SizedBox(height: 7),
+                                const SizedBox(height: 8),
                                 teksForum(
                                     b.isi,
                                     TextStyle(
@@ -1034,10 +1188,6 @@ class _ForumDetailScreenState extends State<ForumDetailScreen> {
                                       style: TextStyle(
                                           fontSize: 10, color: pal.muted))
                               ],
-                              const SizedBox(height: 6),
-                              Align(
-                                  alignment: Alignment.bottomRight,
-                                  child: WaktuRelatif(b.dibuat)),
                             ])),
                     Wrap(
                         crossAxisAlignment: WrapCrossAlignment.center,
@@ -1770,37 +1920,141 @@ class _StoriesBar extends StatelessWidget {
   }
 }
 
-/// Dialog tampilan Story dengan timer progress animasi
-class _DialogLihatStory extends StatefulWidget {
-  const _DialogLihatStory({required this.story, required this.onHapus});
-  final StoryItem story;
-  final VoidCallback onHapus;
+/// Layar Penuh Story Viewer (Instagram / WhatsApp Style)
+class StoryFullScreenViewer extends StatefulWidget {
+  const StoryFullScreenViewer({
+    super.key,
+    required this.stories,
+    this.awalIndex = 0,
+    required this.onHapus,
+  });
+
+  final List<StoryItem> stories;
+  final int awalIndex;
+  final Future<void> Function(String id) onHapus;
 
   @override
-  State<_DialogLihatStory> createState() => _DialogLihatStoryState();
+  State<StoryFullScreenViewer> createState() => _StoryFullScreenViewerState();
 }
 
-class _DialogLihatStoryState extends State<_DialogLihatStory>
+class _StoryFullScreenViewerState extends State<StoryFullScreenViewer>
     with SingleTickerProviderStateMixin {
+  late int _index;
   late final AnimationController _ctrl;
+  final _balasCtrl = TextEditingController();
+  bool _terjeda = false;
+  bool _sedangKirim = false;
 
   @override
   void initState() {
     super.initState();
+    _index = widget.awalIndex.clamp(
+        0, widget.stories.isEmpty ? 0 : widget.stories.length - 1);
     _ctrl =
         AnimationController(vsync: this, duration: const Duration(seconds: 6));
-    _ctrl.forward();
     _ctrl.addStatusListener((status) {
       if (status == AnimationStatus.completed && mounted) {
-        Navigator.pop(context);
+        _lanjutStory();
       }
     });
+    _ctrl.forward();
   }
 
   @override
   void dispose() {
     _ctrl.dispose();
+    _balasCtrl.dispose();
     super.dispose();
+  }
+
+  void _jeda() {
+    if (!_terjeda) {
+      _terjeda = true;
+      _ctrl.stop();
+    }
+  }
+
+  void _lanjut() {
+    if (_terjeda) {
+      _terjeda = false;
+      _ctrl.forward();
+    }
+  }
+
+  void _lanjutStory() {
+    if (_index < widget.stories.length - 1) {
+      setState(() {
+        _index++;
+        _ctrl.reset();
+        _ctrl.forward();
+      });
+    } else {
+      Navigator.pop(context);
+    }
+  }
+
+  void _mundurStory() {
+    if (_index > 0) {
+      setState(() {
+        _index--;
+        _ctrl.reset();
+        _ctrl.forward();
+      });
+    } else {
+      _ctrl.reset();
+      _ctrl.forward();
+    }
+  }
+
+  Future<void> _kirimBalasan(StoryItem s) async {
+    final pesan = _balasCtrl.text.trim();
+    if (pesan.isEmpty) return;
+    setState(() => _sedangKirim = true);
+    _jeda();
+    final galat = await context.read<AppState>().balasStory(s.id, pesan);
+    if (!mounted) return;
+    setState(() => _sedangKirim = false);
+    if (galat == null) {
+      _balasCtrl.clear();
+      FocusScope.of(context).unfocus();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Balasan terkirim ke pesan langsung (DM).'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(galat)),
+      );
+    }
+    _lanjut();
+  }
+
+  Future<void> _repostStory(StoryItem s) async {
+    _jeda();
+    final yakin = await konfirmasi(
+      context,
+      judul: 'Posting Ulang Story',
+      pesan: 'Story milik ${s.nama} akan dibagikan ulang ke feed tokomu.',
+      tombolYa: 'Posting Ulang',
+    );
+    if (!mounted) return;
+    if (yakin) {
+      final galat = await context.read<AppState>().repostStory(s.id);
+      if (mounted) {
+        if (galat == null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Story berhasil diposting ulang!')),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(galat)),
+          );
+        }
+      }
+    }
+    _lanjut();
   }
 
   LinearGradient _getGradient(String jenis) {
@@ -1825,144 +2079,309 @@ class _DialogLihatStoryState extends State<_DialogLihatStory>
 
   @override
   Widget build(BuildContext context) {
-    final s = widget.story;
-    return Dialog(
-      backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 40),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(20),
-        child: Container(
-          decoration: BoxDecoration(
-            gradient: _getGradient(s.bgGradient),
-          ),
-          child: Stack(
-            children: [
-              if ((s.mediaUrl ?? '').isNotEmpty)
-                Positioned.fill(
-                  child: CachedNetworkImage(
-                    imageUrl: s.mediaUrl!,
-                    fit: BoxFit.cover,
-                    placeholder: (_, __) =>
-                        const Center(child: CircularProgressIndicator()),
-                    errorWidget: (_, __, ___) => const Center(
-                        child: Icon(Icons.broken_image_rounded, size: 48)),
-                  ),
-                ),
-              if (s.teks.isNotEmpty)
-                Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(28),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 20, vertical: 16),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withOpacity(0.4),
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: Text(
-                        s.teks,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 20,
-                          fontWeight: FontWeight.w700,
-                          height: 1.4,
-                        ),
-                        textAlign: TextAlign.center,
+    if (widget.stories.isEmpty || _index >= widget.stories.length) {
+      return const Scaffold(backgroundColor: Colors.black);
+    }
+    final s = widget.stories[_index];
+
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: SafeArea(
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            // Konten Story
+            Container(
+              decoration: BoxDecoration(gradient: _getGradient(s.bgGradient)),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  if ((s.mediaUrl ?? '').isNotEmpty)
+                    Positioned.fill(
+                      child: CachedNetworkImage(
+                        imageUrl: s.mediaUrl!,
+                        fit: BoxFit.contain,
+                        placeholder: (_, __) =>
+                            const Center(child: CircularProgressIndicator(color: Colors.white70)),
+                        errorWidget: (_, __, ___) => const Center(
+                            child: Icon(Icons.broken_image_rounded, size: 54, color: Colors.white54)),
                       ),
                     ),
+                  if (s.teks.isNotEmpty)
+                    Center(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 28),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 20, vertical: 16),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withOpacity(0.45),
+                            borderRadius: BorderRadius.circular(18),
+                            border: Border.all(color: Colors.white12),
+                          ),
+                          child: Text(
+                            s.teks,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 21,
+                              fontWeight: FontWeight.w700,
+                              height: 1.4,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+
+            // Tap & Hold detector (kiri: mundur, kanan: lanjut, tahan: jeda)
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onLongPressStart: (_) => _jeda(),
+                onLongPressEnd: (_) => _lanjut(),
+                onTapDown: (_) => _jeda(),
+                onTapCancel: () => _lanjut(),
+                onTapUp: (details) {
+                  _lanjut();
+                  final w = MediaQuery.of(context).size.width;
+                  if (details.localPosition.dx < w * 0.3) {
+                    _mundurStory();
+                  } else {
+                    _lanjutStory();
+                  }
+                },
+              ),
+            ),
+
+            // Indikator Durasi (Segmented Progress Bar di atas)
+            Positioned(
+              top: 8,
+              left: 12,
+              right: 12,
+              child: Row(
+                children: List.generate(widget.stories.length, (i) {
+                  return Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 2),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(2),
+                        child: AnimatedBuilder(
+                          animation: _ctrl,
+                          builder: (context, _) {
+                            double val;
+                            if (i < _index) {
+                              val = 1.0;
+                            } else if (i == _index) {
+                              val = _ctrl.value;
+                            } else {
+                              val = 0.0;
+                            }
+                            return LinearProgressIndicator(
+                              value: val,
+                              backgroundColor: Colors.white24,
+                              valueColor:
+                                  const AlwaysStoppedAnimation(Colors.white),
+                              minHeight: 2.5,
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+                  );
+                }),
+              ),
+            ),
+
+            // Header Pengguna
+            Positioned(
+              top: 18,
+              left: 16,
+              right: 16,
+              child: Row(
+                children: [
+                  AvatarBingkai(
+                    size: 40,
+                    bingkai: s.bingkai,
+                    child: _Avatar(nama: s.nama, foto: s.foto, ukuran: 40),
                   ),
-                ),
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                child: Container(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [
-                        Colors.black.withOpacity(0.7),
-                        Colors.transparent
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          s.nama,
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14.5),
+                        ),
+                        Text(
+                          '${waktuRelatif(s.dibuat)} • ${s.privasi == "teman" ? "Teman" : "Publik"}',
+                          style: const TextStyle(
+                              color: Colors.white70, fontSize: 11),
+                        ),
                       ],
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
                     ),
                   ),
-                  child: Column(
-                    children: [
-                      AnimatedBuilder(
-                        animation: _ctrl,
-                        builder: (context, _) => ClipRRect(
-                          borderRadius: BorderRadius.circular(2),
-                          child: LinearProgressIndicator(
-                            value: _ctrl.value,
-                            backgroundColor: Colors.white24,
-                            valueColor:
-                                const AlwaysStoppedAnimation(Colors.white),
-                            minHeight: 3,
-                          ),
-                        ),
+                  if (s.punyaSaya)
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline_rounded,
+                          color: Colors.white70),
+                      onPressed: () async {
+                        _jeda();
+                        final yakin = await konfirmasi(
+                          context,
+                          judul: 'Hapus Story',
+                          pesan: 'Story ini akan dihapus permanen dan tidak dapat dipulihkan.',
+                          tombolYa: 'Hapus',
+                          bahaya: true,
+                        );
+                        if (!mounted) return;
+                        if (yakin) {
+                          await widget.onHapus(s.id);
+                          if (mounted) Navigator.pop(context);
+                        } else {
+                          _lanjut();
+                        }
+                      },
+                    ),
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded,
+                        color: Colors.white, size: 26),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+            ),
+
+            // Footer Interaksi (Like, Komentar / Balas Story, Repost)
+            Positioned(
+              bottom: 12,
+              left: 14,
+              right: 14,
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Container(
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.55),
+                        borderRadius: BorderRadius.circular(24),
+                        border: Border.all(color: Colors.white24),
                       ),
-                      const SizedBox(height: 12),
-                      Row(
+                      child: Row(
                         children: [
-                          AvatarBingkai(
-                            size: 38,
-                            bingkai: s.bingkai,
-                            child:
-                                _Avatar(nama: s.nama, foto: s.foto, ukuran: 38),
-                          ),
-                          const SizedBox(width: 10),
+                          const SizedBox(width: 14),
                           Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  s.nama,
-                                  style: const TextStyle(
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 14),
-                                ),
-                                Text(
-                                  '${waktuRelatif(s.dibuat)} • ${s.privasi == "teman" ? "Teman" : "Publik"}',
-                                  style: const TextStyle(
-                                      color: Colors.white70, fontSize: 11),
-                                ),
-                              ],
+                            child: TextField(
+                              controller: _balasCtrl,
+                              style: const TextStyle(color: Colors.white, fontSize: 13.5),
+                              decoration: InputDecoration(
+                                hintText: 'Balas ${s.nama}…',
+                                hintStyle: const TextStyle(color: Colors.white54, fontSize: 13),
+                                border: InputBorder.none,
+                                isDense: true,
+                              ),
+                              onTap: () => _jeda(),
+                              onSubmitted: (_) => _kirimBalasan(s),
                             ),
                           ),
-                          if (s.punyaSaya)
-                            IconButton(
-                              icon: const Icon(Icons.delete_outline_rounded,
-                                  color: Colors.white70),
-                              onPressed: () async {
-                                final yakin = await konfirmasi(
-                                  context,
-                                  judul: 'Hapus Story',
-                                  pesan: 'Story ini akan dihapus permanen dan tidak dapat dipulihkan.',
-                                  tombolYa: 'Hapus',
-                                  bahaya: true,
-                                );
-                                if (yakin && mounted) {
-                                  widget.onHapus();
-                                  Navigator.pop(context);
-                                }
-                              },
-                            ),
                           IconButton(
-                            icon: const Icon(Icons.close_rounded,
-                                color: Colors.white),
-                            onPressed: () => Navigator.pop(context),
+                            icon: _sedangKirim
+                                ? const SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                : const Icon(Icons.send_rounded,
+                                    color: Colors.white, size: 18),
+                            onPressed: _sedangKirim ? null : () => _kirimBalasan(s),
                           ),
                         ],
                       ),
-                    ],
+                    ),
                   ),
-                ),
+                  const SizedBox(width: 8),
+                  // Tombol Like
+                  GestureDetector(
+                    onTap: () => context.read<AppState>().likeStory(s.id),
+                    child: Container(
+                      height: 44,
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.55),
+                        borderRadius: BorderRadius.circular(22),
+                        border: Border.all(color: Colors.white24),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            s.sudahLike
+                                ? Icons.favorite_rounded
+                                : Icons.favorite_border_rounded,
+                            color: s.sudahLike ? Colors.redAccent : Colors.white,
+                            size: 22,
+                          ),
+                          if (s.likes > 0) ...[
+                            const SizedBox(width: 4),
+                            Text(
+                              '${s.likes}',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  // Tombol Repost
+                  GestureDetector(
+                    onTap: () => _repostStory(s),
+                    child: Container(
+                      height: 44,
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.55),
+                        borderRadius: BorderRadius.circular(22),
+                        border: Border.all(color: Colors.white24),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.repeat_rounded,
+                            color: Colors.white,
+                            size: 22,
+                          ),
+                          if (s.reposts > 0) ...[
+                            const SizedBox(width: 4),
+                            Text(
+                              '${s.reposts}',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -1983,6 +2402,7 @@ class _SheetBuatStoryState extends State<_SheetBuatStory> {
   String _bg = 'ungu';
   String _privasi = 'teman';
   String? _mediaDataUri;
+  String _tipeMedia = 'teks';
   bool _memuat = false;
 
   final _opsiBg = const [
@@ -2004,7 +2424,7 @@ class _SheetBuatStoryState extends State<_SheetBuatStory> {
     if (t.isEmpty && _mediaDataUri == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-            content: Text('Tulis sesuatu atau pilih gambar untuk story.')),
+            content: Text('Tulis sesuatu atau pilih gambar/video untuk story.')),
       );
       return;
     }
@@ -2012,7 +2432,7 @@ class _SheetBuatStoryState extends State<_SheetBuatStory> {
     final galat = await context.read<AppState>().buatStory(
           teks: t,
           mediaUrl: _mediaDataUri,
-          tipe: _mediaDataUri != null ? 'gambar' : 'teks',
+          tipe: _mediaDataUri != null ? _tipeMedia : 'teks',
           bgGradient: _bg,
           privasi: _privasi,
         );
@@ -2052,20 +2472,24 @@ class _SheetBuatStoryState extends State<_SheetBuatStory> {
                 'Buat Story (24 Jam)',
                 style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
               ),
-              DropdownButton<String>(
+              XyPillSelector<String>(
                 value: _privasi,
-                underline: const SizedBox(),
-                items: const [
-                  DropdownMenuItem(
-                      value: 'teman',
-                      child: Text('👥 Teman & Pengikut',
-                          style: TextStyle(fontSize: 12))),
-                  DropdownMenuItem(
-                      value: 'publik',
-                      child: Text('🌐 Semua Orang',
-                          style: TextStyle(fontSize: 12))),
+                title: 'Privasi Story',
+                options: const [
+                  XyDropdownOption(
+                    value: 'teman',
+                    label: 'Teman & Pengikut',
+                    icon: Icons.people_alt_rounded,
+                    sub: 'Hanya orang yang mengikuti akunmu',
+                  ),
+                  XyDropdownOption(
+                    value: 'publik',
+                    label: 'Semua Orang',
+                    icon: Icons.public_rounded,
+                    sub: 'Bisa dilihat oleh seluruh komunitas',
+                  ),
                 ],
-                onChanged: (v) => setState(() => _privasi = v ?? 'teman'),
+                onChanged: (v) => setState(() => _privasi = v),
               ),
             ],
           ),
@@ -2106,21 +2530,54 @@ class _SheetBuatStoryState extends State<_SheetBuatStory> {
               const Spacer(),
               IconButton(
                 icon: Icon(
-                  _mediaDataUri != null
+                  _mediaDataUri != null && _tipeMedia == 'gambar'
                       ? Icons.image_rounded
                       : Icons.add_photo_alternate_outlined,
-                  color: _mediaDataUri != null ? XyTheme.primary : null,
+                  color: _mediaDataUri != null && _tipeMedia == 'gambar' ? XyTheme.primary : null,
                 ),
-                tooltip: 'Pilih Gambar',
+                tooltip: 'Pilih Foto',
                 onPressed: () async {
                   final f = await GaleriPicker.pilihGambar(context);
                   if (f != null && mounted) {
                     final bytes = await f.readAsBytes();
                     final uri = await Kompres.dataUri(bytes, f.path.split('/').last, maxSisi: 1080, kualitas: 75);
-                    setState(() => _mediaDataUri = uri);
+                    setState(() {
+                      _mediaDataUri = uri;
+                      _tipeMedia = 'gambar';
+                    });
                   }
                 },
               ),
+              IconButton(
+                icon: Icon(
+                  _mediaDataUri != null && _tipeMedia == 'video'
+                      ? Icons.videocam_rounded
+                      : Icons.video_library_outlined,
+                  color: _mediaDataUri != null && _tipeMedia == 'video' ? XyTheme.primary : null,
+                ),
+                tooltip: 'Pilih Video / Animasi',
+                onPressed: () async {
+                  final f = await GaleriPicker.buka(context, jenis: const {JenisGaleri.video, JenisGaleri.gif}, judul: 'Pilih Video Story');
+                  if (f != null && mounted && f is File) {
+                    final bytes = await f.readAsBytes();
+                    final nama = f.path.split('/').last.toLowerCase();
+                    final mime = nama.endsWith('.gif') ? 'image/gif' : 'video/mp4';
+                    setState(() {
+                      _mediaDataUri = 'data:$mime;base64,${base64Encode(bytes)}';
+                      _tipeMedia = 'video';
+                    });
+                  }
+                },
+              ),
+              if (_mediaDataUri != null)
+                IconButton(
+                  icon: const Icon(Icons.close_rounded, size: 18, color: Colors.redAccent),
+                  tooltip: 'Hapus Media',
+                  onPressed: () => setState(() {
+                    _mediaDataUri = null;
+                    _tipeMedia = 'teks';
+                  }),
+                ),
             ],
           ),
           const SizedBox(height: 16),

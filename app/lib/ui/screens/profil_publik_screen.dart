@@ -224,6 +224,7 @@ class _ProfilPublikScreenState extends State<ProfilPublikScreen> {
                         child: BannerProfil(
                           tema: p!.banner,
                           media: p.bannerMedia,
+                          bingkai: p.bingkai,
                           child: const SizedBox.expand(),
                         ),
                       ),
