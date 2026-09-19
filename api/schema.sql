@@ -1097,7 +1097,7 @@ BEGIN
     WHERE payout_id=NEW.id AND status='reserved' AND NEW.status='rejected';
 END;
 
-INSERT OR IGNORE INTO setelan(kunci,nilai,diperbarui) VALUES('livestream_enabled','0',CURRENT_TIMESTAMP);
+INSERT OR IGNORE INTO setelan(kunci,nilai,diperbarui) VALUES('livestream_enabled','1',CURRENT_TIMESTAMP);
 INSERT OR IGNORE INTO setelan(kunci,nilai,diperbarui) VALUES('livestream_platform_fee_bps','2000',CURRENT_TIMESTAMP);
 INSERT OR IGNORE INTO setelan(kunci,nilai,diperbarui) VALUES('livestream_min_tip','5000',CURRENT_TIMESTAMP);
 INSERT OR IGNORE INTO setelan(kunci,nilai,diperbarui) VALUES('livestream_max_tip','500000',CURRENT_TIMESTAMP);
@@ -1118,4 +1118,20 @@ CREATE TABLE IF NOT EXISTS antrean_sewa (
 );
 
 CREATE INDEX IF NOT EXISTS idx_antrean_sewa_plan_status ON antrean_sewa(plan_id, status, prioritas DESC, dibuat ASC);
+
+CREATE TABLE IF NOT EXISTS stories (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  media_url TEXT,
+  tipe TEXT NOT NULL DEFAULT 'teks',
+  teks TEXT,
+  bg_gradient TEXT NOT NULL DEFAULT 'ungu',
+  privasi TEXT NOT NULL DEFAULT 'teman',
+  dibuat TEXT NOT NULL,
+  berakhir TEXT NOT NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_stories_user_berakhir ON stories(user_id, berakhir);
+CREATE INDEX IF NOT EXISTS idx_stories_berakhir ON stories(berakhir);
 

@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 mod obs_live;
 
-pub const VERSI: &str = "1.5.6-rust";
+pub const VERSI: &str = "1.5.7-rust";
 
 /// Batch L: semua proses anak (powershell/cmd/reg/where/sunshine) dibuat
 /// dengan CREATE_NO_WINDOW supaya tidak ada jendela konsol hitam yang
@@ -251,6 +251,112 @@ pub fn kunci_lanskap_sunshine(k: &Konfig, log: &Logger) -> Value {
         Err(e) => {
             log(&format!("Gagal mengunci rasio display: {e}"));
             json!({ "ok": false, "status": "GAGAL", "pesan": e })
+        }
+    }
+}
+
+/// Buka port otomatis via UPnP IGD pada router lokal dan daftarkan
+/// aturan izin ke Windows Defender Firewall.
+pub fn buka_upnp_firewall(k: &Konfig, log: &Logger) -> Value {
+    log("Langkah UPnP 1/3: aktifkan modul UPnP internal Sunshine…");
+    let alamat = format!("{SUNSHINE_BAWAAN}/api/config");
+    let muatan = json!({
+        "upnp": "enabled",
+    });
+    match minta(&alamat, Some(muatan), "POST", Some(header_basic(k))) {
+        Ok((status, _)) if (200..300).contains(&status) => {
+            log("Sunshine: fitur UPnP internal DIAKTIFKAN.");
+        }
+        _ => {
+            log("Sunshine API belum merespons opsi UPnP (melanjutkan ke router langsung).");
+        }
+    }
+
+    log("Langkah UPnP 2/3: daftarkan aturan Windows Firewall (inbound TCP & UDP)…");
+    let _ = perintah("netsh")
+        .args([
+            "advfirewall", "firewall", "add", "rule",
+            "name=XyCloud-Sunshine-TCP", "dir=in", "action=allow",
+            "protocol=TCP", "localport=47984,47989,47990,48010",
+        ])
+        .output();
+    let _ = perintah("netsh")
+        .args([
+            "advfirewall", "firewall", "add", "rule",
+            "name=XyCloud-Sunshine-UDP", "dir=in", "action=allow",
+            "protocol=UDP", "localport=47998,47999,48000,48002,48010",
+        ])
+        .output();
+
+    if let Some(exe) = cari_sunshine_exe() {
+        let exe_s = exe.to_string_lossy().to_string();
+        let _ = perintah("netsh")
+            .args([
+                "advfirewall", "firewall", "add", "rule",
+                "name=XyCloud-Sunshine-App", "dir=in", "action=allow",
+                &format!("program={exe_s}"), "enable=yes",
+            ])
+            .output();
+    }
+    log("Windows Firewall diizinkan.");
+
+    log("Langkah UPnP 3/3: kirim permintaan port mapping UPnP IGD ke router WiFi…");
+    let ps_cmd = r#"
+$ErrorActionPreference = 'SilentlyContinue';
+$upnp = New-Object -ComObject HNetCfg.NATUPnP;
+$maps = $upnp.StaticPortMappingCollection;
+$localIp = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { 
+    $_.InterfaceAlias -notmatch 'Loopback|vEthernet|Tailscale|ZeroTier|VMware' -and 
+    ($_.IPAddress -like '192.168.*' -or $_.IPAddress -like '10.*' -or $_.IPAddress -like '172.*')
+} | Select-Object -First 1).IPAddress;
+if (-not $localIp) {
+    $localIp = (Find-NetRoute -RemoteIPAddress '8.8.8.8' | Select-Object -First 1 | Get-NetIPAddress).IPAddress;
+}
+if ($maps) {
+    $sukses = 0;
+    @(
+        @{p=47984;pr='TCP'}, @{p=47989;pr='TCP'}, @{p=48010;pr='TCP'},
+        @{p=47998;pr='UDP'}, @{p=47999;pr='UDP'}, @{p=48000;pr='UDP'},
+        @{p=48002;pr='UDP'}, @{p=48010;pr='UDP'}
+    ) | ForEach-Object {
+        try {
+            $maps.Remove($_.p, $_.pr) | Out-Null;
+            $maps.Add($_.p, $_.pr, $_.p, $localIp, $true, ('XyCloud ' + $_.pr + ' ' + $_.p)) | Out-Null;
+            $sukses++;
+        } catch { }
+    };
+    Write-Output "UPNP_OK:$sukses:$localIp";
+} else {
+    Write-Output "UPNP_NO_ROUTER:$localIp";
+}
+"#;
+
+    let res = perintah("powershell")
+        .args(["-NoProfile", "-Command", ps_cmd])
+        .output();
+
+    match res {
+        Ok(o) => {
+            let out = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            if out.starts_with("UPNP_OK:") {
+                let parts: Vec<&str> = out.split(':').collect();
+                let jumlah = parts.get(1).unwrap_or(&"0");
+                let ip = parts.get(2).unwrap_or(&"-");
+                log(&format!("UPnP SUKSES: {jumlah} port streaming berhasil dibuka di router ke IP {ip}."));
+                json!({ "ok": true, "status": "OK", "pesan": format!("{jumlah} port berhasil dipetakan di router ke IP {ip}") })
+            } else if out.starts_with("UPNP_NO_ROUTER:") {
+                let ip = out.strip_prefix("UPNP_NO_ROUTER:").unwrap_or("-");
+                log(&format!("Router lokal di jaringan (IP PC: {ip}) belum merespons UPnP."));
+                log("Tips: Buka pengaturan router WiFi (192.168.1.1) lalu aktifkan opsi 'UPnP' agar port otomatis terbuka.");
+                json!({ "ok": false, "status": "ROUTER_NO_UPNP", "pesan": "Router belum merespons UPnP. Aktifkan opsi UPnP di router jika ada." })
+            } else {
+                log("Permintaan UPnP selesai dikirim.");
+                json!({ "ok": true, "status": "SELESAI", "pesan": "Permintaan UPnP selesai dikirim." })
+            }
+        }
+        Err(e) => {
+            log(&format!("Gagal memanggil UPnP powershell: {e}"));
+            json!({ "ok": false, "status": "GAGAL", "pesan": e.to_string() })
         }
     }
 }
@@ -1024,10 +1130,10 @@ pub fn setup_otomatis(k: &Konfig, log: Logger) -> (Konfig, Value) {
     let mut cek = tunggu_api_siap(&k, &log, 45);
     if cek.get("siap").and_then(|x| x.as_bool()).unwrap_or(false) {
         log("SETUP OK — Sunshine siap. Tidak perlu login web UI manual.");
-        // 5) Kunci rasio landscape — display host (termasuk headless/virtual
-        //    display) dipaksa 1920x1080@60 lewat opsi dd_* Sunshine.
-        log("Langkah 5/6: kunci rasio landscape (termasuk headless)…");
+        // 5) Kunci rasio landscape & konfigurasi Auto-UPnP + Firewall
+        log("Langkah 5/6: kunci rasio landscape & konfigurasi Auto-UPnP…");
         let _ = kunci_lanskap_sunshine(&k, &log);
+        let _ = buka_upnp_firewall(&k, &log);
     } else {
         let pesan = cek
             .get("pesan")

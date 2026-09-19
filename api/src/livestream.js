@@ -17,7 +17,7 @@ function accountId(env) {
 
 async function settings(env) {
   const defaults = {
-    livestream_enabled: '0',
+    livestream_enabled: '1',
     livestream_platform_fee_bps: '2000',
     livestream_min_tip: '5000',
     livestream_max_tip: '500000',

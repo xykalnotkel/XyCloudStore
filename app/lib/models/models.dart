@@ -1697,3 +1697,53 @@ class UnitLive {
   String get gpu => '${spec['gpu'] ?? ''}';
   String get osVersi => '${spec['os_versi'] ?? ''}';
 }
+
+/// Item Story di Feed (berlaku 24 jam) untuk teman/pengikut
+class StoryItem {
+  final String id;
+  final String userId;
+  final String nama;
+  final String? foto;
+  final String? bingkai;
+  final String? mediaUrl;
+  final String tipe; // 'teks', 'gambar', 'video'
+  final String teks;
+  final String bgGradient; // 'ungu', 'emas', 'neon', 'senja', 'cyber'
+  final String privasi; // 'teman', 'publik'
+  final DateTime dibuat;
+  final DateTime berakhir;
+  final bool punyaSaya;
+
+  StoryItem({
+    required this.id,
+    required this.userId,
+    required this.nama,
+    this.foto,
+    this.bingkai,
+    this.mediaUrl,
+    required this.tipe,
+    required this.teks,
+    this.bgGradient = 'ungu',
+    this.privasi = 'teman',
+    required this.dibuat,
+    required this.berakhir,
+    this.punyaSaya = false,
+  });
+
+  factory StoryItem.fromJson(Map<String, dynamic> j) => StoryItem(
+        id: '${j['id'] ?? ''}',
+        userId: '${j['user_id'] ?? ''}',
+        nama: '${j['nama'] ?? 'Pengguna'}',
+        foto: j['foto'] as String?,
+        bingkai: j['bingkai'] as String?,
+        mediaUrl: j['media_url'] as String?,
+        tipe: '${j['tipe'] ?? 'teks'}',
+        teks: '${j['teks'] ?? ''}',
+        bgGradient: '${j['bg_gradient'] ?? 'ungu'}',
+        privasi: '${j['privasi'] ?? 'teman'}',
+        dibuat: DateTime.tryParse('${j['dibuat'] ?? ''}') ?? DateTime.now(),
+        berakhir: DateTime.tryParse('${j['berakhir'] ?? ''}') ??
+            DateTime.now().add(const Duration(hours: 24)),
+        punyaSaya: j['punya_saya'] == true,
+      );
+}

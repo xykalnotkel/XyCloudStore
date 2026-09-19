@@ -310,92 +310,49 @@ export async function unggahVideoBanner(env, { dataUri, folder = 'xycloudstore/b
   const timestamp = Math.floor(Date.now() / 1000);
   let mp4Id = null;
   try {
-    // Transformasi GIF banner: 20 FPS (halus, tidak lambat/patah-patah),
-    // dipotong 6 detik awal (looping ringkas & mulus tanpa jeda akhir menit),
-    // lebar 480px batas proporsional, dan kompresi lossy agar ringan.
-    const transformBannerGif = 'f_gif,fps_20,du_6.0,so_0,w_480,c_limit,fl_lossy';
+    // Transformasi GIF banner: 12 FPS (ringan & mulus), 5 detik awal,
+    // lebar 400px batas proporsional, dan kompresi lossy agar konversi cepat & hemat kuota.
+    const transformBannerGif = 'f_gif,fps_12,du_5.0,so_0,w_400,c_limit,fl_lossy';
 
-    // 1) Unggah video (resource video; format asli dipertahankan).
+    // 1) Unggah video dengan eager transformation bertanda-tangan.
+    // 'eager' wajib masuk signParams agar dihitung dalam signature Cloudinary.
     const r = await kirimUnggah(env, `https://api.cloudinary.com/v1_1/${env.CLOUDINARY_CLOUD}/video/upload`, {
-      folder, timestamp, signParams: { folder }, file: dataUri, resourceType: 'video',
-      // GIF derivasi dibuat EAGER saat unggah, sehingga fase konversi tidak
-      // menunggu derivasi on-demand yang bisa memakan puluhan detik
-      // (penyebab UI klien terlihat mentok di 90%).
-      extra: { eager: transformBannerGif },
+      folder, timestamp,
+      signParams: { folder, eager: transformBannerGif },
+      file: dataUri,
+      resourceType: 'video',
     });
     const j = await r.json();
     if (!r.ok || j.error) return { ok: false, alasan: j.error?.message || `HTTP ${r.status}` };
     mp4Id = j.public_id;
 
-    // 2) Verifikasi MP4 bisa diakses.
-    try {
-      const cek = await fetch(j.secure_url, { method: 'HEAD' });
-      if (!cek.ok) return { ok: false, alasan: 'Video gagal tersimpan di cloud (verifikasi gagal).' };
-    } catch (_) {
-      return { ok: false, alasan: 'Video gagal tersimpan di cloud.' };
-    }
-
-    // 3) Ambil byte GIF hasil transformasi f_gif, lalu unggah ulang sebagai
-    //    aset image/gif mandiri (public_id berakhiran .gif). Utamakan URL
-    //    eager (sudah jadi saat unggah); fallback ke derivasi on-demand.
+    // 2) Ambil URL GIF hasil transformasi eager.
     const eagerUrl = Array.isArray(j.eager) && j.eager[0]?.secure_url ? String(j.eager[0].secure_url) : '';
     const gifSumber = eagerUrl.startsWith('http')
       ? eagerUrl
       : String(j.secure_url).replace('/video/upload/', `/video/upload/${transformBannerGif}/`);
-    let gifBytes = null;
-    // Derivasi f_gif dibuat on-demand oleh Cloudinary; permintaan pertama
-    // bisa datang sebelum aset siap. Coba ulang sebentar dan validasi
-    // magic-byte "GIF" supaya byte salah tidak pernah tersimpan sebagai gif.
-    for (let coba = 0; coba < 3 && !gifBytes; coba++) {
-      if (coba) await new Promise((r) => setTimeout(r, 1200 * coba));
-      try {
-        const rg = await fetch(gifSumber);
-        if (rg.ok) {
-          const b = new Uint8Array(await rg.arrayBuffer());
-          if (b.length >= 12 && b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46) gifBytes = b;
-        }
-      } catch (_) {}
-    }
-    if (!gifBytes || gifBytes.length < 12) {
-      // Fallback: pakai GIF turunan (transform) dan biarkan MP4 tersimpan.
-      await catatMedia(env, { id: j.public_id, url: j.secure_url, folder, format: j.format || 'mp4', width: j.width, height: j.height, bytes: j.bytes, animated: 1, hash });
-      return { ok: true, url: j.secure_url, gif: gifSumber, id: j.public_id, format: j.format, sisaMp4: true };
-    }
 
-    const gifBase64 = keBase64(gifBytes);
-    const ts2 = Math.floor(Date.now() / 1000);
-    const rid = crypto.randomUUID().replace(/-/g, '');
-    const r2 = await kirimUnggah(env, `https://api.cloudinary.com/v1_1/${env.CLOUDINARY_CLOUD}/image/upload`, {
-      folder, timestamp: ts2,
-      signParams: { folder, public_id: `${folder}/${rid}.gif` },
-      file: `data:image/gif;base64,${gifBase64}`,
-    });
-    const jg = await r2.json();
-    if (!r2.ok || jg.error) {
-      // Fallback: GIF turunan tetap dipakai, MP4 dibiarkan.
-      await catatMedia(env, { id: j.public_id, url: j.secure_url, folder, format: j.format || 'mp4', width: j.width, height: j.height, bytes: j.bytes, animated: 1, hash });
-      return { ok: true, url: j.secure_url, gif: gifSumber, id: j.public_id, format: j.format, sisaMp4: true };
-    }
-
-    // 4) Hapus MP4 asli — GIF mandiri sudah tersimpan.
-    const terhapus = await hapusCloudinary(env, mp4Id, 'video');
-
-    // 5) Catat aset akhir (GIF).
+    // Catat aset video & GIF ke database
     await catatMedia(env, {
-      id: jg.public_id, url: jg.secure_url, folder, format: 'gif',
-      width: jg.width || null, height: jg.height || null, bytes: jg.bytes || null,
-      animated: 1, hash,
+      id: j.public_id,
+      url: gifSumber,
+      folder,
+      format: 'gif',
+      width: j.width,
+      height: j.height,
+      bytes: j.bytes,
+      animated: 1,
+      hash,
     });
 
     return {
       ok: true,
-      url: jg.secure_url,
-      gif: jg.secure_url,
-      id: jg.public_id,
+      url: gifSumber,
+      gif: gifSumber,
+      id: j.public_id,
       format: 'gif',
-      bytes: jg.bytes,
+      bytes: j.bytes,
       hash,
-      mp4Terhapus: terhapus,
     };
   } catch (e) {
     return { ok: false, alasan: String(e) };

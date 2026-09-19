@@ -169,6 +169,11 @@ abstract class XyRepository {
   Future<void> hapusPesan(String id);
   Future<void> hapusSemuaPesan();
 
+  // ---------- stories (feed) ----------
+  Future<List<StoryItem>> ambilStories();
+  Future<StoryItem> buatStory({required String teks, String? mediaUrl, String tipe = 'teks', String bgGradient = 'ungu', String privasi = 'teman'});
+  Future<void> hapusStory(String id);
+
   // ---------- pemberitahuan ----------
   Future<Map<String, dynamic>> notifikasi();
   Future<void> bacaNotifikasi({String? id});
@@ -715,6 +720,36 @@ class RemoteRepository implements XyRepository {
   Future<void> hapusSemuaPesan() async => api.delete('/cs/messages');
 
   @override
+  Future<List<StoryItem>> ambilStories() async {
+    final res = await api.get('/stories');
+    if (res is List) {
+      return res.map((e) => StoryItem.fromJson(Map<String, dynamic>.from(e))).toList();
+    }
+    return [];
+  }
+
+  @override
+  Future<StoryItem> buatStory({
+    required String teks,
+    String? mediaUrl,
+    String tipe = 'teks',
+    String bgGradient = 'ungu',
+    String privasi = 'teman',
+  }) async {
+    final res = await api.post('/stories', {
+      'teks': teks,
+      if (mediaUrl != null) 'media_url': mediaUrl,
+      'tipe': tipe,
+      'bg_gradient': bgGradient,
+      'privasi': privasi,
+    });
+    return StoryItem.fromJson(Map<String, dynamic>.from(res));
+  }
+
+  @override
+  Future<void> hapusStory(String id) async => api.delete('/stories/$id');
+
+  @override
   Future<Map<String, dynamic>> notifikasi() async =>
       Map<String, dynamic>.from(await api.get('/notifikasi'));
 
@@ -1244,6 +1279,54 @@ class MockRepository implements XyRepository {
 
   @override
   Future<void> hapusSemuaPesan() async {}
+
+  @override
+  Future<List<StoryItem>> ambilStories() => _delay(<StoryItem>[
+        StoryItem(
+          id: 'st_demo',
+          userId: 'u_demo',
+          nama: 'Kirana',
+          foto: null,
+          bingkai: 'sakura',
+          tipe: 'teks',
+          teks: 'Selamat datang di Feed & Story XyCloudStore!',
+          bgGradient: 'ungu',
+          privasi: 'publik',
+          dibuat: DateTime.now(),
+          berakhir: DateTime.now().add(const Duration(hours: 24)),
+          punyaSaya: false,
+        ),
+      ], 200);
+
+  @override
+  Future<StoryItem> buatStory({
+    required String teks,
+    String? mediaUrl,
+    String tipe = 'teks',
+    String bgGradient = 'ungu',
+    String privasi = 'teman',
+  }) =>
+      _delay(
+        StoryItem(
+          id: 'st_local',
+          userId: MockData.user.id,
+          nama: MockData.user.nama,
+          foto: MockData.user.foto,
+          bingkai: MockData.user.bingkai,
+          mediaUrl: mediaUrl,
+          tipe: tipe,
+          teks: teks,
+          bgGradient: bgGradient,
+          privasi: privasi,
+          dibuat: DateTime.now(),
+          berakhir: DateTime.now().add(const Duration(hours: 24)),
+          punyaSaya: true,
+        ),
+        200,
+      );
+
+  @override
+  Future<void> hapusStory(String id) => _delay(null, 100);
 
   @override
   Future<Map<String, dynamic>> notifikasi() => _delay({'daftar': const [], 'belumDibaca': 0}, 200);

@@ -304,13 +304,16 @@ const BINGKAI_PROFIL = ['polos', 'ungu', 'emas', 'neon', 'aurora', 'permata', 'a
   // Batch L: bingkai aset AI baru (assets/bingkai/*.webp).
   'sakura', 'sirkuit', 'sayap', 'petir', 'mahkota', 'naga',
   // Batch Q: bingkai tambahan permintaan pengguna (Cyberpunk, Hologram, Es, Pelangi, Ruby, Emerald, Celestial, Sakura Angin).
-  'cyberpunk', 'hologram', 'es', 'pelangi', 'ruby', 'emerald', 'celestial', 'sakura_angin'];
+  'cyberpunk', 'hologram', 'es', 'pelangi', 'ruby', 'emerald', 'celestial', 'sakura_angin',
+  // Bingkai Baru: Inferno, Matrix, Samurai, Nebula, Phantom
+  'inferno', 'matrix', 'samurai', 'nebula', 'phantom'];
 const BINGKAI_LANGGANAN = [
   'aurora', 'permata', 'api', 'galaksi', 'sakura', 'sirkuit', 'sayap', 'petir',
-  'mahkota', 'naga', 'cyberpunk', 'hologram', 'es', 'pelangi', 'ruby', 'emerald', 'celestial', 'sakura_angin'
+  'mahkota', 'naga', 'cyberpunk', 'hologram', 'es', 'pelangi', 'ruby', 'emerald', 'celestial', 'sakura_angin',
+  'inferno', 'matrix', 'samurai', 'nebula', 'phantom'
 ];
 // Bingkai kelas VIP saja (premium tertinggi — tampil dengan label "VIP" di app).
-const BINGKAI_VIP = ['mahkota', 'naga', 'ruby', 'emerald', 'hologram', 'celestial', 'sakura_angin'];
+const BINGKAI_VIP = ['mahkota', 'naga', 'ruby', 'emerald', 'hologram', 'celestial', 'sakura_angin', 'inferno', 'phantom'];
 
 // Gaya nama kustom (Batch L). Sama dengan daftar GAYA_NAMA di
 // app/lib/ui/widgets/gaya_nama.dart. Gaya beranimasi khusus Pro/VIP.
@@ -7055,13 +7058,14 @@ async function statistikPublik(env) {
           return err('Hanya berkas GIF atau MP4 yang boleh jadi banner kustom.', 422, env);
         }
         if (!hasil.ok) return err(hasil.alasan, 502, env);
-        // Verifikasi setelah unggah: pastikan aset benar-benar bisa diakses
-        // (terdapat kasus aset terhapus dari akun cloud sesaat setelah unggah).
-        try {
-          const cek = await fetch(hasil.url, { method: 'HEAD' });
-          if (!cek.ok) return err('Banner gagal tersimpan di cloud (verifikasi gagal). Coba sekali lagi.', 502, env);
-        } catch (_) {
-          return err('Banner gagal tersimpan di cloud. Coba sekali lagi.', 502, env);
+        // Verifikasi setelah unggah (toleran terhadap pembuatan eager berdurasi 1-2 detik)
+        let verifOk = false;
+        for (let i = 0; i < 3; i++) {
+          try {
+            const cek = await fetch(hasil.url, { method: 'HEAD' });
+            if (cek.ok || [200, 302, 304].includes(cek.status)) { verifOk = true; break; }
+          } catch (_) {}
+          await new Promise((r) => setTimeout(r, 800));
         }
         const media = JSON.stringify({ tipe, url: hasil.url, gif: hasil.gif || hasil.url, mp4Terhapus: hasil.mp4Terhapus === true });
         await env.DB.prepare('UPDATE users SET banner_media=? WHERE id=?').bind(media, me.sub).run();
@@ -7610,6 +7614,81 @@ async function statistikPublik(env) {
           env.DB.prepare('DELETE FROM forum_post WHERE id = ?').bind(id),
         ]);
         ctx.waitUntil(push(env, 'forum', 'forum.hapus', { id }));
+        return json({ ok: true }, 200, env);
+      }
+
+      // ---- Feed Stories (24 Jam) ----
+      if (p === 'stories' && req.method === 'GET') {
+        const now = new Date().toISOString();
+        const { results } = await env.DB.prepare(`
+          SELECT s.*, u.nama, u.foto, u.bingkai,
+                 (s.user_id = ?) AS punya_saya
+          FROM stories s
+          JOIN users u ON u.id = s.user_id
+          WHERE s.berakhir > ?
+            AND (s.user_id = ? OR s.privasi = 'publik' OR s.user_id IN (SELECT target_id FROM follows WHERE ikut_id = ?))
+          ORDER BY (s.user_id = ?) DESC, s.dibuat DESC
+          LIMIT 100
+        `).bind(me.sub, now, me.sub, me.sub, me.sub).all();
+        return json(results || [], 200, env);
+      }
+
+      if (p === 'stories' && req.method === 'POST') {
+        if (!rateMem(`story-mem:${me.sub}`, 10, 3600)) {
+          return err('Maksimal 10 story per jam. Coba lagi nanti.', 429, env);
+        }
+        const b = await req.json().catch(() => ({}));
+        const teks = String(b.teks || '').trim();
+        let mediaUrl = null;
+        if (b.media_url && String(b.media_url).startsWith('data:')) {
+          const up = await unggahGambar(env, { dataUri: b.media_url, folder: 'xycloudstore/stories' });
+          if (up.ok) mediaUrl = up.url;
+        } else if (typeof b.media_url === 'string' && b.media_url.startsWith('https://')) {
+          mediaUrl = b.media_url;
+        }
+        const tipe = ['teks', 'gambar', 'video'].includes(b.tipe) ? b.tipe : (mediaUrl ? 'gambar' : 'teks');
+        const bgGradient = ['ungu', 'emas', 'neon', 'senja', 'cyber'].includes(b.bg_gradient) ? b.bg_gradient : 'ungu';
+        const privasi = b.privasi === 'publik' ? 'publik' : 'teman';
+        if (!teks && !mediaUrl) return err('Story harus memiliki teks atau media.', 400, env);
+        if (teks.length > 500) return err('Teks story maksimal 500 karakter.', 400, env);
+
+        const id = uid('st_');
+        const now = new Date();
+        const dibuat = now.toISOString();
+        const berakhir = new Date(now.getTime() + 24 * 3600 * 1000).toISOString();
+
+        await env.DB.prepare(`
+          INSERT INTO stories (id, user_id, media_url, tipe, teks, bg_gradient, privasi, dibuat, berakhir)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).bind(id, me.sub, mediaUrl, tipe, teks, bgGradient, privasi, dibuat, berakhir).run();
+
+        const u = await env.DB.prepare('SELECT nama, foto, bingkai FROM users WHERE id = ?').bind(me.sub).first();
+        const story = {
+          id,
+          user_id: me.sub,
+          nama: u?.nama || 'Pengguna',
+          foto: u?.foto || null,
+          bingkai: u?.bingkai || null,
+          media_url: mediaUrl,
+          tipe,
+          teks,
+          bg_gradient: bgGradient,
+          privasi,
+          dibuat,
+          berakhir,
+          punya_saya: true,
+        };
+        ctx.waitUntil(push(env, 'forum', 'story.baru', story));
+        return json(story, 201, env);
+      }
+
+      if (p.startsWith('stories/') && req.method === 'DELETE') {
+        const id = p.split('/')[1];
+        const s = await env.DB.prepare('SELECT user_id FROM stories WHERE id = ?').bind(id).first();
+        if (!s) return err('Story tidak ditemukan atau sudah kedaluwarsa.', 404, env);
+        if (s.user_id !== me.sub) return err('Kamu hanya bisa menghapus story milik sendiri.', 403, env);
+        await env.DB.prepare('DELETE FROM stories WHERE id = ?').bind(id).run();
+        ctx.waitUntil(push(env, 'forum', 'story.hapus', { id }));
         return json({ ok: true }, 200, env);
       }
 

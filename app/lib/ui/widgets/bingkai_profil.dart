@@ -47,6 +47,12 @@ const List<BingkaiInfo> daftarBingkai = [
   // Bingkai Baru Non-Cyber (Floating elements & motion blur)
   BingkaiInfo('celestial', 'Celestial Breeze', langganan: true, vip: true),
   BingkaiInfo('sakura_angin', 'Sakura Melayang', langganan: true, vip: true),
+  // Bingkai Baru: Inferno, Matrix, Samurai, Nebula, Phantom
+  BingkaiInfo('inferno', 'Inferno Lava', langganan: true, vip: true),
+  BingkaiInfo('matrix', 'Matrix Cyber', langganan: true),
+  BingkaiInfo('samurai', 'Spirit Samurai', langganan: true),
+  BingkaiInfo('nebula', 'Nebula Kosmik', langganan: true),
+  BingkaiInfo('phantom', 'Phantom Abyss', langganan: true, vip: true),
 ];
 
 /// Id bingkai yang memakai artwork AI (assets/bingkai/{id}.webp).
@@ -94,6 +100,28 @@ Gradient? _gradBingkai(String? id) => switch (id) {
           colors: [Color(0xFFA7F3D0), Color(0xFF059669), Color(0xFF064E3B)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight),
+      'inferno' => const SweepGradient(
+          colors: [
+            Color(0xFFFF1E00), Color(0xFFFF8500), Color(0xFFFFD600),
+            Color(0xFFFF1E00),
+          ]),
+      'matrix' => const LinearGradient(
+          colors: [Color(0xFF00FF66), Color(0xFF008F11), Color(0xFF042F2E)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight),
+      'samurai' => const LinearGradient(
+          colors: [Color(0xFFF8FAFC), Color(0xFF60A5FA), Color(0xFF1E3A8A)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight),
+      'nebula' => const SweepGradient(
+          colors: [
+            Color(0xFFC084FC), Color(0xFFE879F9), Color(0xFF4C1D95),
+            Color(0xFF818CF8), Color(0xFFC084FC),
+          ]),
+      'phantom' => const LinearGradient(
+          colors: [Color(0xFF22D3EE), Color(0xFFA855F7), Color(0xFF0F172A)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight),
       _ => null,
     };
 
@@ -132,12 +160,14 @@ class _AvatarBingkaiState extends State<AvatarBingkai>
       widget.bingkai == 'pelangi' ||
       widget.bingkai == 'hologram' ||
       widget.bingkai == 'es' ||
+      widget.bingkai == 'inferno' ||
+      widget.bingkai == 'nebula' ||
       _idAsetAi.contains(widget.bingkai ?? '');
 
   bool get _asetAi => _idAsetAi.contains(widget.bingkai ?? '');
 
   /// Bingkai yang memakai partikel apung (loop _apung).
-  bool get _pakaiApung => const {'api', 'sakura', 'sayap', 'naga', 'es', 'sakura_angin', 'celestial'}
+  bool get _pakaiApung => const {'api', 'sakura', 'sayap', 'naga', 'es', 'sakura_angin', 'celestial', 'inferno', 'nebula', 'phantom'}
       .contains(widget.bingkai ?? '');
 
   @override
@@ -215,7 +245,7 @@ class _AvatarBingkaiState extends State<AvatarBingkai>
           ),
         );
       }
-      if (id == 'aurora' || id == 'pelangi' || id == 'hologram') {
+      if (id == 'aurora' || id == 'pelangi' || id == 'hologram' || id == 'inferno' || id == 'nebula') {
         return RotationTransition(
           turns: _putar,
           child: Container(
@@ -225,7 +255,11 @@ class _AvatarBingkaiState extends State<AvatarBingkai>
                   ? _gradBingkai('pelangi')
                   : id == 'hologram'
                       ? _gradBingkai('hologram')
-                      : const SweepGradient(
+                      : id == 'inferno'
+                          ? _gradBingkai('inferno')
+                          : id == 'nebula'
+                              ? _gradBingkai('nebula')
+                              : const SweepGradient(
                           colors: [
                             Color(0xFF22D3EE),
                             XyTheme.violet,

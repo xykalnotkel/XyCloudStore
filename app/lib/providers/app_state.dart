@@ -1278,6 +1278,57 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
+  // ================= feed stories =================
+  List<StoryItem> stories = [];
+  bool storiesMemuat = false;
+
+  Future<void> muatStories() async {
+    if (storiesMemuat) return;
+    storiesMemuat = true;
+    notifyListeners();
+    try {
+      stories = await _repo.ambilStories();
+    } catch (_) {}
+    finally {
+      storiesMemuat = false;
+      notifyListeners();
+    }
+  }
+
+  Future<String?> buatStory({
+    required String teks,
+    String? mediaUrl,
+    String tipe = 'teks',
+    String bgGradient = 'ungu',
+    String privasi = 'teman',
+  }) async {
+    try {
+      final s = await _repo.buatStory(
+        teks: teks,
+        mediaUrl: mediaUrl,
+        tipe: tipe,
+        bgGradient: bgGradient,
+        privasi: privasi,
+      );
+      stories.insert(0, s);
+      notifyListeners();
+      return null;
+    } catch (e) {
+      return _pesan(e);
+    }
+  }
+
+  Future<String?> hapusStory(String id) async {
+    try {
+      await _repo.hapusStory(id);
+      stories.removeWhere((s) => s.id == id);
+      notifyListeners();
+      return null;
+    } catch (e) {
+      return _pesan(e);
+    }
+  }
+
   // ================= forum komunitas =================
   List<ForumPost> forum = [];
   Set<String> forumDisukai = {};
@@ -1618,6 +1669,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     liveCatalog = const LiveCatalog(); creatorLive = null; liveGalat = null; creatorLiveGalat = null; liveMemuat = false;
     _livePayoutClientId = null; _livePayoutUserId = null;
     forum = []; forumDisukai.clear(); balasanDisukai.clear();
+    stories = [];
     forumRevisi = 0; dmRevisi = 0;
     notifikasi = []; notifBelum = 0; notifBelumDibaca = 0;
     favorit.clear(); _ulasan.clear(); _identitasForum.clear();

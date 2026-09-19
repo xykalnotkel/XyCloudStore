@@ -1,6 +1,6 @@
 [package]
 name = "xycloud-agent"
-version = "1.5.6"
+version = "1.5.7"
 description = "XyCloudStore — Agen PC Host (Rust/Tauri)"
 edition = "2021"
 

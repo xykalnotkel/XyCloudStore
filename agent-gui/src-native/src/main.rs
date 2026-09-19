@@ -30,6 +30,7 @@ enum Sibuk {
     Uji,
     Setup,
     CekPort,
+    Upnp,
     Loop,
 }
 
@@ -337,6 +338,36 @@ impl Aplikasi {
         self.ctx.request_repaint();
     }
 
+    fn jalankan_upnp(&self) {
+        {
+            let mut s = self.st.sibuk.lock().unwrap();
+            if *s != Sibuk::Tidak {
+                return;
+            }
+            *s = Sibuk::Upnp;
+        }
+        let cfg = self.st.cfg();
+        let st = self.st.clone();
+        let ctx = self.ctx.clone();
+        std::thread::spawn(move || {
+            let log = logger_gui(st.clone(), ctx.clone());
+            st.log_push("=== Menjalankan Auto-UPnP Router & Windows Firewall ===", &ctx);
+            let hasil = agent::buka_upnp_firewall(&cfg, &log);
+            st.set_sibuk(Sibuk::Tidak);
+            let ok = hasil.get("ok").and_then(|x| x.as_bool()).unwrap_or(false);
+            let pesan = hasil.get("pesan").and_then(|x| x.as_str()).unwrap_or("");
+            st.log_push(
+                &format!("Hasil Auto-UPnP: {}", if ok { "BERHASIL" } else { "INFORMASI" }),
+                &ctx,
+            );
+            if !pesan.is_empty() {
+                st.log_push(pesan, &ctx);
+            }
+            ctx.request_repaint();
+        });
+        self.ctx.request_repaint();
+    }
+
     fn mulai_loop(&self) {
         // Ambil konfig terbaru (memori → disk), sama seperti build Tauri.
         let cfg = {
@@ -606,6 +637,12 @@ impl eframe::App for Aplikasi {
                     {
                         self.cek_port();
                     }
+                    if ui
+                        .add(egui::Button::new("🔓  Auto-UPnP").min_size(egui::vec2(110.0, 34.0)))
+                        .clicked()
+                    {
+                        self.jalankan_upnp();
+                    }
                 });
                 if berjalan {
                     if ui
@@ -651,6 +688,7 @@ impl eframe::App for Aplikasi {
                             Sibuk::Uji => "Menguji koneksi ke Sunshine…",
                             Sibuk::Setup => "Setup otomatis berjalan (unduh/pasang Sunshine bisa beberapa menit)…",
                             Sibuk::CekPort => "Server sedang memeriksa port streaming dari internet…",
+                            Sibuk::Upnp => "Membuka port via UPnP router & Windows Firewall…",
                             Sibuk::Loop => "Agen berjalan…",
                             Sibuk::Tidak => "",
                         })

@@ -295,7 +295,7 @@ class _OpsiTampilanScreenState extends State<OpsiTampilanScreen> {
       ]));
 }
 
-const _labelNav = ['Beranda', 'Sewa PC', 'Akun', 'Komunitas', 'Profil'];
+const _labelNav = ['Beranda', 'Sewa PC', 'Akun', 'Feed', 'Profil'];
 
 class OpsiNotifikasiScreen extends StatefulWidget {
   const OpsiNotifikasiScreen({super.key});
