@@ -4713,7 +4713,7 @@ dependencies = [
 
 [[package]]
 name = "xycloud-agent"
-version = "1.5.5"
+version = "1.5.8"
 dependencies = [
  "reqwest 0.12.28",
  "serde",

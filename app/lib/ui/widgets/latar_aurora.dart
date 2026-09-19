@@ -43,50 +43,26 @@ class XyLatar extends StatelessWidget {
 
     return RepaintBoundary(
       child: Stack(fit: StackFit.expand, children: [
-        // Dasar: gradasi vertikal dalam (gelap) / lavender halus (terang).
+        // Dasar: GitHub Dark Canvas (gelap) / lavender halus (terang).
         DecoratedBox(
           decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: gelap
-                  ? const [
-                      Color(0xFF1B0745),
-                      Color(0xFF0D0224),
-                      Color(0xFF13042E),
-                    ]
-                  : const [
+            color: gelap ? const Color(0xFF0D1117) : null,
+            gradient: gelap
+                ? null
+                : const LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
                       Color(0xFFFDFBFF),
                       Color(0xFFF4EFFF),
                       Color(0xFFEEE6FF),
                     ],
-              stops: const [0, .55, 1],
-            ),
+                    stops: [0, .55, 1],
+                  ),
           ),
         ),
-        // Blob aurora: violet kiri-atas, plum kanan-tengah, indigo bawah.
-        if (gelap) ...[
-          Positioned(
-            left: -140,
-            top: -120,
-            child: blob(XyTheme.violet, 420, opasitas: .85 * o),
-          ),
-          Positioned(
-            right: -160,
-            top: 220,
-            child: blob(XyTheme.plum, 380, opasitas: .55 * o),
-          ),
-          Positioned(
-            left: -100,
-            bottom: -60,
-            child: blob(const Color(0xFF4C1D95), 460, opasitas: .9 * o),
-          ),
-          Positioned(
-            right: -60,
-            bottom: 140,
-            child: blob(XyTheme.primaryDeep, 260, opasitas: .5 * o),
-          ),
-        ] else ...[
+        // Blob aurora hanya di mode terang agar mode gelap tetap solid GitHub style
+        if (!gelap) ...[
           Positioned(
             left: -150,
             top: -130,

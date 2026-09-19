@@ -7,14 +7,38 @@ import 'dart:convert';
 // XyCloudStore — Model data (mirror dari tabel D1 Cloudflare)
 // ============================================================
 
-/// Media banner profil kustom (Batch I): GIF langsung, atau MP4 yang
-/// disajikan Cloudinary sebagai GIF animasi (transformasi f_gif).
+/// Media banner profil kustom (Batch I + O):
+/// - Batch I: GIF langsung, atau MP4 → GIF (f_gif)
+/// - Batch O (Discord-style): Video → Animated WebP (fl_animated,fl_awebp)
+///   + GIF fallback. Discord sendiri pakai teknik sama:
+///   * Avatar/banner animasi: `a_` hash → .webp (bukan .gif)
+///   * Avatar decoration/profile effect: APNG / Animated WebP / Lottie
+///     (butuh alpha 8-bit, GIF cuma 1-bit → glow bergerigi)
+///   * Stiker animasi: wajib APNG/Lottie, GIF ditolak (512KB limit)
+///   * Chat GIF: sebenarnya MP4 muted looping (hemat 90% bandwidth)
+///
+/// Cloudinary: `f_webp,fl_awebp,fl_animated,w_480,fps_20,du_5,q_auto:good,e_loop`
+/// menghasilkan Animated WebP 24-bit + 8-bit alpha, 64% lebih kecil dari GIF,
+/// seamless loop tanpa delay.
 class BannerMedia {
-  final String tipe; // 'gif' | 'video'
-  final String url; // berkas asli (gif/mp4)
-  final String gif; // URL sajian GIF animasi (untuk video = f_gif)
+  final String tipe; // 'gif' | 'video' | 'webp'
+  final String url; // berkas asli / primary display (webp preferred)
+  final String gif; // fallback GIF
+  final String webp; // primary Animated WebP (Discord Nitro style)
 
-  const BannerMedia({required this.tipe, required this.url, required this.gif});
+  const BannerMedia({
+    required this.tipe,
+    required this.url,
+    required this.gif,
+    String? webp,
+  }) : webp = webp ?? gif;
+
+  /// URL terbaik untuk ditampilkan: WebP animasi dulu (tajam, alpha halus),
+  /// baru GIF fallback, baru url legacy.
+  String get displayUrl => webp.isNotEmpty ? webp : (gif.isNotEmpty ? gif : url);
+  String get displayGifFallback => gif.isNotEmpty ? gif : url;
+  bool get isAnimatedWebP => webp.toLowerCase().endsWith('.webp') || webp.contains('.webp') || tipe == 'webp';
+  bool get isVideoOrigin => tipe == 'video';
 
   /// Server menyimpan kolom `banner_media` sebagai TEKS JSON; kadang sudah
   /// terurai jadi Map oleh klien JSON — terima keduanya.
@@ -28,16 +52,28 @@ class BannerMedia {
       } else if (v is Map) {
         m = Map<String, dynamic>.from(v);
       }
-      if (m == null || (m['url'] ?? '').toString().isEmpty) return null;
+      if (m == null) return null;
+      final url = (m['url'] ?? m['webp'] ?? m['gif'] ?? '').toString();
+      if (url.isEmpty) return null;
+      final gif = (m['gif'] ?? m['url']).toString();
+      final webp = (m['webp'] ?? m['url'] ?? gif).toString();
       return BannerMedia(
-        tipe: (m['tipe'] ?? 'gif').toString(),
-        url: m['url'].toString(),
-        gif: (m['gif'] ?? m['url']).toString(),
+        tipe: (m['tipe'] ?? (webp.endsWith('.webp') ? 'webp' : 'gif')).toString(),
+        url: url,
+        gif: gif,
+        webp: webp,
       );
     } catch (_) {
       return null;
     }
   }
+
+  Map<String, dynamic> toJson() => {
+        'tipe': tipe,
+        'url': url,
+        'gif': gif,
+        'webp': webp,
+      };
 }
 
 class UserProfile {
@@ -176,13 +212,7 @@ class UserProfile {
         'foto': foto,
         'bio': bio,
         'banner': banner,
-        'banner_media': bannerMedia == null
-            ? null
-            : {
-                'tipe': bannerMedia!.tipe,
-                'url': bannerMedia!.url,
-                'gif': bannerMedia!.gif,
-              },
+        'banner_media': bannerMedia == null ? null : bannerMedia!.toJson(),
         'bingkai': bingkai,
         'username': username,
         'nama_diubah_pada': namaDiubahPada,
@@ -952,6 +982,8 @@ class SesiMain {
   final String status; // menyiapkan | siap | pairing | berjalan | selesai | gagal
   final String? host;
   final String? hostLan;
+  final String? tunnelHost; // Cloudflare Tunnel tanpa Tailscale
+  final String? relayHost; // Custom UDP relay (Fly.io)
   final String? catatan;
   final int durasiMenit;
   final DateTime? mulai;
@@ -972,6 +1004,8 @@ class SesiMain {
     this.agenId,
     this.host,
     this.hostLan,
+    this.tunnelHost,
+    this.relayHost,
     this.catatan,
     this.durasiMenit = 60,
     this.mulai,
@@ -994,6 +1028,8 @@ class SesiMain {
         host: (j['host'] as String?)?.isNotEmpty == true ? j['host'] : null,
         hostLan:
             (j['host_lan'] as String?)?.isNotEmpty == true ? j['host_lan'] : null,
+        tunnelHost: (j['tunnel_host'] as String?)?.isNotEmpty == true ? j['tunnel_host'] : null,
+        relayHost: (j['relay_host'] as String?)?.isNotEmpty == true ? j['relay_host'] : null,
         catatan: (j['catatan'] as String?)?.isNotEmpty == true ? j['catatan'] : null,
         durasiMenit: j['durasi_menit'] ?? 60,
         mulai: DateTime.tryParse('${j['mulai']}'.replaceFirst(' ', 'T')),
@@ -1281,8 +1317,11 @@ class IkutanItem {
   final String? foto;
   const IkutanItem({required this.id, required this.nama, this.foto});
   factory IkutanItem.fromJson(Map<String, dynamic> j) => IkutanItem(
-    id: j['id'] as String, nama: j['nama'] as String? ?? '', foto: j['foto'] as String?,
+    id: j['id'] as String? ?? j['user_id'] as String? ?? '',
+    nama: j['nama'] as String? ?? '',
+    foto: j['foto'] as String?,
   );
+  Map<String, dynamic> toJson() => {'id': id, 'nama': nama, 'foto': foto};
 }
 
 class DmPesan {
@@ -1322,6 +1361,21 @@ class DmPesan {
 
   bool dariSaya(String sayaId) => dariId == sayaId;
   DateTime get tanggal => DateTime.fromMillisecondsSinceEpoch(waktu);
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'dari_id': dariId,
+    'ke_id': keId,
+    'teks': teks,
+    'audio': audio,
+    'durasi': durasi,
+    'gambar': gambar,
+    'tipe': tipe,
+    'dibaca': dibaca ? 1 : 0,
+    'waktu': waktu,
+    'dari_nama': dariNama,
+    'dari_foto': dariFoto,
+  };
 }
 
 
@@ -1681,4 +1735,146 @@ class UnitLive {
   String get ram => '${spec['ram_total_gb'] ?? ''}';
   String get gpu => '${spec['gpu'] ?? ''}';
   String get osVersi => '${spec['os_versi'] ?? ''}';
+}
+
+/// Item Story di Feed (berlaku 24 jam) untuk teman/pengikut
+/// Batch Q: editor lengkap — gaya teks, warna, align, background, label, filter, trim
+class StoryItem {
+  final String id;
+  final String userId;
+  final String nama;
+  final String? foto;
+  final String? bingkai;
+  final String? mediaUrl;
+  final String tipe; // 'teks', 'gambar', 'video'
+  final String teks;
+  final String bgGradient; // 'ungu', 'emas', 'neon', 'senja', 'cyber', 'solid', 'image'
+  final String privasi; // 'teman', 'publik'
+  final int likes;
+  final int reposts;
+  final bool sudahLike;
+  final DateTime dibuat;
+  final DateTime berakhir;
+  final bool punyaSaya;
+
+  // Batch Q editor fields
+  final String gayaTeks; // normal, bold, italic, bold_italic, neon, pelangi, ketik, ombak, retro, minimal
+  final String warnaTeks; // hex
+  final int ukuranTeks; // 14-48
+  final String alignTeks; // left, center, right
+  final String bgType; // gradient, solid, image, video
+  final String bgWarna; // hex solid
+  final String? bgImageUrl;
+  final bool teksBg;
+  final String teksBgWarna;
+  final String label; // JSON array label: location, mention, hashtag
+  final double trimStart;
+  final double trimEnd;
+  final String filter; // normal, bw, sepia, vintage, vivid, blur, warm, cool
+  final double durasiVideo;
+
+  StoryItem({
+    required this.id,
+    required this.userId,
+    required this.nama,
+    this.foto,
+    this.bingkai,
+    this.mediaUrl,
+    required this.tipe,
+    required this.teks,
+    this.bgGradient = 'ungu',
+    this.privasi = 'teman',
+    this.likes = 0,
+    this.reposts = 0,
+    this.sudahLike = false,
+    required this.dibuat,
+    required this.berakhir,
+    this.punyaSaya = false,
+    this.gayaTeks = 'normal',
+    this.warnaTeks = '#FFFFFF',
+    this.ukuranTeks = 21,
+    this.alignTeks = 'center',
+    this.bgType = 'gradient',
+    this.bgWarna = '',
+    this.bgImageUrl,
+    this.teksBg = true,
+    this.teksBgWarna = '#00000073',
+    this.label = '',
+    this.trimStart = 0,
+    this.trimEnd = 0,
+    this.filter = 'normal',
+    this.durasiVideo = 0,
+  });
+
+  StoryItem copyWith({
+    int? likes,
+    int? reposts,
+    bool? sudahLike,
+  }) =>
+      StoryItem(
+        id: id,
+        userId: userId,
+        nama: nama,
+        foto: foto,
+        bingkai: bingkai,
+        mediaUrl: mediaUrl,
+        tipe: tipe,
+        teks: teks,
+        bgGradient: bgGradient,
+        privasi: privasi,
+        likes: likes ?? this.likes,
+        reposts: reposts ?? this.reposts,
+        sudahLike: sudahLike ?? this.sudahLike,
+        dibuat: dibuat,
+        berakhir: berakhir,
+        punyaSaya: punyaSaya,
+        gayaTeks: gayaTeks,
+        warnaTeks: warnaTeks,
+        ukuranTeks: ukuranTeks,
+        alignTeks: alignTeks,
+        bgType: bgType,
+        bgWarna: bgWarna,
+        bgImageUrl: bgImageUrl,
+        teksBg: teksBg,
+        teksBgWarna: teksBgWarna,
+        label: label,
+        trimStart: trimStart,
+        trimEnd: trimEnd,
+        filter: filter,
+        durasiVideo: durasiVideo,
+      );
+
+  factory StoryItem.fromJson(Map<String, dynamic> j) => StoryItem(
+        id: '${j['id'] ?? ''}',
+        userId: '${j['user_id'] ?? ''}',
+        nama: '${j['nama'] ?? 'Pengguna'}',
+        foto: j['foto'] as String?,
+        bingkai: j['bingkai'] as String?,
+        mediaUrl: j['media_url'] as String?,
+        tipe: '${j['tipe'] ?? 'teks'}',
+        teks: '${j['teks'] ?? ''}',
+        bgGradient: '${j['bg_gradient'] ?? 'ungu'}',
+        privasi: '${j['privasi'] ?? 'teman'}',
+        likes: (j['likes'] as num?)?.toInt() ?? 0,
+        reposts: (j['reposts'] as num?)?.toInt() ?? 0,
+        sudahLike: j['sudah_like'] == true || j['sudah_like'] == 1,
+        dibuat: DateTime.tryParse('${j['dibuat'] ?? ''}') ?? DateTime.now(),
+        berakhir: DateTime.tryParse('${j['berakhir'] ?? ''}') ??
+            DateTime.now().add(const Duration(hours: 24)),
+        punyaSaya: j['punya_saya'] == true,
+        gayaTeks: '${j['gaya_teks'] ?? 'normal'}',
+        warnaTeks: '${j['warna_teks'] ?? '#FFFFFF'}',
+        ukuranTeks: (j['ukuran_teks'] as num?)?.toInt() ?? 21,
+        alignTeks: '${j['align_teks'] ?? 'center'}',
+        bgType: '${j['bg_type'] ?? 'gradient'}',
+        bgWarna: '${j['bg_warna'] ?? ''}',
+        bgImageUrl: j['bg_image_url'] as String?,
+        teksBg: (j['teks_bg'] as num?)?.toInt() != 0 && j['teks_bg'] != false,
+        teksBgWarna: '${j['teks_bg_warna'] ?? '#00000073'}',
+        label: '${j['label'] ?? ''}',
+        trimStart: (j['trim_start'] as num?)?.toDouble() ?? 0,
+        trimEnd: (j['trim_end'] as num?)?.toDouble() ?? 0,
+        filter: '${j['filter'] ?? 'normal'}',
+        durasiVideo: (j['durasi_video'] as num?)?.toDouble() ?? 0,
+      );
 }

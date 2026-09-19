@@ -12,6 +12,7 @@ import '../widgets/error_state.dart';
 import 'akun_screen.dart';
 import 'cs_screen.dart';
 import 'favorit_screen.dart';
+import 'follows_screen.dart';
 import 'leaderboard_screen.dart';
 import 'livestream_screen.dart';
 import 'notifikasi_screen.dart';
@@ -93,9 +94,9 @@ class HomeScreen extends StatelessWidget {
               BannerSlider(items: s.banners),
 
               SectionHeader(
-                'Akun Terlaris',
-                sub: 'Kredensial dikirim otomatis',
-                aksi: 'Semua',
+                'Produk & Akun Toko',
+                sub: 'Kredensial instan dikirim otomatis',
+                aksi: 'Ke Toko',
                 onAksi: () => Navigator.push(context, xyRoute(const AkunScreen())),
               ),
               ...s.produk.take(3).toList().asMap().entries.map(
@@ -171,6 +172,21 @@ class _Header extends StatelessWidget {
         ]),
       ),
       LiveDot(state: koneksi),
+      const SizedBox(width: 6),
+      // Pesan & Pertemanan — akses cepat ke teman yang diikuti & pesan pribadi
+      Pressable(
+        onTap: () => Navigator.push(context, xyRoute(const FollowsScreen())),
+        child: Container(
+          width: 42,
+          height: 42,
+          decoration: BoxDecoration(
+            color: XyTheme.of(context).surface,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: XyTheme.of(context).line),
+          ),
+          child: const Icon(Icons.people_alt_outlined, size: 20),
+        ),
+      ),
       const SizedBox(width: 6),
       // CS — chat langsung ke customer service
       Pressable(

@@ -312,7 +312,16 @@ export default function LivestreamOperationsPage() {
     {!loading && tab === "session" && <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
       {lives.map(l => <div key={l.id} className="xy-card rounded-[15px] p-4">
         <div className="flex items-start justify-between gap-2"><div><div className="font-semibold text-[#1E1B2E]">{l.title}</div>
-          <div className="text-[11px] text-[#7C738F] mt-1">{l.creator_name} · {l.game} · {l.agen_nama || l.agen_id}</div></div><Badge value={l.status}/></div>
+          <div className="text-[11px] text-[#7C738F] mt-1 flex items-center gap-1.5 flex-wrap">
+            <span>{l.creator_name} · {l.game}</span>
+            {l.agen_id === "agen_mobile" ? (
+              <span className="inline-flex px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-700 font-semibold text-[10px]">
+                Mobile Stream (HP)
+              </span>
+            ) : (
+              <span>· {l.agen_nama || l.agen_id || "PC Rental"}</span>
+            )}
+          </div></div><Badge value={l.status}/></div>
         <div className="grid grid-cols-3 gap-2 mt-3 text-center"><div className="bg-[#F8F7FC] rounded-lg p-2"><Eye size={13} className="mx-auto text-[#7C3AED]"/><b>{l.viewers || 0}</b><small className="block text-[#7C738F]">aktif</small></div>
           <div className="bg-[#F8F7FC] rounded-lg p-2"><Users size={13} className="mx-auto text-[#7C3AED]"/><b>{l.viewer_peak || 0}</b><small className="block text-[#7C738F]">puncak</small></div>
           <div className="bg-[#F8F7FC] rounded-lg p-2"><HeartHandshake size={13} className="mx-auto text-pink-600"/><b>{rp(l.gross_tip)}</b><small className="block text-[#7C738F]">gross</small></div></div>
@@ -324,6 +333,16 @@ export default function LivestreamOperationsPage() {
         {((l.provider_input_uid && !l.provider_deleted_at) || ["queued","starting","live","ending"].includes(l.status) || (l.status === "failed" && Number(l.cleanup_pending) === 1)) && <div className="flex gap-2 mt-3">
           {l.provider_input_uid && !l.provider_deleted_at && <button onClick={() => checkProvider(l)} disabled={!!busy} className="flex-1 h-9 rounded-lg border border-[#E9E3F5] text-[#7C3AED] font-semibold text-xs disabled:opacity-50"><ShieldCheck size={12} className="inline"/> {busy === `provider-${l.id}` ? "Memeriksa…" : "Cek provider"}</button>}
           {(["queued","starting","live","ending"].includes(l.status) || (l.status === "failed" && Number(l.cleanup_pending) === 1)) && <button onClick={() => { if(window.confirm("Putus ingest dan akhiri siaran ini?")) act(`end-${l.id}`, () => adminFetch(`/api/admin/livestream/sessions/${l.id}/end`,{method:"POST",body:{reason:"Diakhiri dari dashboard operasi"}}), "Penghentian ingest dan cleanup OBS telah diantrikan."); }} disabled={!!busy} className="flex-1 h-9 rounded-lg bg-rose-600 text-white font-semibold text-xs disabled:opacity-50"><Square size={12} className="inline"/> Akhiri</button>}
+          {["live", "starting"].includes(l.status) && (
+            <a
+              href={`https://api.xycloud.my.id/live/watch/${l.id}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="h-9 px-3 rounded-lg bg-[#7C3AED] text-white font-semibold text-xs flex items-center justify-center gap-1 hover:bg-[#6D28D9]"
+            >
+              <Eye size={12} /> Buka Player
+            </a>
+          )}
         </div>}
       </div>)}
       {!lives.length && <div className="xy-card rounded-xl p-8 text-center text-[#7C738F]">Belum ada riwayat siaran.</div>}

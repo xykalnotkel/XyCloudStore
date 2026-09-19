@@ -43,9 +43,9 @@ void main() {
     await tester.pump();
 
     expect(find.byType(XyCard), findsNothing);
-    final daftar = tester.state<ScrollableState>(find.byType(Scrollable).first);
-    daftar.position.jumpTo(daftar.position.maxScrollExtent);
-    await tester.pump();
+    final scrollable = find.byType(Scrollable).first;
+    await tester.scrollUntilVisible(find.text('Hapus Akun'), 200.0, scrollable: scrollable);
+    await tester.pumpAndSettle();
     expect(find.text('Hapus Akun'), findsOneWidget);
     expect(find.text('Keluar'), findsOneWidget);
     expect(tester.takeException(), isNull);

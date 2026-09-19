@@ -14,35 +14,46 @@ import { setInputLivestream } from './livestream.js';
  *
  * @returns {string|null} host (dengan port bila disebut) atau null bila tidak ada calon sah
  */
+export function isPrivateIp(h) {
+  if (!h) return false;
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(h)) {
+    const p = h.split('.').map(Number);
+    if (p[0] === 10) return true; // 10.0.0.0/8
+    if (p[0] === 172 && p[1] >= 16 && p[1] <= 31) return true; // 172.16.0.0/12
+    if (p[0] === 192 && p[1] === 168) return true; // 192.168.0.0/16
+    if (p[0] === 127) return true; // 127.0.0.0/8
+    if (p[0] === 169 && p[1] === 254) return true; // 169.254.0.0/16
+  }
+  return false;
+}
+
 export function normalisasiHostStream(raw, fallback){
   const portSah=p=>{if(p==null)return true;const n=Number(p);return Number.isInteger(n)&&n>=1&&n<=65535;};
-  /**
-   * Pisahkan `host` dan `:port` opsional.
-   * Tiga bentuk diterima: `host`, `host:port`, dan `[ipv6]:port` / `ipv6` polos.
-   * Bentuk yang dikembalikan selalu bisa diurai `NativeStreaming.address()`.
-   */
   const pisah=v=>{
     const t=String(v||'').trim();
     if(!t||/\s/.test(t))return null;
-    // [ipv6] atau [ipv6]:port — kurung siku dipertahankan supaya tidak ambigu
     const siku=/^\[([0-9a-fA-F:]{2,})\](?::(\d{1,5}))?$/.exec(t);
     if(siku)return portSah(siku[2])?{host:siku[1],port:siku[2]||null,siku:true}:null;
-    // IPv6 polos: lebih dari satu titik dua, hanya heksadesimal + ':' (tanpa port,
-    // karena tidak bisa dibedakan dari bagian alamat). Klien membungkusnya sendiri.
     if((t.match(/:/g)||[]).length>1)return /^[0-9a-fA-F:]{2,}$/.test(t)?{host:t,port:null}:null;
-    // host atau host:port
     const m=/^([^\s:]+)(?::(\d{1,5}))?$/.exec(t);
     if(!m||!portSah(m[2]))return null;
     return {host:m[1],port:m[2]||null};
   };
-  /** Host saja (tanpa port) harus IP atau FQDN, bukan nama mesin lokal. */
   const okHost=h=>{
     if(!h)return false;
-    if(/^\d{1,3}(\.\d{1,3}){3}$/.test(h))return h.split('.').every(o=>Number(o)<=255);   // IPv4
-    if(h.includes(':'))return /^[0-9a-fA-F:]{2,}$/.test(h);                              // IPv6
-    return h.includes('.')&&h.length<253&&/^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$/.test(h); // FQDN
+    if(/^\d{1,3}(\.\d{1,3}){3}$/.test(h))return h.split('.').every(o=>Number(o)<=255);
+    if(h.includes(':'))return /^[0-9a-fA-F:]{2,}$/.test(h);
+    return h.includes('.')&&h.length<253&&/^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$/.test(h);
   };
-  for(const calon of [raw,fallback]){
+
+  const rawP = pisah(raw);
+  const fbP = pisah(fallback);
+  let daftarCalon = [raw, fallback];
+  if (rawP && okHost(rawP.host) && isPrivateIp(rawP.host) && fbP && okHost(fbP.host) && !isPrivateIp(fbP.host)) {
+    daftarCalon = [fallback, raw];
+  }
+
+  for(const calon of daftarCalon){
     const p=pisah(calon);
     if(!p||!okHost(p.host))continue;
     const host=p.siku?`[${p.host}]`:p.host;
@@ -71,15 +82,32 @@ export async function probePortTcp(host,port,ms=6000){
     return terbuka;
   }catch(_){return false;}
 }
-// Lampirkan IP LAN agen (dari spec.ip_lan) ke baris sesi agar app bisa fallback
-// bila host publik tertutup firewall/NAT saat penyewa satu jaringan dengan unit.
+// Lampirkan IP LAN + tunnel_host + relay_host dari agen spec agar app bisa fallback
+// tanpa Tailscale: Tunnel Cloudflare (gratis, tanpa buka port) > Publik > Relay > LAN
 async function lampirkanHostLan(env,s){
   if(!s||!s.agen_id)return s;
   try{
-    const ag=await env.DB.prepare('SELECT spec FROM agen WHERE id=?').bind(s.agen_id).first();
-    const spec=ag&&ag.spec?JSON.parse(ag.spec):{};
+    const ag=await env.DB.prepare('SELECT spec, tunnel_host, relay_host, host FROM agen WHERE id=?').bind(s.agen_id).first();
+    if(!ag) return s;
+    const spec=ag.spec?JSON.parse(ag.spec):{};
     const lan=String(spec.ip_lan||'').split(',')[0].trim();
-    if(lan)s.host_lan=lan;
+    if(lan) s.host_lan=lan;
+    // Tunnel dari kolom agen.tunnel_host atau spec.tunnel_host (cloudflared)
+    const tunnel = String(ag.tunnel_host||spec.tunnel_host||spec.tunnel_url||'').trim();
+    if(tunnel) {
+      // Normalisasi: bisa URL https://xxx.trycloudflare.com → ambil host
+      try {
+        const u = new URL(tunnel);
+        s.tunnel_host = u.host;
+      } catch {
+        s.tunnel_host = tunnel;
+      }
+    }
+    // Relay custom UDP (Fly.io)
+    const relay = String(ag.relay_host||spec.relay_host||'').trim();
+    if(relay) s.relay_host = relay;
+    // Fallback host dari agen.host jika sesi.host kosong
+    if(!s.host && ag.host) s.host = ag.host;
   }catch(_){}
   return s;
 }
@@ -138,8 +166,8 @@ export async function mulaiSewa(env,userId,orderId){
   if(!host)fail('Unit belum bisa dihubungi. Tunggu agen online atau batalkan pesanan yang belum siap.',409);
   const key=id('s_');const menit=o.mulai&&o.berakhir?Math.max(1,Math.ceil((Date.parse(o.berakhir)-Date.now())/60000)):o.durasi_jam*60;
   await env.DB.batch([
-    env.DB.prepare(`INSERT INTO sesi(id,order_id,user_id,agen_id,status,durasi_menit,host)
-      SELECT ?,?,?,id,'menyiapkan',?,host FROM agen WHERE id=? AND (sesi_aktif IS NULL OR sesi_aktif='' OR sesi_aktif='order:'||?)
+    env.DB.prepare(`INSERT INTO sesi(id,order_id,user_id,agen_id,status,durasi_menit,host,host_lan,tunnel_host,relay_host)
+      SELECT ?,?,?,id,'menyiapkan',?,host,host_lan,tunnel_host,relay_host FROM agen WHERE id=? AND (sesi_aktif IS NULL OR sesi_aktif='' OR sesi_aktif='order:'||?)
       AND NOT EXISTS(SELECT 1 FROM sesi WHERE order_id=? AND status NOT IN ('selesai','gagal'))`).bind(key,o.id,userId,menit,host.id,o.id,o.id),
     env.DB.prepare('UPDATE agen SET sesi_aktif=? WHERE id=? AND EXISTS(SELECT 1 FROM sesi WHERE id=?)').bind(key,host.id,key),
     env.DB.prepare("UPDATE orders SET status='provisioning',agen_id=? WHERE id=? AND EXISTS(SELECT 1 FROM sesi WHERE id=?)").bind(host.id,o.id,key),
@@ -207,16 +235,20 @@ export async function konfirmasiAgen(env,agent,command,b){
       status='siap';const o=await env.DB.prepare('SELECT mulai,berakhir FROM orders WHERE id=?').bind(s.order_id).first();
       const mulai=o.mulai||waktu,sampai=o.berakhir||new Date(Date.now()+s.durasi_menit*60000).toISOString();
       const hostStream=normalisasiHostStream(b.host, agent.host);
+      const tunnelHost = b.tunnel_host ? String(b.tunnel_host).trim().slice(0,200) : null;
+      const relayHost = b.relay_host ? String(b.relay_host).trim().slice(0,200) : null;
+      const hostLan = b.host_lan ? String(b.host_lan).trim().slice(0,100) : null;
       if(hostStream){
         await env.DB.batch([
-          env.DB.prepare("UPDATE sesi SET status='siap',mulai=?,berakhir=?,host=?,catatan='Host siap untuk koneksi streaming' WHERE id=?").bind(mulai,sampai,hostStream,s.id),
+          env.DB.prepare("UPDATE sesi SET status='siap',mulai=?,berakhir=?,host=?,host_lan=COALESCE(?,host_lan),tunnel_host=COALESCE(?,tunnel_host),relay_host=COALESCE(?,relay_host),catatan='Host siap untuk koneksi streaming (tunnel/relay supported)' WHERE id=?").bind(mulai,sampai,hostStream,hostLan,tunnelHost,relayHost,s.id),
           env.DB.prepare("UPDATE orders SET status='aktif',progress=100,mulai=?,berakhir=?,host=? WHERE id=? AND status IN ('dibayar','provisioning','aktif')").bind(mulai,sampai,hostStream,s.order_id),
-          env.DB.prepare('UPDATE agen SET host=? WHERE id=?').bind(hostStream, agent.id),
+          env.DB.prepare('UPDATE agen SET host=?, host_lan=COALESCE(?,host_lan), tunnel_host=COALESCE(?,tunnel_host), relay_host=COALESCE(?,relay_host) WHERE id=?').bind(hostStream, hostLan, tunnelHost, relayHost, agent.id),
         ]);
       } else {
         await env.DB.batch([
-          env.DB.prepare("UPDATE sesi SET status='siap',mulai=?,berakhir=?,host=COALESCE(host, ?),catatan=? WHERE id=?").bind(mulai,sampai,agent.host||null,'Host siap. Set IP/host publik di Unit (bukan nama PC Windows).',s.id),
+          env.DB.prepare("UPDATE sesi SET status='siap',mulai=?,berakhir=?,host=COALESCE(host, ?),host_lan=COALESCE(?,host_lan),tunnel_host=COALESCE(?,tunnel_host),relay_host=COALESCE(?,relay_host),catatan=? WHERE id=?").bind(mulai,sampai,agent.host||null,hostLan,tunnelHost,relayHost,'Host siap. Set IP/host publik di Unit (bukan nama PC Windows). Tunnel/Relay tanpa Tailscale didukung.',s.id),
           env.DB.prepare("UPDATE orders SET status='aktif',progress=100,mulai=?,berakhir=?,host=COALESCE(host, ?) WHERE id=? AND status IN ('dibayar','provisioning','aktif')").bind(mulai,sampai,agent.host||null,s.order_id),
+          env.DB.prepare('UPDATE agen SET host_lan=COALESCE(?,host_lan), tunnel_host=COALESCE(?,tunnel_host), relay_host=COALESCE(?,relay_host) WHERE id=?').bind(hostLan, tunnelHost, relayHost, agent.id),
         ]);
       }
     

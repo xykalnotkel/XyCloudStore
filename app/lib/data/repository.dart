@@ -50,6 +50,7 @@ abstract class XyRepository {
   Future<bool> ubahFavorit(String produkId);
   Future<List<Ulasan>> ulasanPaket(String planId);
   Future<void> kirimUlasanPaket({required String planId, required int rating, String? komentar, String? orderId});
+  Future<Map<String, dynamic>> antreSewa({required String planId, required int jam});
   Future<Map<String, dynamic>> dataSaya();
 
   /// Dokumen legal: 'syarat' atau 'privasi'.
@@ -82,6 +83,8 @@ abstract class XyRepository {
   Future<Map<String, dynamic>> laporPengguna(String id, String alasan);
   Future<List<BisukanItem>> bisukanDaftar();
   Future<void> gantiPassword(String lama, String baru);
+  Future<List<Map<String, dynamic>>> daftarPerangkat();
+  Future<bool> cabutPerangkat({String? deviceId});
 
   // ---------- profil lengkap & dompet sosial (Batch I) ----------
   /// Unggah GIF/MP4 sebagai banner profil (server otomatis jadikan GIF).
@@ -138,6 +141,7 @@ abstract class XyRepository {
     required String title,
     required String game,
     required bool micConsent,
+    String sumber = 'kamera',
   });
   Future<String> liveWatch(String id);
   Future<Map<String, dynamic>> liveTip(String id, {
@@ -166,6 +170,34 @@ abstract class XyRepository {
   Future<void> forumHapusBalasan(String id);
   Future<void> hapusPesan(String id);
   Future<void> hapusSemuaPesan();
+
+  // ---------- stories (feed) ----------
+  Future<List<StoryItem>> ambilStories();
+  Future<StoryItem> buatStory({
+    required String teks,
+    String? mediaUrl,
+    String tipe = 'teks',
+    String bgGradient = 'ungu',
+    String privasi = 'teman',
+    String gayaTeks = 'normal',
+    String warnaTeks = '#FFFFFF',
+    int ukuranTeks = 21,
+    String alignTeks = 'center',
+    String bgType = 'gradient',
+    String bgWarna = '',
+    String? bgImageUrl,
+    bool teksBg = true,
+    String teksBgWarna = '#00000073',
+    String label = '',
+    double trimStart = 0,
+    double trimEnd = 0,
+    String filter = 'normal',
+    double durasiVideo = 0,
+  });
+  Future<void> hapusStory(String id);
+  Future<Map<String, dynamic>> likeStory(String id);
+  Future<Map<String, dynamic>> repostStory(String id);
+  Future<void> balasStory(String id, String pesan);
 
   // ---------- pemberitahuan ----------
   Future<Map<String, dynamic>> notifikasi();
@@ -332,6 +364,13 @@ class RemoteRepository implements XyRepository {
         if (komentar != null) 'komentar': komentar,
         if (orderId != null) 'order_id': orderId,
       });
+
+  @override
+  Future<Map<String, dynamic>> antreSewa({required String planId, required int jam}) async =>
+      Map<String, dynamic>.from(await api.post('/sewa/antre', {
+        'plan_id': planId,
+        'durasi_jam': jam,
+      }));
 
   @override
   Future<Map<String, dynamic>> dataSaya() async => Map<String, dynamic>.from(await api.get('/me/data'));
@@ -519,6 +558,23 @@ class RemoteRepository implements XyRepository {
   Future<void> gantiPassword(String lama, String baru) async =>
       api.post('/me/password', {'lama': lama, 'baru': baru});
 
+  @override
+  Future<List<Map<String, dynamic>>> daftarPerangkat() async {
+    final res = await api.get('/user/devices');
+    if (res is Map && res['devices'] is List) {
+      return (res['devices'] as List)
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+    }
+    return [];
+  }
+
+  @override
+  Future<bool> cabutPerangkat({String? deviceId}) async {
+    final res = await api.post('/user/devices/revoke', {'device_id': deviceId});
+    return res is Map && res['ok'] == true;
+  }
+
   // ---------- HUD streaming & preset komunitas (Batch P) ----------
   @override
   Future<List<HudPresetPublik>> hudPresetPublik({String urut = 'populer'}) async =>
@@ -594,10 +650,12 @@ class RemoteRepository implements XyRepository {
     required String title,
     required String game,
     required bool micConsent,
+    String sumber = 'kamera',
   }) async => LivestreamItem.fromJson(Map<String, dynamic>.from(
       await api.post('/live/start', {
         'title': title,
         'game': game,
+        'sumber': sumber,
         'mic_consent': micConsent,
         'recording_consent': true,
         'safe_scene_ack': true,
@@ -702,6 +760,76 @@ class RemoteRepository implements XyRepository {
 
   @override
   Future<void> hapusSemuaPesan() async => api.delete('/cs/messages');
+
+  @override
+  Future<List<StoryItem>> ambilStories() async {
+    final res = await api.get('/stories');
+    if (res is List) {
+      return res.map((e) => StoryItem.fromJson(Map<String, dynamic>.from(e))).toList();
+    }
+    return [];
+  }
+
+  @override
+  Future<StoryItem> buatStory({
+    required String teks,
+    String? mediaUrl,
+    String tipe = 'teks',
+    String bgGradient = 'ungu',
+    String privasi = 'teman',
+    String gayaTeks = 'normal',
+    String warnaTeks = '#FFFFFF',
+    int ukuranTeks = 21,
+    String alignTeks = 'center',
+    String bgType = 'gradient',
+    String bgWarna = '',
+    String? bgImageUrl,
+    bool teksBg = true,
+    String teksBgWarna = '#00000073',
+    String label = '',
+    double trimStart = 0,
+    double trimEnd = 0,
+    String filter = 'normal',
+    double durasiVideo = 0,
+  }) async {
+    final res = await api.post('/stories', {
+      'teks': teks,
+      if (mediaUrl != null) 'media_url': mediaUrl,
+      'tipe': tipe,
+      'bg_gradient': bgGradient,
+      'privasi': privasi,
+      'gaya_teks': gayaTeks,
+      'warna_teks': warnaTeks,
+      'ukuran_teks': ukuranTeks,
+      'align_teks': alignTeks,
+      'bg_type': bgType,
+      'bg_warna': bgWarna,
+      if (bgImageUrl != null) 'bg_image_url': bgImageUrl,
+      'teks_bg': teksBg ? 1 : 0,
+      'teks_bg_warna': teksBgWarna,
+      'label': label,
+      'trim_start': trimStart,
+      'trim_end': trimEnd,
+      'filter': filter,
+      'durasi_video': durasiVideo,
+    });
+    return StoryItem.fromJson(Map<String, dynamic>.from(res));
+  }
+
+  @override
+  Future<void> hapusStory(String id) async => api.delete('/stories/$id');
+
+  @override
+  Future<Map<String, dynamic>> likeStory(String id) async =>
+      Map<String, dynamic>.from(await api.post('/stories/$id/like', {}));
+
+  @override
+  Future<Map<String, dynamic>> repostStory(String id) async =>
+      Map<String, dynamic>.from(await api.post('/stories/$id/repost', {}));
+
+  @override
+  Future<void> balasStory(String id, String pesan) async =>
+      api.post('/stories/$id/komen', {'pesan': pesan});
 
   @override
   Future<Map<String, dynamic>> notifikasi() async =>
@@ -892,6 +1020,20 @@ class MockRepository implements XyRepository {
   }) async {}
 
   @override
+  Future<Map<String, dynamic>> antreSewa({required String planId, required int jam}) async => {
+        'ok': true,
+        'antrean': {
+          'id': 'q_mock',
+          'plan_id': planId,
+          'durasi_jam': jam,
+          'nomor': 1,
+          'prioritas_label': 'VIP Priority',
+          'estimasi_menit': 20,
+        },
+        'pesan': 'Kamu berhasil masuk antrean unit PC!'
+      };
+
+  @override
   Future<Map<String, dynamic>> dataSaya() => _delay({'profil': const {}}, 300);
 
   @override
@@ -1008,6 +1150,21 @@ class MockRepository implements XyRepository {
   @override
   Future<void> gantiPassword(String lama, String baru) async {}
 
+  @override
+  Future<List<Map<String, dynamic>>> daftarPerangkat() => _delay(<Map<String, dynamic>>[
+        {
+          'device_id': 'mock-dev-1',
+          'kind': 'android',
+          'model': 'Samsung Galaxy S24 Ultra',
+          'first_login': DateTime.now().subtract(const Duration(days: 12)).toIso8601String(),
+          'last_seen': DateTime.now().toIso8601String(),
+          'is_current': true,
+        },
+      ], 200);
+
+  @override
+  Future<bool> cabutPerangkat({String? deviceId}) => _delay(true, 200);
+
   // ---------- HUD streaming & preset komunitas (Batch P) ----------
   @override
   Future<List<HudPresetPublik>> hudPresetPublik({String urut = 'populer'}) async =>
@@ -1084,7 +1241,7 @@ class MockRepository implements XyRepository {
       _delay({'ok': true, 'status': 'pending'}, 350);
 
   @override
-  Future<LivestreamItem> liveStart({required String title, required String game, required bool micConsent}) async =>
+  Future<LivestreamItem> liveStart({required String title, required String game, required bool micConsent, String sumber = 'kamera'}) async =>
       _delay(LivestreamItem(
         id: 'live_demo_baru', creatorId: MockData.user.id,
         creatorName: MockData.user.nama, title: title, game: game,
@@ -1219,6 +1376,93 @@ class MockRepository implements XyRepository {
 
   @override
   Future<void> hapusSemuaPesan() async {}
+
+  @override
+  Future<List<StoryItem>> ambilStories() => _delay(<StoryItem>[
+        StoryItem(
+          id: 'st_demo',
+          userId: 'u_demo',
+          nama: 'Kirana',
+          foto: null,
+          bingkai: 'sakura',
+          tipe: 'teks',
+          teks: 'Selamat datang di Feed & Story XyCloudStore!',
+          bgGradient: 'ungu',
+          privasi: 'publik',
+          dibuat: DateTime.now(),
+          berakhir: DateTime.now().add(const Duration(hours: 24)),
+          punyaSaya: false,
+        ),
+      ], 200);
+
+  @override
+  Future<StoryItem> buatStory({
+    required String teks,
+    String? mediaUrl,
+    String tipe = 'teks',
+    String bgGradient = 'ungu',
+    String privasi = 'teman',
+    String gayaTeks = 'normal',
+    String warnaTeks = '#FFFFFF',
+    int ukuranTeks = 21,
+    String alignTeks = 'center',
+    String bgType = 'gradient',
+    String bgWarna = '',
+    String? bgImageUrl,
+    bool teksBg = true,
+    String teksBgWarna = '#00000073',
+    String label = '',
+    double trimStart = 0,
+    double trimEnd = 0,
+    String filter = 'normal',
+    double durasiVideo = 0,
+  }) =>
+      _delay(
+        StoryItem(
+          id: 'st_local',
+          userId: MockData.user.id,
+          nama: MockData.user.nama,
+          foto: MockData.user.foto,
+          bingkai: MockData.user.bingkai,
+          mediaUrl: mediaUrl,
+          tipe: tipe,
+          teks: teks,
+          bgGradient: bgGradient,
+          privasi: privasi,
+          dibuat: DateTime.now(),
+          berakhir: DateTime.now().add(const Duration(hours: 24)),
+          punyaSaya: true,
+          gayaTeks: gayaTeks,
+          warnaTeks: warnaTeks,
+          ukuranTeks: ukuranTeks,
+          alignTeks: alignTeks,
+          bgType: bgType,
+          bgWarna: bgWarna,
+          bgImageUrl: bgImageUrl,
+          teksBg: teksBg,
+          teksBgWarna: teksBgWarna,
+          label: label,
+          trimStart: trimStart,
+          trimEnd: trimEnd,
+          filter: filter,
+          durasiVideo: durasiVideo,
+        ),
+        200,
+      );
+
+  @override
+  Future<void> hapusStory(String id) => _delay(null, 100);
+
+  @override
+  Future<Map<String, dynamic>> likeStory(String id) =>
+      _delay({'ok': true, 'likes': 1, 'sudah_like': true}, 100);
+
+  @override
+  Future<Map<String, dynamic>> repostStory(String id) =>
+      _delay({'ok': true, 'repost_id': 'st_rep'}, 100);
+
+  @override
+  Future<void> balasStory(String id, String pesan) => _delay(null, 100);
 
   @override
   Future<Map<String, dynamic>> notifikasi() => _delay({'daftar': const [], 'belumDibaca': 0}, 200);

@@ -11,6 +11,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:record/record.dart';
 
+import '../../core/cache.dart';
 import '../../core/kompres.dart';
 import '../../core/motion.dart';
 import '../../core/theme.dart';
@@ -41,7 +42,7 @@ class _DmChatScreenState extends State<DmChatScreen> {
   final _rec = AudioRecorder();
 
   List<DmPesan> _pesan = [];
-  bool _memuat = true;
+  bool _memuat = false; // WA style: no spinner, cache dulu
   bool _kirim = false;
   String? _galat;
   Timer? _poll;
@@ -67,10 +68,31 @@ class _DmChatScreenState extends State<DmChatScreen> {
     _appState = context.read<AppState>();
     _dmRevisi = _appState.dmRevisi;
     _appState.addListener(_saatRealtime);
-    _muat();
+    _bacaSinggahanLaluMuat();
     // WebSocket adalah jalur utama; polling jarang ini hanya menutup celah saat
     // koneksi perangkat/proxy tidak mendukung upgrade.
     _poll = Timer.periodic(const Duration(seconds: 30), (_) => _muat(sunyi: true));
+  }
+
+  Future<void> _bacaSinggahanLaluMuat() async {
+    // WA style: tampilkan cache instant 0ms, tanpa spinner
+    try {
+      final lama = await Cache.daftar('dm_${widget.userId}');
+      if (lama.isNotEmpty && mounted) {
+        final parsed = lama.map((e) => DmPesan.fromJson(Map<String, dynamic>.from(e))).toList();
+        if (parsed.isNotEmpty && mounted) {
+          setState(() {
+            _pesan = parsed;
+            _memuat = false;
+          });
+          // auto scroll ke bawah ala WA
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (_scroll.hasClients) _scroll.jumpTo(_scroll.position.maxScrollExtent);
+          });
+        }
+      }
+    } catch (_) {}
+    if (mounted) await _muat(sunyi: true);
   }
 
   void _saatRealtime() {
@@ -110,6 +132,7 @@ class _DmChatScreenState extends State<DmChatScreen> {
         _memuat = false;
         _galat = null;
       });
+      unawaited(Cache.simpan('dm_${widget.userId}', daftar.map((m) => m.toJson()).toList()));
       if (adaBaru || daftar.any((m) => !m.dariSaya(s.user?.id ?? '') && !m.dibaca)) {
         unawaited(s.repo.dmBaca(widget.userId).catchError((_) => <String, dynamic>{}));
       }
@@ -131,16 +154,35 @@ class _DmChatScreenState extends State<DmChatScreen> {
   Future<void> _kirimTeks() async {
     final teks = _ctrl.text.trim();
     if (teks.isEmpty || _kirim) return;
-    setState(() => _kirim = true);
+    final sayaId = context.read<AppState>().user?.id ?? '';
+    // WA style: optimistic — tampil langsung 0ms tanpa tunggu server
+    final temp = DmPesan(
+      id: 'temp_${DateTime.now().millisecondsSinceEpoch}',
+      dariId: sayaId,
+      keId: widget.userId,
+      teks: teks,
+      tipe: 'teks',
+      dibaca: false,
+      waktu: DateTime.now().millisecondsSinceEpoch,
+      dariNama: null,
+    );
+    setState(() {
+      _pesan = [..._pesan, temp];
+      _kirim = true;
+    });
     _ctrl.clear();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scroll.hasClients) _scroll.animateTo(_scroll.position.maxScrollExtent, duration: const Duration(milliseconds: 180), curve: Curves.easeOut);
+    });
     try {
       await context.read<AppState>().repo.dmKirim(widget.userId, teks: teks);
       if (mounted) await _muat(sunyi: true);
     } catch (e) {
       if (mounted) {
+        // rollback optimistic
+        setState(() => _pesan = _pesan.where((p) => p.id != temp.id).toList());
         _ctrl.text = teks;
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('Gagal mengirim pesan.')));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Gagal mengirim pesan.')));
       }
     }
     if (mounted) setState(() => _kirim = false);
@@ -314,24 +356,23 @@ class _DmChatScreenState extends State<DmChatScreen> {
       ),
       body: Column(children: [
         Expanded(
-          child: _memuat
-              ? const Center(
-                  child: CircularProgressIndicator(color: XyTheme.primary))
-              : _galat != null
-                  ? Kosong(
-                      icon: Icons.wifi_off_rounded,
-                      judul: 'Waduh',
-                      sub: _galat,
-                      aksi: GradientButton(label: 'Coba Lagi', onPressed: _muat),
-                    )
-                  : _pesan.isEmpty
-                      ? Kosong(
+          child: _galat != null && _pesan.isEmpty
+              ? Kosong(
+                  icon: Icons.wifi_off_rounded,
+                  judul: 'Waduh',
+                  sub: _galat,
+                  aksi: GradientButton(label: 'Coba Lagi', onPressed: () => _muat(sunyi: false)),
+                )
+              : _pesan.isEmpty
+                  ? _memuat
+                      ? const _SkeletonChat() // WA style skeleton, bukan spinner
+                      : const Kosong(
                           icon: Icons.forum_outlined,
                           judul: 'Mulai percakapan',
-                          sub:
-                              'Kirim pesan, gambar, atau tahan tombol mic untuk pesan suara.',
+                          sub: 'Kirim pesan, gambar, atau tahan tombol mic untuk pesan suara.',
+                          ilustrasi: 'pesan',
                         )
-                      : ListView.builder(
+                  : ListView.builder(
                           controller: _scroll,
                           padding: const EdgeInsets.fromLTRB(14, 14, 14, 8),
                           itemCount: _pesan.length,
@@ -392,13 +433,12 @@ class _DmChatScreenState extends State<DmChatScreen> {
               ),
             ]),
           ),
-        // ---------- bar input ----------
+        // ---------- bar input ---------- TikTok no border WA style
         Container(
           padding: EdgeInsets.fromLTRB(
               12, 8, 12, 10 + MediaQuery.of(context).viewInsets.bottom),
-          decoration: BoxDecoration(
-            color: t.surface,
-            boxShadow: [BoxShadow(color: t.ink.withOpacity(.07), blurRadius: 22, offset: const Offset(0, -6))],
+          decoration: const BoxDecoration(
+            color: Color(0xFF0A0A0A),
           ),
           child: SafeArea(
             top: false,
@@ -420,20 +460,12 @@ class _DmChatScreenState extends State<DmChatScreen> {
                   onChanged: (_) => setState(() {}),
                   decoration: InputDecoration(
                     hintText: 'Tulis pesan…',
-                    contentPadding:
-                        const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(XyRadius.pill),
-                      borderSide: BorderSide(color: t.line),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(XyRadius.pill),
-                      borderSide: BorderSide(color: t.line),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(XyRadius.pill),
-                      borderSide: const BorderSide(color: XyTheme.primary, width: 1.6),
-                    ),
+                    filled: true,
+                    fillColor: const Color(0xFF1E1E1E),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(99), borderSide: BorderSide.none),
+                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(99), borderSide: BorderSide.none),
+                    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(99), borderSide: BorderSide.none),
                   ),
                   onSubmitted: (_) => _kirimTeks(),
                 ),
@@ -510,21 +542,13 @@ class _DmChatScreenState extends State<DmChatScreen> {
                   ),
                 )
               else
-                Container(
-                  width: 44,
-                  height: 44,
-                  decoration: const BoxDecoration(
-                      shape: BoxShape.circle, gradient: XyTheme.gradPrimary),
-                  child: IconButton(
-                    onPressed: _kirim ? null : _kirimTeks,
-                    icon: _kirim
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(
-                                strokeWidth: 2, color: Colors.white))
-                        : const Icon(Icons.send_rounded,
-                            color: Colors.white, size: 19),
+                Pressable(
+                  onTap: _kirim ? null : _kirimTeks,
+                  child: Container(
+                    width: 44,
+                    height: 44,
+                    decoration: const BoxDecoration(shape: BoxShape.circle, gradient: XyTheme.gradPrimary),
+                    child: const Icon(Icons.send_rounded, color: Colors.white, size: 19),
                   ),
                 ),
             ]),
@@ -626,7 +650,6 @@ class _Gelembung extends StatelessWidget {
           gradient: saya ? XyTheme.gradPrimary : null,
           color: saya ? null : t.surface,
           borderRadius: radius,
-          border: saya ? null : Border.all(color: t.line),
         ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           if (tunjukkanNama)
@@ -766,7 +789,6 @@ class _SuaraDmState extends State<_SuaraDm> {
           bottomLeft: Radius.circular(widget.saya ? 18 : 5),
           bottomRight: Radius.circular(widget.saya ? 5 : 18),
         ),
-        border: widget.saya ? null : Border.all(color: t.line),
       ),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         Material(
@@ -836,6 +858,33 @@ class _SuaraDmState extends State<_SuaraDm> {
               color: widget.msg.dibaca ? const Color(0xFF7DD3FC) : Colors.white70),
         ],
       ]),
+    );
+  }
+}
+
+/// Skeleton Chat ala WA — tanpa spinner, shimmer bubble
+class _SkeletonChat extends StatelessWidget {
+  const _SkeletonChat();
+  @override
+  Widget build(BuildContext context) {
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 8),
+      itemCount: 8,
+      itemBuilder: (_, i) {
+        final saya = i % 2 == 0;
+        return Padding(
+          padding: EdgeInsets.only(bottom: 9, left: saya ? 50 : 0, right: saya ? 0 : 50),
+          child: Align(
+            alignment: saya ? Alignment.centerRight : Alignment.centerLeft,
+            child: Container(
+              width: 180 + (i % 3) * 30,
+              height: 44,
+              decoration: BoxDecoration(color: const Color(0xFF1E1E1E), borderRadius: BorderRadius.circular(18)),
+              child: const Shimmer(width: double.infinity, height: double.infinity, radius: 18),
+            ),
+          ),
+        );
+      },
     );
   }
 }

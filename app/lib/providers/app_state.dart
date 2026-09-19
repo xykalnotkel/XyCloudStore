@@ -577,6 +577,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   bool liveMemuat = false;
   String? liveGalat;
   String? creatorLiveGalat;
+  LivestreamItem? liveAktifSaya;
 
   Future<void> muatLive({bool senyap = false}) async {
     await _muatLiveDenganHasil(senyap: senyap);
@@ -651,10 +652,12 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     required String title,
     required String game,
     required bool mic,
+    String sumber = 'kamera',
   }) async {
     try {
-      await _repo.liveStart(title: title, game: game, micConsent: mic);
+      liveAktifSaya = await _repo.liveStart(title: title, game: game, micConsent: mic, sumber: sumber);
       await muatLive(senyap: true);
+      notifyListeners();
       return null;
     } catch (e) {
       return _pesan(e);
@@ -664,7 +667,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   Future<String?> akhiriLivestream(String id) async {
     try {
       await _repo.liveEnd(id);
+      if (liveAktifSaya?.id == id) liveAktifSaya = null;
       await muatLive(senyap: true);
+      notifyListeners();
       return null;
     } catch (e) {
       return _pesan(e);
@@ -1277,9 +1282,203 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
+  Future<List<Map<String, dynamic>>> muatDaftarPerangkat() async {
+    try {
+      return await _repo.daftarPerangkat();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<bool> cabutAksesPerangkat({String? deviceId}) async {
+    try {
+      return await _repo.cabutPerangkat(deviceId: deviceId);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // ================= feed stories =================
+  List<StoryItem> stories = [];
+  bool storiesMemuat = false;
+
+  Future<void> muatStories() async {
+    if (storiesMemuat) return;
+    storiesMemuat = true;
+    notifyListeners();
+    try {
+      stories = await _repo.ambilStories();
+    } catch (_) {}
+    finally {
+      storiesMemuat = false;
+      notifyListeners();
+    }
+  }
+
+  Future<String?> buatStory({
+    required String teks,
+    String? mediaUrl,
+    String tipe = 'teks',
+    String bgGradient = 'ungu',
+    String privasi = 'teman',
+    String gayaTeks = 'normal',
+    String warnaTeks = '#FFFFFF',
+    int ukuranTeks = 21,
+    String alignTeks = 'center',
+    String bgType = 'gradient',
+    String bgWarna = '',
+    String? bgImageUrl,
+    bool teksBg = true,
+    String teksBgWarna = '#00000073',
+    String label = '',
+    double trimStart = 0,
+    double trimEnd = 0,
+    String filter = 'normal',
+    double durasiVideo = 0,
+  }) async {
+    try {
+      final s = await _repo.buatStory(
+        teks: teks,
+        mediaUrl: mediaUrl,
+        tipe: tipe,
+        bgGradient: bgGradient,
+        privasi: privasi,
+        gayaTeks: gayaTeks,
+        warnaTeks: warnaTeks,
+        ukuranTeks: ukuranTeks,
+        alignTeks: alignTeks,
+        bgType: bgType,
+        bgWarna: bgWarna,
+        bgImageUrl: bgImageUrl,
+        teksBg: teksBg,
+        teksBgWarna: teksBgWarna,
+        label: label,
+        trimStart: trimStart,
+        trimEnd: trimEnd,
+        filter: filter,
+        durasiVideo: durasiVideo,
+      );
+      stories.insert(0, s);
+      notifyListeners();
+      return null;
+    } catch (e) {
+      return _pesan(e);
+    }
+  }
+
+  Future<String?> hapusStory(String id) async {
+    final idx = stories.indexWhere((s) => s.id == id);
+    StoryItem? cadangan;
+    if (idx >= 0) {
+      cadangan = stories.removeAt(idx);
+      notifyListeners();
+    }
+    try {
+      await _repo.hapusStory(id);
+      return null;
+    } catch (e) {
+      if (cadangan != null) {
+        stories.insert(idx.clamp(0, stories.length), cadangan);
+        notifyListeners();
+      }
+      return _pesan(e);
+    }
+  }
+
+  Future<void> likeStory(String id) async {
+    final idx = stories.indexWhere((s) => s.id == id);
+    if (idx < 0) return;
+    final item = stories[idx];
+    final targetLike = !item.sudahLike;
+    final targetCount = targetLike ? item.likes + 1 : (item.likes > 0 ? item.likes - 1 : 0);
+    stories[idx] = item.copyWith(sudahLike: targetLike, likes: targetCount);
+    notifyListeners();
+    try {
+      final res = await _repo.likeStory(id);
+      if (res['likes'] != null) {
+        stories[idx] = stories[idx].copyWith(
+          likes: (res['likes'] as num).toInt(),
+          sudahLike: res['sudah_like'] == true,
+        );
+        notifyListeners();
+      }
+    } catch (_) {}
+  }
+
+  Future<String?> repostStory(String id) async {
+    final idx = stories.indexWhere((s) => s.id == id);
+    if (idx >= 0) {
+      final item = stories[idx];
+      stories[idx] = item.copyWith(reposts: item.reposts + 1);
+      notifyListeners();
+    }
+    try {
+      await _repo.repostStory(id);
+      unawaited(muatStories());
+      return null;
+    } catch (e) {
+      if (idx >= 0 && idx < stories.length) {
+        final item = stories[idx];
+        stories[idx] = item.copyWith(reposts: max(0, item.reposts - 1));
+        notifyListeners();
+      }
+      return _pesan(e);
+    }
+  }
+
+  Future<String?> balasStory(String id, String pesan) async {
+    try {
+      await _repo.balasStory(id, pesan);
+      return null;
+    } catch (e) {
+      return _pesan(e);
+    }
+  }
+
   // ================= forum komunitas =================
   List<ForumPost> forum = [];
   Set<String> forumDisukai = {};
+  Set<String> penggunaDiikuti = {};
+
+  Future<void> muatPenggunaDiikuti() async {
+    if (user == null) return;
+    try {
+      final list = await _repo.followsSaya(arah: 'mengikuti');
+      penggunaDiikuti = list.map((e) => e.id).toSet();
+      notifyListeners();
+    } catch (_) {}
+  }
+
+  Future<bool> toggleIkuti(String targetUserId) async {
+    if (user == null || targetUserId.isEmpty || targetUserId == user!.id) return false;
+    final sedangIkuti = penggunaDiikuti.contains(targetUserId);
+    if (sedangIkuti) {
+      penggunaDiikuti.remove(targetUserId);
+    } else {
+      penggunaDiikuti.add(targetUserId);
+    }
+    notifyListeners();
+    try {
+      final res = await _repo.ikuti(targetUserId, !sedangIkuti);
+      final hasilIkuti = res['ikuti'] == true || res['status'] == 'mengikuti';
+      if (hasilIkuti) {
+        penggunaDiikuti.add(targetUserId);
+      } else {
+        penggunaDiikuti.remove(targetUserId);
+      }
+      notifyListeners();
+      return hasilIkuti;
+    } catch (_) {
+      // rollback
+      if (sedangIkuti) {
+        penggunaDiikuti.add(targetUserId);
+      } else {
+        penggunaDiikuti.remove(targetUserId);
+      }
+      notifyListeners();
+      return sedangIkuti;
+    }
+  }
 
   /// Posting yang dibookmark pengguna (Batch D).
   Set<String> forumDisimpan = {};
@@ -1346,6 +1545,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         try {
           forumDisukai = (await _repo.forumSukaSaya()).toSet();
           unawaited(muatSimpanan());
+          unawaited(muatPenggunaDiikuti());
         } catch (_) {}
       }
     } catch (e) {
@@ -1616,7 +1816,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     user = null; orders = []; transaksi = []; chat = []; topupSaya = [];
     liveCatalog = const LiveCatalog(); creatorLive = null; liveGalat = null; creatorLiveGalat = null; liveMemuat = false;
     _livePayoutClientId = null; _livePayoutUserId = null;
-    forum = []; forumDisukai.clear(); balasanDisukai.clear();
+    forum = []; forumDisukai.clear(); balasanDisukai.clear(); penggunaDiikuti.clear();
+    stories = [];
     forumRevisi = 0; dmRevisi = 0;
     notifikasi = []; notifBelum = 0; notifBelumDibaca = 0;
     favorit.clear(); _ulasan.clear(); _identitasForum.clear();
@@ -1688,13 +1889,15 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       final bn = await Cache.daftar('banners');
       final od = await Cache.daftar('orders_${user?.id}');
       final tr = await Cache.daftar('transaksi_${user?.id}');
-      if (p.isEmpty && pr.isEmpty) return;
+      final ch = await Cache.daftar('chat_${user?.id}');
+      if (p.isEmpty && pr.isEmpty && ch.isEmpty) return;
 
-      plans = p.map((e) => PcPlan.fromJson(Map<String, dynamic>.from(e))).toList();
-      produk = pr.map((e) => AkunProduk.fromJson(Map<String, dynamic>.from(e))).toList();
-      banners = bn.map((e) => PromoBanner.fromJson(Map<String, dynamic>.from(e))).toList();
-      orders = od.map((e) => RentOrder.fromJson(Map<String, dynamic>.from(e))).toList();
-      transaksi = tr.map((e) => Transaksi.fromJson(Map<String, dynamic>.from(e))).toList();
+      if (p.isNotEmpty) plans = p.map((e) => PcPlan.fromJson(Map<String, dynamic>.from(e))).toList();
+      if (pr.isNotEmpty) produk = pr.map((e) => AkunProduk.fromJson(Map<String, dynamic>.from(e))).toList();
+      if (bn.isNotEmpty) banners = bn.map((e) => PromoBanner.fromJson(Map<String, dynamic>.from(e))).toList();
+      if (od.isNotEmpty) orders = od.map((e) => RentOrder.fromJson(Map<String, dynamic>.from(e))).toList();
+      if (tr.isNotEmpty) transaksi = tr.map((e) => Transaksi.fromJson(Map<String, dynamic>.from(e))).toList();
+      if (ch.isNotEmpty) chat = ch.map((e) => ChatMessage.fromJson(Map<String, dynamic>.from(e))).toList();
       dariCache = true;
       notifyListeners();
     } catch (_) {}
@@ -1707,6 +1910,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       await Cache.simpan('banners', banners.map((e) => e.toJson()).toList());
       await Cache.simpan('orders_${user?.id}', orders.map((e) => e.toJson()).toList());
       await Cache.simpan('transaksi_${user?.id}', transaksi.map((e) => e.toJson()).toList());
+      await Cache.simpan('chat_${user?.id}', chat.map((e) => e.toJson()).toList());
     } catch (_) {}
   }
 
@@ -1718,7 +1922,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     } catch (_) {}
   }
 
-  /// Muat ulang riwayat chat.
+  /// Muat ulang riwayat chat — WA style cache dulu.
   Future<void> muatChat() async {
     if(!masuk)return;
     try {
@@ -1727,6 +1931,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       final pending=chat.where((x)=>x.id.startsWith('local_')&&!clients.contains(x.clientId)).toList();
       chat=[...remote,...pending]..sort((a,b)=>a.waktu.compareTo(b.waktu));
       notifyListeners();
+      unawaited(Cache.simpan('chat_${user?.id}', chat.map((e) => e.toJson()).toList()));
     } catch (_) {}
   }
 
@@ -1883,6 +2088,41 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       case 'forum.hapus':
         forum.removeWhere((f) => f.id == '${e.payload['id']}');
         break;
+      case 'story.baru':
+        try {
+          final st = StoryItem.fromJson(Map<String, dynamic>.from(e.payload));
+          final idx = stories.indexWhere((s) => s.id == st.id);
+          if (idx < 0) {
+            stories.insert(0, st);
+            notifyListeners();
+          }
+        } catch (_) {}
+        break;
+      case 'story.hapus':
+        stories.removeWhere((s) => s.id == '${e.payload['id']}');
+        notifyListeners();
+        break;
+      case 'story.like':
+        try {
+          final id = '${e.payload['id']}';
+          final idx = stories.indexWhere((s) => s.id == id);
+          if (idx >= 0) {
+            final likes = (e.payload['likes'] as num?)?.toInt() ?? (stories[idx].likes + 1);
+            stories[idx] = stories[idx].copyWith(likes: likes);
+            notifyListeners();
+          }
+        } catch (_) {}
+        break;
+      case 'story.repost':
+        try {
+          final id = '${e.payload['id']}';
+          final idx = stories.indexWhere((s) => s.id == id);
+          if (idx >= 0) {
+            stories[idx] = stories[idx].copyWith(reposts: stories[idx].reposts + 1);
+            notifyListeners();
+          }
+        } catch (_) {}
+        break;
       case 'wallet.update':
         user = user?.copyWith(saldo: e.payload['saldo'] as int);
         break;
@@ -1975,6 +2215,17 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     } catch (e) {
       error = '$e';
       notifyListeners();
+      return null;
+    }
+  }
+
+  Future<Map<String, dynamic>?> antreSewa(String planId, int jam) async {
+    try {
+      final res = await _repo.antreSewa(planId: planId, jam: jam);
+      unawaited(muatNotifikasi());
+      return res;
+    } catch (e) {
+      error = '$e';
       return null;
     }
   }

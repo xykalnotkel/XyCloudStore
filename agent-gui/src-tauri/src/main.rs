@@ -39,8 +39,10 @@ fn simpan(
     server: String,
     st: State<St>,
 ) -> Result<String, String> {
-    let sandi_lama = st.cfg.lock().unwrap().sandi.clone();
-    let user_lama = st.cfg.lock().unwrap().user.clone();
+    let (sandi_lama, user_lama, stream_host_lama) = {
+        let cfg = st.cfg.lock().unwrap();
+        (cfg.sandi.clone(), cfg.user.clone(), cfg.stream_host.clone())
+    };
 
     let mut k = Konfig {
         kode: kode.trim().into(),
@@ -52,6 +54,7 @@ fn simpan(
         } else {
             server.trim().into()
         },
+        stream_host: stream_host_lama,
     };
     if k.kode.is_empty() {
         return Err("Kode unit wajib diisi.".into());

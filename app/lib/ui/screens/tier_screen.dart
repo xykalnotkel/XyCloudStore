@@ -11,41 +11,42 @@ import '../widgets/common.dart';
 /// ============================================================
 ///  Definisi tier disamakan dengan server (api/src/loyal.js):
 ///  basic 0 / pro 300.000 / vip 1.500.000 dari total belanja lunas.
-///  Sebelumnya layar ini menampilkan Bronze/Silver/Gold/Platinum yang
-///  tidak pernah ada di server — sekarang progres benefit sungguhan:
-///  bar menuju tier berikutnya + benefit yang sudah/akan aktif,
-///  termasuk benefit baru Batch I (banner bergerak, bingkai premium).
 class _Tingkat {
-  const _Tingkat(this.id, this.nama, this.min, this.warna, this.ikon,
+  const _Tingkat(this.id, this.nama, this.min, this.warna, this.badge,
       this.manfaat);
   final String id;
   final String nama;
   final int min;
   final Color warna;
-  final IconData ikon;
+  final String badge;
   final List<String> manfaat;
 }
 
 const _tingkat = [
-  _Tingkat('basic', 'Basic', 0, Color(0xFF7C7391), Icons.rocket_launch_outlined, [
-    'Akses semua paket dan produk',
-    'Chat admin tanpa batas',
-    'Transfer saldo antar pengguna',
-    '5 tema banner profil',
+  _Tingkat('basic', 'Basic', 0, Color(0xFF7C7391), 'badge_basic', [
+    'Akses semua paket rental PC dan produk digital',
+    'Chat admin & customer support 24/7',
+    'Transfer saldo antar pengguna dengan PIN aman',
+    '5 tema banner profil standar',
+    'Akses penuh komunitas dan feed publik',
   ]),
-  _Tingkat('pro', 'Pro', 300000, XyTheme.violet, Icons.workspace_premium_outlined, [
-    'Diskon 3% tiap transaksi',
-    'Antrean unit lebih dulu',
-    'Lencana Pro di komunitas',
-    'Banner profil GIF & video (auto-GIF)',
-    'Bingkai avatar Aurora & Permata',
+  _Tingkat('pro', 'Pro', 300000, XyTheme.violet, 'badge_pro', [
+    'Diskon 3% otomatis tiap transaksi',
+    'Prioritas antrean unit PC sewa',
+    'Lencana 3D Pro eksklusif di profil & feed',
+    'Banner profil animasi GIF & video (auto-GIF tanpa jeda)',
+    'Bingkai avatar premium Aurora & Permata',
+    'Kapasitas preset HUD kustom tambahan',
   ]),
-  _Tingkat('vip', 'VIP', 1500000, XyTheme.goldSoft, Icons.diamond_outlined, [
-    'Diskon 7% tiap transaksi',
-    'Prioritas tertinggi saat unit penuh',
-    'Bantuan admin didahulukan',
-    'Lencana VIP di komunitas',
-    'Semua benefit Pro tetap aktif',
+  _Tingkat('vip', 'VIP', 1500000, XyTheme.goldSoft, 'badge_vip', [
+    'Diskon 7% otomatis tiap transaksi sewa & produk',
+    'Prioritas antrean tertinggi saat server penuh',
+    'Lencana 3D VIP Gold berkilau di samping nama',
+    '8 Bingkai avatar eksklusif VIP (Celestial, Sakura, Cyber, Nebula, dll)',
+    'Gaya tampilan nama khusus (warna, glow, animasi)',
+    'Banner profil animasi GIF tanpa batas durasi',
+    'Customer service jalur cepat (VIP Fast-Lane)',
+    'Semua benefit Basic & Pro otomatis aktif',
   ]),
 ];
 
@@ -70,6 +71,7 @@ class TierScreen extends StatelessWidget {
         ? 1.0
         : ((belanja - sekarang.min) / rentang).clamp(0.0, 1.0);
     final kurang = berikutnya == null ? 0 : (berikutnya.min - belanja).clamp(0, 1 << 31);
+    final persenMaju = (maju * 100).toInt();
 
     return Scaffold(
       appBar: AppBar(title: const Text('Tier & Benefit')),
@@ -81,43 +83,65 @@ class TierScreen extends StatelessWidget {
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
               gradient: LinearGradient(
-                colors: [XyTheme.bgGelap2, XyTheme.primaryDark, sekarang.warna],
+                colors: [const Color(0xFF1E1730), XyTheme.primaryDark, sekarang.warna.withOpacity(.7)],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
               borderRadius: BorderRadius.circular(XyRadius.lg),
-              boxShadow: XyTheme.glow(sekarang.warna, .22),
+              boxShadow: XyTheme.glow(sekarang.warna, .25),
             ),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Row(children: [
                 Container(
-                  width: 52,
-                  height: 52,
+                  width: 58,
+                  height: 58,
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(.14),
-                    borderRadius: BorderRadius.circular(15),
+                    color: Colors.white.withOpacity(.12),
+                    borderRadius: BorderRadius.circular(16),
                     border: Border.all(color: Colors.white.withOpacity(.25)),
                   ),
-                  child: Icon(sekarang.ikon, color: Colors.white, size: 27),
+                  child: Center(
+                    child: Image.asset(
+                      'assets/brand/${sekarang.badge}.webp',
+                      width: 46,
+                      height: 46,
+                      fit: BoxFit.contain,
+                      errorBuilder: (_, __, ___) => const Icon(Icons.stars_rounded, color: Colors.white, size: 30),
+                    ),
+                  ),
                 ),
                 const SizedBox(width: 14),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Tier ${sekarang.nama}',
-                          style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w800,
-                              fontSize: 17,
-                              letterSpacing: -.4)),
+                      Row(
+                        children: [
+                          Text('Tier ${sekarang.nama}',
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 18,
+                                  letterSpacing: -.4)),
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(.2),
+                              borderRadius: BorderRadius.circular(XyRadius.pill),
+                            ),
+                            child: Text('$persenMaju%',
+                                style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w800)),
+                          ),
+                        ],
+                      ),
                       const SizedBox(height: 3),
                       Text(
                         berikutnya == null
-                            ? 'Tier tertinggi — semua benefit aktif!'
+                            ? 'Tier tertinggi — semua benefit eksklusif aktif!'
                             : 'Belanja ${rupiah(kurang)} lagi menuju ${berikutnya.nama}',
                         style: TextStyle(
-                            color: Colors.white.withOpacity(.78),
+                            color: Colors.white.withOpacity(.82),
                             fontSize: 11.8,
                             height: 1.4),
                       ),
@@ -181,7 +205,7 @@ class TierScreen extends StatelessWidget {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Total belanja kamu dihitung dari pesanan sewa & akun yang lunas — tanpa batas waktu.',
+                      'Total belanja kamu dihitung dari pesanan sewa & produk digital yang lunas — akumulasi otomatis tanpa hangus.',
                       style: TextStyle(
                           color: Colors.white.withOpacity(.82),
                           fontSize: 10.8,
@@ -208,15 +232,23 @@ class TierScreen extends StatelessWidget {
                     children: [
                       Row(children: [
                         Container(
-                          width: 44,
-                          height: 44,
+                          width: 48,
+                          height: 48,
                           decoration: BoxDecoration(
-                            color: x.warna.withOpacity(.15),
+                            color: x.warna.withOpacity(.12),
                             borderRadius: BorderRadius.circular(14),
                             border:
-                                Border.all(color: x.warna.withOpacity(.3)),
+                                Border.all(color: x.warna.withOpacity(.25)),
                           ),
-                          child: Icon(x.ikon, color: x.warna, size: 22),
+                          child: Center(
+                            child: Image.asset(
+                              'assets/brand/${x.badge}.webp',
+                              width: 38,
+                              height: 38,
+                              fit: BoxFit.contain,
+                              errorBuilder: (_, __, ___) => Icon(Icons.stars_rounded, color: x.warna, size: 24),
+                            ),
+                          ),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
@@ -276,8 +308,10 @@ class TierScreen extends StatelessWidget {
                       ]),
                       const SizedBox(height: 14),
                       ...x.manfaat.map((m) {
-                        final baru = m.contains('Banner profil GIF') ||
-                            m.contains('Bingkai avatar');
+                        final baru = m.contains('Banner profil') ||
+                            m.contains('Bingkai avatar') ||
+                            m.contains('Lencana 3D') ||
+                            m.contains('Gaya tampilan nama');
                         return Padding(
                           padding: const EdgeInsets.only(bottom: 7),
                           child: Row(
@@ -345,10 +379,10 @@ class TierScreen extends StatelessWidget {
                       style: TextStyle(fontWeight: FontWeight.w800)),
                   const SizedBox(height: 8),
                   Text(
-                    '• Sewa paket mingguan/bulanan (nilai besar langsung dihitung)\n'
-                    '• Beli akun digital premium\n'
-                    '• Diskon tier otomatis terpakai di checkout\n'
-                    '• Tier hanya naik, tidak pernah turun otomatis',
+                    '• Sewa paket mingguan atau bulanan untuk percepatan level\n'
+                    '• Beli akun game & streaming premium di katalog produk\n'
+                    '• Diskon tier otomatis terpotong saat proses checkout\n'
+                    '• Akumulasi total belanja permanen (tier tidak pernah turun otomatis)',
                     style: TextStyle(color: t.muted, fontSize: 12.3, height: 1.65),
                   ),
                 ]),

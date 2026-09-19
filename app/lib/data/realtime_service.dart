@@ -83,10 +83,19 @@ class RealtimeService {
         cancelOnError: true,
       );
       _ping?.cancel();
-      _ping = Timer.periodic(const Duration(seconds: 25), (_) => send('ping', {}));
+      // Keepalive 12 detik mencegah NAT drop pada jaringan seluler 4G/5G/WiFi.
+      _ping = Timer.periodic(const Duration(seconds: 12), (_) => send('ping', {}));
     } catch (_) {
       _handleDrop();
     }
+  }
+
+  /// Panggil untuk segera mencoba koneksi ulang tanpa menunggu jeda timer backoff.
+  void reconnectNow() {
+    if (_sengajaTutup) return;
+    _retry?.cancel();
+    _retry = null;
+    unawaited(_open());
   }
 
   Future<void> _tutupChannel(WebSocketChannel? channel) async {
@@ -101,9 +110,15 @@ class RealtimeService {
     unawaited(_tutupChannel(channel));
     _setState(RealtimeState.offline);
     if (_sengajaTutup || (_retry?.isActive ?? false)) return;
-    // exponential backoff + jitter, maks 20 detik. Reconnect mengambil ticket
-    // baru; capability lama tidak pernah dipakai ulang setelah kedaluwarsa.
-    final delay = min(20, pow(2, _attempt++).toInt()) * 1000 + Random().nextInt(600);
+    // Reconnect cepat anti-delay: percobaan pertama langsung ~350ms,
+    // kemudian backoff bertahap hingga maks 10 detik.
+    final int delay;
+    if (_attempt == 0) {
+      delay = 300 + Random().nextInt(150);
+      _attempt++;
+    } else {
+      delay = min(10, pow(1.8, _attempt++).toInt()) * 1000 + Random().nextInt(300);
+    }
     _retry = Timer(Duration(milliseconds: delay), () {
       _retry = null;
       unawaited(_open());

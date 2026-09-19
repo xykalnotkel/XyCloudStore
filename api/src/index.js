@@ -1,6 +1,6 @@
 import { adminSecurity, ownerProtected } from './admin_security.js';
 import { SecurityError, securityConfig, securityHash, securitySlot, auditSecurity, requireRate, deviceFromRequest, linkDevice, beforeRegistration, translateRegistrationError, assertAccountEnabled, otpAllowed, otpDigest, newOAuthState, consumeOAuthState, saveSecurityConfig } from './security.js';
-import { estimasiSewa, buatSewa, mulaiSewa, bacaSewa, antreAkhir, konfirmasiAgen, tutupSewa, rawatSewa, normalisasiHostStream, probePortTcp} from './sewa.js';
+import { estimasiSewa, buatSewa, mulaiSewa, bacaSewa, antreAkhir, konfirmasiAgen, tutupSewa, rawatSewa, normalisasiHostStream, isPrivateIp, probePortTcp} from './sewa.js';
 import { infoHapusAkun, bersihkanAkun } from './akun.js';
 import { KontenError, daftarPromosi, simpanPromosi, ambilKunciGiphy, simpanKunciGiphy, cariGiphy, terimaStiker, bacaStiker } from './engagement.js';
 import { periksaTeks } from './moderasi.js';
@@ -57,7 +57,7 @@ function bersihkanUser(env, u) {
 }
 import { kirimEmail } from './mail.js';
 import { kirimPush, kirimPushBanyak, siarkanPush } from './push.js';
-import { unggahGambar, unggahAudio, unggahVideoBanner, imporFotoSosial, samarkanGambar, samarkanKMedia, samarkanBannerMedia, layaniGambar, layaniMedia } from './upload.js';
+import { unggahGambar, unggahAudio, unggahVideoBanner, unggahVideoKeAnimasi, imporFotoSosial, samarkanGambar, samarkanKMedia, samarkanBannerMedia, layaniGambar, layaniMedia } from './upload.js';
 import { penyediaBayar, metodeTersedia, infoKonfigurasiPembayaran, buatTagihan, bacaPemberitahuan, cekStatusPenyedia, batalkanTagihan } from './bayar.js';
 import { setelan, simpanSetelan, jalankanPemeliharaan, statistikLengkap, catatLog, pantauKesehatan } from './sistem.js';
 import { TIER, diskonTier, segarkanTier, cekVoucher, pakaiVoucher, pakaiVoucherStrict, buatCadangan } from './loyal.js';
@@ -298,16 +298,22 @@ async function tertutupPemeliharaan(env, req) {
 // Tema banner profil yang tersedia di aplikasi (gradasi palet ungu).
 const BANNER_PROFIL = ['ungu', 'senja', 'midnight', 'permen', 'anggrek'];
 
-// Bingkai avatar profil (Batch I). Nilai harus sama dengan daftar BINGKAI
-// di app/lib/ui/widgets/bingkai_profil.dart. 'aurora' & 'permata' khusus
-// langganan Pro/VIP.
+// Bingkai avatar profil (Batch I + Batch Q). Nilai harus sama dengan daftar BINGKAI
+// di app/lib/ui/widgets/bingkai_profil.dart.
 const BINGKAI_PROFIL = ['polos', 'ungu', 'emas', 'neon', 'aurora', 'permata', 'api', 'galaksi',
-  // Batch L: bingkai aset AI baru (assets/bingkai/*.webp). 'mahkota' & 'naga'
-  // kelas tertinggi — khusus VIP; sisanya Pro/VIP.
-  'sakura', 'sirkuit', 'sayap', 'petir', 'mahkota', 'naga'];
-const BINGKAI_LANGGANAN = ['aurora', 'permata', 'api', 'galaksi', 'sakura', 'sirkuit', 'sayap', 'petir', 'mahkota', 'naga'];
+  // Batch L: bingkai aset AI baru (assets/bingkai/*.webp).
+  'sakura', 'sirkuit', 'sayap', 'petir', 'mahkota', 'naga',
+  // Batch Q: bingkai tambahan permintaan pengguna (Cyberpunk, Hologram, Es, Pelangi, Ruby, Emerald, Celestial, Sakura Angin).
+  'cyberpunk', 'hologram', 'es', 'pelangi', 'ruby', 'emerald', 'celestial', 'sakura_angin',
+  // Bingkai Baru: Inferno, Matrix, Samurai, Nebula, Phantom
+  'inferno', 'matrix', 'samurai', 'nebula', 'phantom'];
+const BINGKAI_LANGGANAN = [
+  'aurora', 'permata', 'api', 'galaksi', 'sakura', 'sirkuit', 'sayap', 'petir',
+  'mahkota', 'naga', 'cyberpunk', 'hologram', 'es', 'pelangi', 'ruby', 'emerald', 'celestial', 'sakura_angin',
+  'inferno', 'matrix', 'samurai', 'nebula', 'phantom'
+];
 // Bingkai kelas VIP saja (premium tertinggi — tampil dengan label "VIP" di app).
-const BINGKAI_VIP = ['mahkota', 'naga'];
+const BINGKAI_VIP = ['mahkota', 'naga', 'ruby', 'emerald', 'hologram', 'celestial', 'sakura_angin', 'inferno', 'phantom'];
 
 // Gaya nama kustom (Batch L). Sama dengan daftar GAYA_NAMA di
 // app/lib/ui/widgets/gaya_nama.dart. Gaya beranimasi khusus Pro/VIP.
@@ -388,7 +394,17 @@ async function pulihkanBlokirKadaluarsa(env, userId) {
 
 // ---------- password ----------
 const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
-const PW_ITERATIONS = 210_000;
+// BATAS RUNTIME, bukan pilihan gaya: WebCrypto di Cloudflare Workers menolak
+// PBKDF2 di atas 100.000 iterasi —
+//   "Pbkdf2 failed: Iteration counts above 100000 are not supported (requested 210000)"
+// Node mengizinkan jauh lebih tinggi, sehingga `node --test` (65 test hijau)
+// TIDAK BISA menangkap galat ini. Nilai 210.000 pernah dipakai di commit
+// 16d5b5e dan membuat login produksi gagal total: verifikasi hash warisan
+// berhasil, lalu upgrade transparan di jalur login memanggil buatPw() yang
+// melempar, sehingga permintaan berakhir 500.
+// Jangan naikkan PW_ITERATIONS melampaui PW_ITERASI_MAKS_RUNTIME.
+const PW_ITERASI_MAKS_RUNTIME = 100_000;
+const PW_ITERATIONS = PW_ITERASI_MAKS_RUNTIME;
 const PW_PREFIX = 'pbkdf2-sha256';
 const encoderPw = new TextEncoder();
 
@@ -440,7 +456,11 @@ async function cocokPw(password, tersimpan) {
     const iterations = Number(bagian[1]);
     const salt = bytesHexPw(bagian[2]);
     const harapan = bytesHexPw(bagian[3]);
-    if (!Number.isSafeInteger(iterations) || iterations < 100_000 || iterations > 1_000_000
+    // Batas atas mengikuti kemampuan runtime, bukan angka longgar: hash dengan
+    // iterasi di atas PW_ITERASI_MAKS_RUNTIME tidak bisa diverifikasi di Workers
+    // (deriveBits akan melempar). Ditolak sebagai "password salah" supaya satu
+    // baris data yang mustahil tidak mengubah permintaan login menjadi HTTP 500.
+    if (!Number.isSafeInteger(iterations) || iterations < 100_000 || iterations > PW_ITERASI_MAKS_RUNTIME
         || !salt || salt.length < 16 || !harapan || harapan.length !== 32) return false;
     return samaKonstanPw(await pbkdf2Pw(password, salt, iterations), harapan);
   }
@@ -995,7 +1015,13 @@ async function gagalKlaimReferral(env, attributionId, userId, risiko, pesan, sta
  */
 async function klaimAtribusiReferral(env, ctx, req, userId, body = {}) {
   const raw = tiketReferralDari(body, req);
-  if (!raw) throw new KontenError('Tiket undangan tidak ada. Buka aplikasi dari halaman unduhan temanmu.', 400);
+  if (!raw) {
+    throw new KontenError(
+      'Untuk mencegah farming akun, referral wajib melalui tautan unduhan APK resmi. ' +
+      'Minta temanmu mengirim tautan undangan, lalu unduh APK dari tautan tersebut dan buka aplikasi melalui tombol aktivasi.',
+      400
+    );
+  }
   const deviceId = await deviceFromRequest(env, req, { required: true });
   const attributionId = await hashTiketReferral(env, raw);
   const attr = await env.DB.prepare(
@@ -1077,6 +1103,18 @@ async function klaimAtribusiReferral(env, ctx, req, userId, body = {}) {
     return tolakAtribusiReferral(env, attributionId, userId, 'perangkat_sama_pengundang',
       'Pengundang dan akun baru tidak boleh berasal dari perangkat yang sama.', 403);
   }
+
+  // Anti-akali: cegah skema referral lingkaran (A undang B, B undang A)
+  const lingkaran = await env.DB.prepare(
+    'SELECT 1 FROM referral WHERE pengundang=? AND diundang=?'
+  ).bind(userId, attr.pengundang).first();
+  if (lingkaran) {
+    return tolakAtribusiReferral(env, attributionId, userId, 'referral_lingkaran',
+      'Tidak dapat menggunakan kode referral dari akun yang telah kamu undang.', 403);
+  }
+
+  // Batasi klaim per IP agar tidak bisa difarm melalui bot/script
+  await requireRate(env, 'referral-claim-ip', req.headers.get('cf-connecting-ip') || 'unknown', 5, 86400);
 
   const sudah = await env.DB.prepare('SELECT * FROM referral WHERE diundang=? OR attribution_id=? LIMIT 1')
     .bind(userId, attributionId).first();
@@ -2554,18 +2592,19 @@ ${halaman.map(([u, p2, f]) => `  <url>
         if (p === 'agen/heartbeat' && req.method === 'POST') {
           await rawatSewa(env);
           const b = await req.json().catch(() => ({}));
-          // `online` adalah status tunggal yang sah dari heartbeat. `offline`
-          // hanya ditetapkan watchdog server; nilai status dari payload agen
-          // tidak dipercaya untuk keputusan kapasitas atau mulai live.
+          const cfIp = req.headers.get('cf-connecting-ip');
+          const hostPublik = normalisasiHostStream(b.host, cfIp);
+          let specObj = b.spec && typeof b.spec === 'object' ? b.spec : null;
+          if (specObj && isPrivateIp(b.host)) {
+            specObj.ip_lan = specObj.ip_lan ? `${b.host},${specObj.ip_lan}` : b.host;
+          }
           await env.DB.prepare(
             "UPDATE agen SET status = 'online', spec = COALESCE(?, spec), versi = COALESCE(?, versi), host = CASE WHEN ? IS NOT NULL THEN ? ELSE host END, terakhir = ? WHERE id = ?"
           ).bind(
-            b.spec ? JSON.stringify(b.spec) : null,
+            specObj ? JSON.stringify(specObj) : (b.spec ? JSON.stringify(b.spec) : null),
             b.versi || null,
-            // Hotfix cek-port: bila agen tak tahu IP publiknya (ipify diblok /
-            // COMPUTERNAME ditolak validasi), pakai IP yang terlihat Cloudflare.
-            (() => { const h = normalisasiHostStream(b.host, req.headers.get('cf-connecting-ip')); return h; })(),
-            (() => { const h = normalisasiHostStream(b.host, req.headers.get('cf-connecting-ip')); return h; })(),
+            hostPublik,
+            hostPublik,
             new Date().toISOString(),
             agen.id
           ).run();
@@ -3240,10 +3279,45 @@ async function statistikPublik(env) {
         assertAccountEnabled(u,{izinkanBlokir:true});
         if (!(await cocokPw(password, u.password))) return err('Password salah. Coba lagi.', 401, env);
 
-        if (!u.email_verified && !u.diblokir) {
+        // Batas maksimal 2 akun per 1 device (kebijakan keamanan ketat)
+        if (deviceId) {
+          const akunTerkait = await env.DB.prepare(
+            `SELECT COUNT(DISTINCT user_id) AS total FROM security_device_users
+             WHERE device_id = ? AND user_id != ?`
+          ).bind(deviceId, u.id).first();
+          if (Number(akunTerkait?.total || 0) >= 2) {
+            return err('Perangkat ini sudah mencapai batas maksimal 2 akun. Tidak dapat masuk dengan akun lain di perangkat ini.', 403, env);
+          }
+        }
+
+        // Deteksi login di perangkat baru / IP atau IMEI berbeda untuk akun yang sama
+        let deviceBaru = false;
+        if (deviceId && u.email_verified) {
+          const perangkatDikenal = await env.DB.prepare(
+            'SELECT 1 FROM security_device_users WHERE device_id = ? AND user_id = ?'
+          ).bind(deviceId, u.id).first();
+
+          if (!perangkatDikenal) {
+            const punyaPerangkatLain = await env.DB.prepare(
+              'SELECT 1 FROM security_device_users WHERE user_id = ? LIMIT 1'
+            ).bind(u.id).first();
+            if (punyaPerangkatLain || (u.registration_device && u.registration_device !== deviceId)) {
+              deviceBaru = true;
+            }
+          }
+        }
+
+        if ((!u.email_verified || deviceBaru) && !u.diblokir) {
           ctx.waitUntil(kirimOtp(env, { email: u.email, nama: u.nama, tipe: 'verifikasi' }));
-          return json({ perluVerifikasi: true, email: u.email, nama: u.nama,
-            pesan: 'Email belum diverifikasi. Periksa kode terakhir atau gunakan Kirim Ulang setelah jeda.' }, 200, env);
+          return json({
+            perluVerifikasi: true,
+            deviceBaru: !!deviceBaru,
+            email: u.email,
+            nama: u.nama,
+            pesan: deviceBaru
+              ? 'Login di perangkat baru terdeteksi. Demi keamanan akun, masukkan kode verifikasi OTP yang dikirim ke email kamu.'
+              : 'Email belum diverifikasi. Periksa kode terakhir atau gunakan Kirim Ulang setelah jeda.'
+          }, 200, env);
         }
 
         // Upgrade transparan plaintext, SHA-256 lama, atau iterasi PBKDF2 lama.
@@ -3317,22 +3391,33 @@ async function statistikPublik(env) {
         const u = await env.DB.prepare('SELECT * FROM users WHERE lower(email) = ?').bind(email).first();
         if (!u) return err('Akun tidak ditemukan',404,env);
         assertAccountEnabled(u);
-        if (u.email_verified) return err('Email sudah terverifikasi. Silakan masuk dengan password atau penyedia login.',409,env);
+
+        if (!kode) {
+          if (u.email_verified) return err('Email sudah terverifikasi. Silakan masuk dengan password atau penyedia login.', 409, env);
+          return err('Kode verifikasi wajib diisi', 400, env);
+        }
 
         const cek = await cekOtp(env, { email, kode, tipe: 'verifikasi' });
         if (!cek.ok) return err(cek.pesan, 400, env);
 
         await env.DB.prepare('UPDATE users SET email_verified = 1 WHERE id = ?').bind(u.id).run();
 
-        // sapaan CS + email selamat datang
-        const sapa = {
-          id: uid('m_'), room: `user:${u.id}`, dari: 'cs',
-          teks: `Halo ${u.nama.split(' ')[0]}, aku Kirana dari XyCloudStore. Ada yang bisa aku bantu hari ini?`,
-          waktu: new Date().toISOString(),
-        };
-        ctx.waitUntil(env.DB.prepare('INSERT INTO cs_messages (id,room,user_id,dari,teks,waktu) VALUES (?,?,?,?,?,?)')
-          .bind(sapa.id, sapa.room, u.id, 'cs', sapa.teks, sapa.waktu).run());
-        ctx.waitUntil(kirimEmail(env, { to: email, template: 'selamatDatang', data: { nama: u.nama } }));
+        // Tautkan perangkat baru setelah kode verifikasi email valid
+        if (deviceId) {
+          await linkDevice(env, deviceId, u.id);
+        }
+
+        // sapaan CS + email selamat datang (hanya untuk akun yang baru pertama verifikasi)
+        if (!u.email_verified) {
+          const sapa = {
+            id: uid('m_'), room: `user:${u.id}`, dari: 'cs',
+            teks: `Halo ${u.nama.split(' ')[0]}, aku Kirana dari XyCloudStore. Ada yang bisa aku bantu hari ini?`,
+            waktu: new Date().toISOString(),
+          };
+          ctx.waitUntil(env.DB.prepare('INSERT INTO cs_messages (id,room,user_id,dari,teks,waktu) VALUES (?,?,?,?,?,?)')
+            .bind(sapa.id, sapa.room, u.id, 'cs', sapa.teks, sapa.waktu).run());
+          ctx.waitUntil(kirimEmail(env, { to: email, template: 'selamatDatang', data: { nama: u.nama } }));
+        }
 
         const token = await issueUserToken(env,u,typeof deviceId==='undefined'?null:deviceId);
         bersihkanUser(env, u);
@@ -3351,7 +3436,6 @@ async function statistikPublik(env) {
         const u = await env.DB.prepare('SELECT nama, email_verified FROM users WHERE lower(email) = ?')
           .bind(email).first();
         if (!u) return err('Email belum terdaftar', 404, env);
-        if (tipe === 'verifikasi' && u.email_verified) return err('Email ini sudah terverifikasi', 400, env);
         const hasil = await kirimOtp(env, { email, nama: u.nama, tipe });
         if (!hasil.ok) return err('Gagal mengirim email: ' + hasil.alasan, 502, env);
         return json({ ok: true, pesan: `Kode baru dikirim ke ${email}` }, 200, env);
@@ -3996,6 +4080,40 @@ async function statistikPublik(env) {
              ORDER BY tersedia ASC`
           ).all();
           return json(results, 200, env);
+        }
+        if (a === 'stok' && req.method === 'POST') {
+          const b = await req.json();
+          const { produk_id, akun, teks_bulk } = b;
+          if (!produk_id) return err('ID produk diperlukan', 400, env);
+          let daftar = Array.isArray(akun) ? akun : [];
+          if (typeof teks_bulk === 'string' && teks_bulk.trim()) {
+            const baris = teks_bulk.split('\n');
+            for (const br of baris) {
+              const part = br.trim().split(/[:|,;\t]/);
+              if (part.length >= 2 && part[0] && part[1]) {
+                daftar.push({ email: part[0].trim(), password: part.slice(1).join(':').trim() });
+              }
+            }
+          }
+          if (!daftar.length && b.email && b.password) {
+            daftar.push({ email: b.email.trim(), password: b.password.trim(), detail: b.detail });
+          }
+          let tambah = 0;
+          for (const item of daftar) {
+            if (item.email && item.password) {
+              const sId = uid('stk_');
+              await env.DB.prepare(
+                `INSERT INTO akun_stok (id, produk_id, email, password, detail, terpakai, dibuat)
+                 VALUES (?, ?, ?, ?, ?, 0, datetime('now'))`
+              ).bind(sId, produk_id, item.email.trim(), item.password.trim(), JSON.stringify(item.detail || {})).run();
+              tambah++;
+            }
+          }
+          await env.DB.prepare(
+            `UPDATE akun_produk SET stok = (SELECT COUNT(*) FROM akun_stok WHERE produk_id=? AND terpakai=0) WHERE id=?`
+          ).bind(produk_id, produk_id).run();
+          ctx.waitUntil(push(env, 'katalog', 'stock.update', { id: produk_id }));
+          return json({ ok: true, ditambahkan: tambah }, 201, env);
         }
         if (a === 'dbinfo' && req.method === 'GET') {
           const daftar = ['users','orders','sesi','pc_plans','akun_produk','akun_stok','transaksi','topup','cs_messages','forum_post','forum_balasan','ulasan','ulasan_pc','voucher','voucher_pakai','banners','follows','dm','simpan_post','hud_preset','hud_preset_suka','laporan','banding','log_admin','log_sistem','security_events','media_assets','rilis','agen','notifikasi','setelan','batas','perintah','promo_overlay'];
@@ -5596,6 +5714,51 @@ async function statistikPublik(env) {
         return json(await terimaStiker(env, await req.json()), 201, env);
       }
 
+      // ---- manajemen perangkat login ----
+      if (p === 'user/devices' && req.method === 'GET') {
+        const curDev = await deviceFromRequest(env, req);
+        const { results } = await env.DB.prepare(
+          `SELECT d.id AS device_id, d.kind, d.model, d.created_at, u.last_seen
+             FROM security_device_users u
+             JOIN security_devices d ON d.id = u.device_id
+            WHERE u.user_id = ?
+            ORDER BY u.last_seen DESC`
+        ).bind(me.sub).all();
+
+        const daftar = (results || []).map((r) => {
+          let namaModel = r.model || '';
+          if (!namaModel) {
+            namaModel = r.kind === 'android' ? 'Perangkat Android' : r.kind === 'windows' ? 'Komputer Windows' : 'Perangkat';
+          }
+          return {
+            device_id: r.device_id,
+            kind: r.kind || 'unknown',
+            model: namaModel,
+            first_login: r.created_at,
+            last_seen: r.last_seen,
+            is_current: curDev ? (r.device_id === curDev) : false,
+          };
+        });
+
+        return json({ ok: true, devices: daftar }, 200, env);
+      }
+
+      if (p === 'user/devices/revoke' && req.method === 'POST') {
+        const b = await req.json().catch(() => ({}));
+        const targetId = b.device_id;
+        if (targetId) {
+          await env.DB.prepare('DELETE FROM security_device_users WHERE user_id = ? AND device_id = ?')
+            .bind(me.sub, targetId).run();
+        } else {
+          const curDev = await deviceFromRequest(env, req);
+          if (curDev) {
+            await env.DB.prepare('DELETE FROM security_device_users WHERE user_id = ? AND device_id != ?')
+              .bind(me.sub, curDev).run();
+          }
+        }
+        return json({ ok: true, pesan: 'Sesi perangkat berhasil dicabut.' }, 200, env);
+      }
+
       if(p==='me/notifikasi/tes'&&req.method==='POST'){
         if(!(await bolehLanjut(env,`push-test:${me.sub}`,3,3600)))return err('Tes notifikasi maksimal 3 kali per jam.',429,env);
         const result=await kirimPush(env,{userId:me.sub,judul:'Tes notifikasi XyCloudStore',pesan:'Jika pesan ini terdengar, pengaturan nada Android sudah diterapkan.',data:{tipe:'sistem'}});
@@ -5660,20 +5823,31 @@ async function statistikPublik(env) {
         if (!cek.ok) return err(cek.alasan, 422, env);
         const now = new Date().toISOString();
         await env.DB.prepare(
-          `INSERT INTO creator_profile(user_id,status,display_name,bio,age_18,terms_version,applied_at,updated_at)
-           VALUES(?,'pending',?,?,?,?,?,?)
-           ON CONFLICT(user_id) DO UPDATE SET status='pending',display_name=excluded.display_name,bio=excluded.bio,
+          `INSERT INTO creator_profile(user_id,status,display_name,bio,age_18,terms_version,applied_at,updated_at,reviewed_at,reviewed_by)
+           VALUES(?,'approved',?,?,1,'live-creator-v1',?,?,?,'sistem')
+           ON CONFLICT(user_id) DO UPDATE SET status='approved',display_name=excluded.display_name,bio=excluded.bio,
              age_18=excluded.age_18,terms_version=excluded.terms_version,applied_at=excluded.applied_at,
-             reviewed_at=NULL,reviewed_by=NULL,review_note=NULL,updated_at=excluded.updated_at`,
-        ).bind(me.sub, display, bio, 1, 'live-creator-v1', now, now).run();
-        return json({ ok: true, status: 'pending' }, 201, env);
+             reviewed_at=excluded.reviewed_at,reviewed_by='sistem',updated_at=excluded.updated_at`,
+        ).bind(me.sub, display, bio, now, now, now).run();
+        return json({ ok: true, status: 'approved' }, 201, env);
       }
 
       if (p === 'live/start' && req.method === 'POST') {
         const cfg = await konfigurasiLivestream(env);
         if (!cfg.effective) return err('Livestream belum diaktifkan oleh pemilik.', 503, env);
-        const creator = await env.DB.prepare("SELECT * FROM creator_profile WHERE user_id=? AND status='approved'").bind(me.sub).first();
-        if (!creator) return err('Akun kreator belum disetujui.', 403, env);
+        let creator = await env.DB.prepare("SELECT * FROM creator_profile WHERE user_id=? AND status='approved'").bind(me.sub).first();
+        if (!creator) {
+          const u = await env.DB.prepare('SELECT nama FROM users WHERE id=?').bind(me.sub).first();
+          const disp = u?.nama || 'Kreator XyCloud';
+          const now = new Date().toISOString();
+          await env.DB.prepare(
+            `INSERT INTO creator_profile(user_id,status,display_name,bio,age_18,terms_version,applied_at,updated_at,reviewed_at,reviewed_by)
+             VALUES(?,'approved',?,'Kreator resmi XyCloudStore',1,'live-creator-v1',?,?,?,'sistem')
+             ON CONFLICT(user_id) DO UPDATE SET status='approved',display_name=excluded.display_name,reviewed_at=excluded.reviewed_at,reviewed_by='sistem',updated_at=excluded.updated_at`,
+          ).bind(me.sub, disp, now, now, now).run();
+          creator = await env.DB.prepare("SELECT * FROM creator_profile WHERE user_id=? AND status='approved'").bind(me.sub).first();
+        }
+        if (!creator) return err('Gagal memverifikasi status kreator.', 403, env);
         const b = await req.json().catch(() => ({}));
         if (b.recording_consent !== true || b.safe_scene_ack !== true || b.terms_version !== 'live-broadcast-v1') {
           return err('Persetujuan rekaman dan pemeriksaan scene wajib sebelum live.', 422, env);
@@ -5686,27 +5860,51 @@ async function statistikPublik(env) {
           userId: me.sub, konteks: 'livestream', teks: `${title}\n${game}`, opt: { maksUrl: 0 },
         });
         if (!cek.ok) return err(cek.alasan, 422, env);
-        const sesi = await env.DB.prepare(
-          `SELECT s.*,a.terakhir agen_terakhir,a.status agen_status,a.spec agen_spec,a.versi agen_versi,u.nama creator_name
-           FROM sesi s JOIN agen a ON a.id=s.agen_id JOIN users u ON u.id=s.user_id
-           WHERE s.user_id=? AND s.status IN ('siap','berjalan') AND datetime(s.berakhir)>datetime('now')
-           ORDER BY s.dibuat DESC LIMIT 1`,
-        ).bind(me.sub).first();
-        if (!sesi) return err('Mulai sesi PC rental terlebih dahulu sebelum siaran.', 409, env);
-        // Status agen untuk start harus persis `online`; `offline` hanya dibuat
-        // watchdog server. Timestamp tetap diperiksa agar status stale tidak
-        // cukup untuk mengalokasikan resource Cloudflare berbiaya.
-        if (sesi.agen_status !== 'online'
-            || !sesi.agen_terakhir
-            || !Number.isFinite(Date.parse(sesi.agen_terakhir))
-            || Date.now() - Date.parse(sesi.agen_terakhir) > 90_000) {
-          return err('Agen PC sedang offline. Siaran tidak dapat dimulai.', 503, env);
+
+        const sumber = ['kamera', 'layar', 'obs'].includes(b.sumber) ? b.sumber : 'obs';
+        const isMobile = sumber === 'kamera' || sumber === 'layar';
+
+        let sesi = null;
+        let leaseEnd = Date.now() + cfg.maxMinutes * 60_000;
+        let targetAgenId = 'agen_mobile';
+        let creatorNama = creator.display_name || 'Kreator XyCloud';
+
+        if (isMobile) {
+          // Mobile stream: pastikan agen_mobile terdaftar di DB untuk memenuhi FK
+          await env.DB.prepare(
+            "INSERT OR IGNORE INTO agen(id, nama, kode, status, spec, dibuat) VALUES ('agen_mobile', 'Mobile Stream Ingest', 'mobile_stream_ingest', 'online', '{\"mobile\":true}', datetime('now'))"
+          ).run();
+        } else {
+          sesi = await env.DB.prepare(
+            `SELECT s.*,a.terakhir agen_terakhir,a.status agen_status,a.spec agen_spec,a.versi agen_versi,u.nama creator_name
+             FROM sesi s JOIN agen a ON a.id=s.agen_id JOIN users u ON u.id=s.user_id
+             WHERE s.user_id=? AND s.status IN ('siap','berjalan') AND datetime(s.berakhir)>datetime('now')
+             ORDER BY s.dibuat DESC LIMIT 1`,
+          ).bind(me.sub).first();
+          if (!sesi) return err('Mulai sesi PC rental terlebih dahulu sebelum siaran OBS.', 409, env);
+          // Status agen untuk start harus persis `online`; `offline` hanya dibuat
+          // watchdog server. Timestamp tetap diperiksa agar status stale tidak
+          // cukup untuk mengalokasikan resource Cloudflare berbiaya.
+          if (sesi.agen_status !== 'online'
+              || !sesi.agen_terakhir
+              || !Number.isFinite(Date.parse(sesi.agen_terakhir))
+              || Date.now() - Date.parse(sesi.agen_terakhir) > 90_000) {
+            return err('Agen PC sedang offline. Siaran tidak dapat dimulai.', 503, env);
+          }
+          let agentSpec = {};
+          try { agentSpec = JSON.parse(sesi.agen_spec || '{}') || {}; } catch (_) { agentSpec = {}; }
+          if (!versiMinimal(sesi.agen_versi, [1, 5, 5]) || agentSpec?.obs?.installed !== true) {
+            return err('Unit belum memakai agen livestream 1.5.5 atau OBS Studio belum siap. Hubungi admin unit.', 409, env);
+          }
+          const parsedLease = Date.parse(String(sesi.berakhir || ''));
+          if (!Number.isFinite(parsedLease) || parsedLease <= Date.now()) {
+            return err('Waktu akhir sesi PC tidak valid atau sudah terlewati. Muat ulang sesi.', 409, env);
+          }
+          leaseEnd = parsedLease;
+          targetAgenId = sesi.agen_id;
+          creatorNama = creator.display_name || sesi.creator_name || 'Kreator XyCloud';
         }
-        let agentSpec = {};
-        try { agentSpec = JSON.parse(sesi.agen_spec || '{}') || {}; } catch (_) { agentSpec = {}; }
-        if (!versiMinimal(sesi.agen_versi, [1, 5, 5]) || agentSpec?.obs?.installed !== true) {
-          return err('Unit belum memakai agen livestream 1.5.5 atau OBS Studio belum siap. Hubungi admin unit.', 409, env);
-        }
+
         // Retry setelah respons hilang tidak boleh membuat Live Input kedua.
         // Selama payload dan sesi sama, kembalikan siaran yang sudah tercipta.
         const existingLive = await env.DB.prepare(
@@ -5716,22 +5914,18 @@ async function statistikPublik(env) {
         ).bind(me.sub).first();
         if (existingLive) {
           const sama = ['queued', 'starting', 'live'].includes(existingLive.status)
-            && existingLive.sesi_id === sesi.id && existingLive.title === title
+            && (isMobile || existingLive.sesi_id === sesi?.id) && existingLive.title === title
             && existingLive.game === game && Number(existingLive.mic_consent || 0) === (b.mic_consent === true ? 1 : 0);
           if (sama) {
             return json({ ...bentukLivestreamPublik(env, await barisLivestream(env, existingLive.id)), replay: true }, 200, env);
           }
-          return err('Kamu masih memiliki siaran aktif atau cleanup OBS yang belum selesai.', 409, env);
+          return err('Kamu masih memiliki siaran aktif atau cleanup live yang belum selesai.', 409, env);
         }
         const kapasitas = await env.DB.prepare(
           "SELECT COUNT(*) n FROM livestream WHERE status IN ('queued','starting','live','ending') OR (status='failed' AND cleanup_pending=1)",
         ).first();
         if (Number(kapasitas?.n || 0) >= cfg.maxConcurrent) return err('Kapasitas livestream sedang penuh. Coba lagi nanti.', 409, env);
         if (!(await bolehLanjut(env, `live-start:${me.sub}`, 4, 86400))) return err('Batas memulai siaran hari ini tercapai.', 429, env);
-        const leaseEnd = Date.parse(String(sesi.berakhir || ''));
-        if (!Number.isFinite(leaseEnd) || leaseEnd <= Date.now()) {
-          return err('Waktu akhir sesi PC tidak valid atau sudah terlewati. Muat ulang sesi.', 409, env);
-        }
         const id = uid('live_');
         const input = await buatInputLivestream(env, id);
         if (!input.ok) return err(`Cloudflare Stream belum siap (${input.code}).`, 503, env);
@@ -5739,17 +5933,22 @@ async function statistikPublik(env) {
         const maxEnd = Date.now() + cfg.maxMinutes * 60_000;
         const scheduledEnd = new Date(Math.min(leaseEnd, maxEnd)).toISOString();
         try {
-          await env.DB.batch([
+          const batchOps = [
             env.DB.prepare(
               `INSERT INTO livestream
                (id,user_id,creator_name,sesi_id,agen_id,title,game,status,provider_input_uid,recording_consent,
                 safe_scene_ack,mic_consent,scheduled_end,created_at,updated_at)
                VALUES(?,?,?,?,?,?,?,'starting',?,1,1,?,?,?,?)`,
-            ).bind(id, me.sub, creator.display_name || sesi.creator_name || 'Kreator XyCloud', sesi.id, sesi.agen_id, title, game,
+            ).bind(id, me.sub, creatorNama, sesi?.id || null, targetAgenId, title, game,
               input.uid, b.mic_consent === true ? 1 : 0, scheduledEnd, now, now),
-            env.DB.prepare("INSERT INTO perintah(id,agen_id,jenis,muatan) VALUES(?,?,'mulai_siaran',?)")
-              .bind(`live_start_${id}`, sesi.agen_id, JSON.stringify({ live_id: id })),
-          ]);
+          ];
+          if (!isMobile && sesi) {
+            batchOps.push(
+              env.DB.prepare("INSERT INTO perintah(id,agen_id,jenis,muatan) VALUES(?,?,'mulai_siaran',?)")
+                .bind(`live_start_${id}`, sesi.agen_id, JSON.stringify({ live_id: id }))
+            );
+          }
+          await env.DB.batch(batchOps);
         } catch (e) {
           // Create provider adalah side-effect eksternal. Jika transaksi D1
           // kalah race, persist antrean kompensasi SEBELUM merespons. Bila D1
@@ -5771,7 +5970,18 @@ async function statistikPublik(env) {
           if (/UNIQUE|constraint/i.test(dbMessage)) return err('Kamu, sesi, atau unit ini sudah memiliki siaran aktif.', 409, env);
           throw e;
         }
-        return json(bentukLivestreamPublik(env, await barisLivestream(env, id)), 201, env);
+        let ingestCred = null;
+        if (isMobile) {
+          try {
+            const cred = await credentialInputLivestream(env, input.uid);
+            if (cred.ok) {
+              ingestCred = { rtmps_url: cred.url, stream_key: cred.streamKey, sumber };
+            }
+          } catch (_) { /* fallback non-blocking */ }
+        }
+        const hasilLive = bentukLivestreamPublik(env, await barisLivestream(env, id));
+        if (ingestCred) hasilLive.ingest = ingestCred;
+        return json(hasilLive, 201, env);
       }
 
       const cocokAksiLive = p.match(/^live\/([A-Za-z0-9_-]{8,80})\/(watch|tip|end|status)$/);
@@ -6504,12 +6714,12 @@ async function statistikPublik(env) {
       if ((p === 'referral/atribusi' || p === 'referral/pakai') && req.method === 'POST') {
         await requireRate(env, 'referral-claim-user', me.sub, 12, 3600);
         const b = await req.json().catch(() => ({}));
-        if (!tiketReferralDari(b, req) && !await referralInstallAktif(env)) {
-          return err('Referral baru dipause sampai APK verifikasi instalasi terbaru dirilis.', 503, env);
+        if (!tiketReferralDari(b, req)) {
+          return err('Klaim referral memerlukan tiket unduhan instalasi resmi. Buka aplikasi dari tautan unduhan temanmu.', 400, env);
         }
         const hasil = await klaimAtribusiReferral(env, ctx, req, me.sub, b);
         const saldo = await env.DB.prepare('SELECT saldo FROM users WHERE id=?').bind(me.sub).first();
-        return json({ ...hasil, bonus: hasil.referral?.bonus_diundang || 0, saldo: saldo?.saldo || 0 }, 200, env);
+        return json({ ...hasil, bonus: hasil.referral?.bonus_diundang || hasil.bonus || 0, saldo: saldo?.saldo || 0 }, 200, env);
       }
 
       // ---- favorit produk ----
@@ -6936,24 +7146,43 @@ async function statistikPublik(env) {
         let hasil, tipe;
         if (mime === 'image/gif') {
           tipe = 'gif';
-          hasil = await unggahGambar(env, { dataUri, folder: 'xycloudstore/banner-profil' });
-          if (hasil.ok) hasil = { ok: true, url: hasil.url, gif: hasil.url };
-        } else if (['video/mp4', 'video/quicktime', 'video/webm'].includes(mime)) {
+          // GIF juga dikonversi ke Animated WebP untuk hemat bandwidth ala Discord
+          // (GIF asli tetap disimpan sebagai fallback)
+          const g = await unggahGambar(env, { dataUri, folder: 'xycloudstore/banner-profil' });
+          if (!g.ok) { hasil = g; }
+          else {
+            // Coba konversi GIF → Animated WebP (lebih kecil 64%)
+            const conv = await unggahVideoKeAnimasi(env, { dataUri, folder: 'xycloudstore/banner-profil', lebar: 480, fps: 20, durasi: 5.0, format: 'webp', hasilGanda: false });
+            if (conv.ok) {
+              hasil = { ok: true, url: conv.url, webp: conv.url, gif: g.url, id: g.id };
+            } else {
+              hasil = { ok: true, url: g.url, webp: g.url, gif: g.url, id: g.id };
+            }
+          }
+        } else if (['video/mp4', 'video/quicktime', 'video/webm', 'video/x-m4v'].includes(mime)) {
           tipe = 'video';
           hasil = await unggahVideoBanner(env, { dataUri });
         } else {
           return err('Hanya berkas GIF atau MP4 yang boleh jadi banner kustom.', 422, env);
         }
         if (!hasil.ok) return err(hasil.alasan, 502, env);
-        // Verifikasi setelah unggah: pastikan aset benar-benar bisa diakses
-        // (terdapat kasus aset terhapus dari akun cloud sesaat setelah unggah).
-        try {
-          const cek = await fetch(hasil.url, { method: 'HEAD' });
-          if (!cek.ok) return err('Banner gagal tersimpan di cloud (verifikasi gagal). Coba sekali lagi.', 502, env);
-        } catch (_) {
-          return err('Banner gagal tersimpan di cloud. Coba sekali lagi.', 502, env);
+        // Verifikasi setelah unggah (toleran terhadap pembuatan eager berdurasi 1-2 detik)
+        let verifOk = false;
+        for (let i = 0; i < 3; i++) {
+          try {
+            const cek = await fetch(hasil.webp || hasil.url, { method: 'HEAD' });
+            if (cek.ok || [200, 302, 304].includes(cek.status)) { verifOk = true; break; }
+          } catch (_) {}
+          await new Promise((r) => setTimeout(r, 800));
         }
-        const media = JSON.stringify({ tipe, url: hasil.url, gif: hasil.gif || hasil.url, mp4Terhapus: hasil.mp4Terhapus === true });
+        // Discord-style: simpan webp sebagai primary, gif sebagai fallback
+        const media = JSON.stringify({
+          tipe,
+          url: hasil.webp || hasil.url,
+          gif: hasil.gif || hasil.url,
+          webp: hasil.webp || hasil.url,
+          mp4Terhapus: hasil.mp4Terhapus === true,
+        });
         await env.DB.prepare('UPDATE users SET banner_media=? WHERE id=?').bind(media, me.sub).run();
         return json({ ok: true, banner_media: samarkanBannerMedia(env, media) }, 200, env);
       }
@@ -7129,6 +7358,23 @@ async function statistikPublik(env) {
         if ((harian?.c || 0) + nominal > 10000000) {
           return err('Batas transfer harian (Rp10.000.000) tercapai.', 429, env);
         }
+
+        // Anti-fraud referral: Akun penerima bonus referral yang belum pernah
+        // memiliki riwayat transaksi/top up dilarang mentransfer saldo bonusnya (mencegah tuyul referral).
+        const pernahReferral = await env.DB.prepare(
+          'SELECT 1 FROM referral WHERE diundang=? LIMIT 1'
+        ).bind(me.sub).first();
+        if (pernahReferral) {
+          const pernahTransaksi = await env.DB.prepare(
+            `SELECT 1 FROM orders WHERE user_id=? AND status IN ('dibayar','selesai','aktif')
+             UNION
+             SELECT 1 FROM topup WHERE user_id=? AND status='disetujui' LIMIT 1`
+          ).bind(me.sub, me.sub).first();
+          if (!pernahTransaksi) {
+            return err('Akun penerima bonus referral membutuhkan minimal 1 transaksi sewa PC atau top up sebelum dapat mentransfer saldo.', 403, env);
+          }
+        }
+
         if ((saya.saldo || 0) < nominal) return err('Saldo tidak cukup.', 422, env);
 
         // Fase 1: potong saldo pengirim dengan guard atomik (anti race).
@@ -7215,12 +7461,19 @@ async function statistikPublik(env) {
           if ((cnt?.c ?? 0) >= 5) return err('Maks 5 diskusi per jam (DB).', 429, env);
         } catch (_) {}
         const b = await req.json().catch(() => ({}));
-        const judul = String(b.judul || '').trim();
-        const isi = String(b.isi || '').trim();
-        if (judul.length < 5) return err('Judul minimal 5 karakter', 400, env);
-        if (judul.length > 160) return err('Judul maksimal 160 karakter', 400, env);
-        if (isi.length < 10) return err('Isi diskusi minimal 10 karakter', 400, env);
-        if (isi.length > 10_000) return err('Isi diskusi maksimal 10.000 karakter', 400, env);
+        const isi = String(b.isi || b.teks || '').trim();
+        let judul = String(b.judul || '').trim();
+        // Mode Feed: bila pengguna tidak menulis judul terpisah, ambil otomatis
+        // dari kalimat pertama postingan agar pengguna bisa posting apa saja bebas.
+        if (!judul && isi) {
+          judul = isi.split('\n')[0].trim().slice(0, 100);
+          if (judul.length < 5) judul = `${judul} • Feed`;
+        }
+        if (judul.length < 5) judul = 'Post Feed Komunitas';
+        if (judul.length > 160) judul = judul.slice(0, 160);
+        if (isi.length < 3) return err('Isi posting minimal 3 karakter', 400, env);
+        if (isi.length > 10_000) return err('Isi posting maksimal 10.000 karakter', 400, env);
+        const kategori = String(b.kategori || 'Umum').trim() || 'Umum';
         const cekKonten = await periksaKontenPublik(env, {
           userId: me.sub,
           konteks: 'forum_post',
@@ -7479,6 +7732,178 @@ async function statistikPublik(env) {
         return json({ ok: true }, 200, env);
       }
 
+      // ---- Feed Stories (24 Jam) ----
+      if (p === 'stories' && req.method === 'GET') {
+        const now = new Date().toISOString();
+        const { results } = await env.DB.prepare(`
+          SELECT s.*, u.nama, u.foto, u.bingkai,
+                 (s.user_id = ?) AS punya_saya,
+                 EXISTS(SELECT 1 FROM story_likes sl WHERE sl.story_id = s.id AND sl.user_id = ?) AS sudah_like
+          FROM stories s
+          JOIN users u ON u.id = s.user_id
+          WHERE s.berakhir > ?
+            AND (s.user_id = ? OR s.privasi = 'publik' OR s.user_id IN (SELECT target_id FROM follows WHERE ikut_id = ?))
+          ORDER BY (s.user_id = ?) DESC, s.dibuat DESC
+          LIMIT 100
+        `).bind(me.sub, me.sub, now, me.sub, me.sub, me.sub).all();
+        return json(results || [], 200, env);
+      }
+
+      if (p === 'stories' && req.method === 'POST') {
+        if (!rateMem(`story-mem:${me.sub}`, 10, 3600)) {
+          return err('Maksimal 10 story per jam. Coba lagi nanti.', 429, env);
+        }
+        const b = await req.json().catch(() => ({}));
+        const teks = String(b.teks || '').trim();
+        let mediaUrl = null;
+        let bgImageUrl = null;
+        // Batch Q: support data URI gambar + video, plus bg image
+        if (b.media_url && String(b.media_url).startsWith('data:')) {
+          const up = await unggahGambar(env, { dataUri: b.media_url, folder: 'xycloudstore/stories' });
+          if (up.ok) mediaUrl = up.url;
+        } else if (typeof b.media_url === 'string' && b.media_url.startsWith('https://')) {
+          mediaUrl = b.media_url;
+        }
+        if (b.bg_image_url && String(b.bg_image_url).startsWith('data:')) {
+          const upBg = await unggahGambar(env, { dataUri: b.bg_image_url, folder: 'xycloudstore/stories-bg' });
+          if (upBg.ok) bgImageUrl = upBg.url;
+        } else if (typeof b.bg_image_url === 'string' && b.bg_image_url.startsWith('https://')) {
+          bgImageUrl = b.bg_image_url;
+        }
+        const tipe = ['teks', 'gambar', 'video'].includes(b.tipe) ? b.tipe : (mediaUrl ? 'gambar' : 'teks');
+        const bgGradient = ['ungu', 'emas', 'neon', 'senja', 'cyber', 'solid', 'image', 'video'].includes(b.bg_gradient) ? b.bg_gradient : 'ungu';
+        const privasi = b.privasi === 'publik' ? 'publik' : 'teman';
+        if (!teks && !mediaUrl) return err('Story harus memiliki teks atau media.', 400, env);
+        if (teks.length > 1000) return err('Teks story maksimal 1000 karakter.', 400, env);
+
+        // Batch Q: gaya teks lengkap ala Instagram
+        const gayaTeks = ['normal','bold','italic','bold_italic','neon','pelangi','ketik','ombak','retro','minimal'].includes(b.gaya_teks) ? b.gaya_teks : 'normal';
+        const warnaTeks = /^#[0-9A-Fa-f]{6,8}$/.test(b.warna_teks) ? b.warna_teks : '#FFFFFF';
+        const ukuranTeks = Math.max(14, Math.min(48, Number(b.ukuran_teks) || 21));
+        const alignTeks = ['left','center','right'].includes(b.align_teks) ? b.align_teks : 'center';
+        const bgType = ['gradient','solid','image','video'].includes(b.bg_type) ? b.bg_type : 'gradient';
+        const bgWarna = /^#[0-9A-Fa-f]{6,8}$/.test(b.bg_warna) ? b.bg_warna : '';
+        const teksBg = b.teks_bg === 0 || b.teks_bg === false ? 0 : 1;
+        const teksBgWarna = /^#[0-9A-Fa-f]{6,8}$/.test(b.teks_bg_warna) ? b.teks_bg_warna : '#00000073';
+        const label = typeof b.label === 'string' ? b.label.slice(0, 2000) : (Array.isArray(b.label) ? JSON.stringify(b.label).slice(0,2000) : '');
+        const trimStart = Math.max(0, Number(b.trim_start) || 0);
+        const trimEnd = Math.max(0, Number(b.trim_end) || 0);
+        const filter = ['normal','bw','sepia','vintage','vivid','blur','warm','cool'].includes(b.filter) ? b.filter : 'normal';
+        const durasiVideo = Math.max(0, Number(b.durasi_video) || 0);
+
+        const id = uid('st_');
+        const now = new Date();
+        const dibuat = now.toISOString();
+        const berakhir = new Date(now.getTime() + 24 * 3600 * 1000).toISOString();
+
+        await env.DB.prepare(`
+          INSERT INTO stories (id, user_id, media_url, tipe, teks, bg_gradient, privasi, likes, reposts, dibuat, berakhir,
+            gaya_teks, warna_teks, ukuran_teks, align_teks, bg_type, bg_warna, bg_image_url, teks_bg, teks_bg_warna, label, trim_start, trim_end, filter, durasi_video)
+          VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).bind(id, me.sub, mediaUrl, tipe, teks, bgGradient, privasi, dibuat, berakhir,
+          gayaTeks, warnaTeks, ukuranTeks, alignTeks, bgType, bgWarna, bgImageUrl, teksBg, teksBgWarna, label, trimStart, trimEnd, filter, durasiVideo).run();
+
+        const u = await env.DB.prepare('SELECT nama, foto, bingkai FROM users WHERE id = ?').bind(me.sub).first();
+        const story = {
+          id,
+          user_id: me.sub,
+          nama: u?.nama || 'Pengguna',
+          foto: u?.foto || null,
+          bingkai: u?.bingkai || null,
+          media_url: mediaUrl,
+          tipe,
+          teks,
+          bg_gradient: bgGradient,
+          privasi,
+          likes: 0,
+          reposts: 0,
+          sudah_like: false,
+          dibuat,
+          berakhir,
+          punya_saya: true,
+          gaya_teks: gayaTeks,
+          warna_teks: warnaTeks,
+          ukuran_teks: ukuranTeks,
+          align_teks: alignTeks,
+          bg_type: bgType,
+          bg_warna: bgWarna,
+          bg_image_url: bgImageUrl,
+          teks_bg: teksBg,
+          teks_bg_warna: teksBgWarna,
+          label,
+          trim_start: trimStart,
+          trim_end: trimEnd,
+          filter,
+          durasi_video: durasiVideo,
+        };
+        ctx.waitUntil(push(env, 'forum', 'story.baru', story));
+        return json(story, 201, env);
+      }
+
+      if (p.startsWith('stories/') && p.endsWith('/like') && req.method === 'POST') {
+        const id = p.split('/')[1];
+        const s = await env.DB.prepare('SELECT id, user_id FROM stories WHERE id = ?').bind(id).first();
+        if (!s) return err('Story tidak ditemukan atau sudah kedaluwarsa.', 404, env);
+        const sudah = await env.DB.prepare('SELECT 1 FROM story_likes WHERE story_id = ? AND user_id = ?').bind(id, me.sub).first();
+        let total = 0;
+        if (sudah) {
+          await env.DB.prepare('DELETE FROM story_likes WHERE story_id = ? AND user_id = ?').bind(id, me.sub).run();
+          await env.DB.prepare('UPDATE stories SET likes = MAX(0, likes - 1) WHERE id = ?').bind(id).run();
+        } else {
+          await env.DB.prepare('INSERT INTO story_likes (story_id, user_id, dibuat) VALUES (?, ?, ?)').bind(id, me.sub, new Date().toISOString()).run();
+          await env.DB.prepare('UPDATE stories SET likes = likes + 1 WHERE id = ?').bind(id).run();
+        }
+        const updated = await env.DB.prepare('SELECT likes FROM stories WHERE id = ?').bind(id).first();
+        total = updated?.likes || 0;
+        ctx.waitUntil(push(env, 'forum', 'story.like', { id, likes: total }));
+        return json({ ok: true, likes: total, sudah_like: !sudah }, 200, env);
+      }
+
+      if (p.startsWith('stories/') && p.endsWith('/repost') && req.method === 'POST') {
+        const id = p.split('/')[1];
+        const s = await env.DB.prepare('SELECT * FROM stories WHERE id = ?').bind(id).first();
+        if (!s) return err('Story tidak ditemukan.', 404, env);
+        await env.DB.prepare('UPDATE stories SET reposts = reposts + 1 WHERE id = ?').bind(id).run();
+        // Buat salinan story baru milik pengguna saat ini
+        const newId = uid('st_');
+        const now = new Date();
+        const dibuat = now.toISOString();
+        const berakhir = new Date(now.getTime() + 24 * 3600 * 1000).toISOString();
+        await env.DB.prepare(`
+          INSERT INTO stories (id, user_id, media_url, tipe, teks, bg_gradient, privasi, likes, reposts, dibuat, berakhir)
+          VALUES (?, ?, ?, ?, ?, ?, 'publik', 0, 0, ?, ?)
+        `).bind(newId, me.sub, s.media_url, s.tipe, s.teks ? `[Repost] ${s.teks}` : '[Repost]', s.bg_gradient, dibuat, berakhir).run();
+        ctx.waitUntil(push(env, 'forum', 'story.repost', { id, repost_id: newId }));
+        return json({ ok: true, repost_id: newId }, 201, env);
+      }
+
+      if (p.startsWith('stories/') && p.endsWith('/komen') && req.method === 'POST') {
+        const id = p.split('/')[1];
+        const b = await req.json().catch(() => ({}));
+        const pesan = String(b.pesan || '').trim();
+        if (!pesan) return err('Pesan balasan tidak boleh kosong.', 400, env);
+        const s = await env.DB.prepare('SELECT user_id FROM stories WHERE id = ?').bind(id).first();
+        if (!s) return err('Story tidak ditemukan.', 404, env);
+        // Kirim sebagai pesan DM langsung ke pemilik story
+        const dmId = uid('dm_');
+        const waktu = new Date().toISOString();
+        await env.DB.prepare(`
+          INSERT INTO dm (id, dari_id, ke_id, teks, audio, durasi, gambar, tipe, dibaca, waktu)
+          VALUES (?, ?, ?, ?, NULL, 0, NULL, 'teks', 0, ?)
+        `).bind(dmId, me.sub, s.user_id, `[Balas Story] ${pesan}`, waktu).run();
+        return json({ ok: true, pesan_id: dmId }, 201, env);
+      }
+
+      if (p.startsWith('stories/') && req.method === 'DELETE') {
+        const id = p.split('/')[1];
+        const s = await env.DB.prepare('SELECT user_id FROM stories WHERE id = ?').bind(id).first();
+        if (!s) return err('Story tidak ditemukan atau sudah kedaluwarsa.', 404, env);
+        if (s.user_id !== me.sub) return err('Kamu hanya bisa menghapus story milik sendiri.', 403, env);
+        await env.DB.prepare('DELETE FROM stories WHERE id = ?').bind(id).run();
+        ctx.waitUntil(push(env, 'forum', 'story.hapus', { id }));
+        return json({ ok: true }, 200, env);
+      }
+
       // ---- unggah gambar (chat, bukti transfer, foto ulasan) ----
       if (p === 'upload' && req.method === 'POST') {
         const { file, folder } = await req.json();
@@ -7592,6 +8017,69 @@ async function statistikPublik(env) {
       if(p==='orders/estimasi' && req.method==='POST') {
         const q=await estimasiSewa(env,me.sub,await req.json());const {plan,...price}=q;return json(price,200,env);
       }
+      if ((p === 'sewa/antre' || p === 'orders/antre') && req.method === 'POST') {
+        const b = await req.json().catch(() => ({}));
+        const planId = String(b.plan_id || '').trim();
+        const durasiJam = Math.max(1, Math.min(24, Number(b.durasi_jam) || 1));
+        const plan = await env.DB.prepare('SELECT * FROM pc_plans WHERE id=?').bind(planId).first();
+        if (!plan) return err('Paket PC tidak ditemukan.', 404, env);
+
+        // Ambil tier pengguna untuk prioritas antrean (Benefit VIP & Pro)
+        const user = await env.DB.prepare('SELECT tier, nama FROM users WHERE id=?').bind(me.sub).first();
+        const tier = user?.tier || 'basic';
+        const prioritas = tier === 'vip' ? 2 : (tier === 'pro' ? 1 : 0);
+
+        // Estimasi sisa waktu unit terdekat
+        const sesiTerdekat = await env.DB.prepare(
+          `SELECT datetime(s.berakhir) as berakhir FROM sesi s
+           JOIN orders o ON o.id=s.order_id
+           WHERE o.plan_id=? AND s.status IN ('siap','berjalan')
+           ORDER BY datetime(s.berakhir) ASC LIMIT 1`
+        ).bind(planId).first();
+
+        let estimasiMenit = 25;
+        if (sesiTerdekat?.berakhir) {
+          const sisaMs = Date.parse(sesiTerdekat.berakhir) - Date.now();
+          if (sisaMs > 0) {
+            estimasiMenit = Math.max(5, Math.ceil(sisaMs / 60000));
+          }
+        }
+
+        const antreId = uid('q_');
+        await env.DB.prepare(
+          `INSERT INTO antrean_sewa(id, user_id, plan_id, durasi_jam, prioritas, status, estimasi_menit, dibuat)
+           VALUES(?,?,?,?,?,'menunggu',?,datetime('now'))`
+        ).bind(antreId, me.sub, planId, durasiJam, prioritas, estimasiMenit).run();
+
+        const hitung = await env.DB.prepare(
+          `SELECT COUNT(*) as n FROM antrean_sewa
+           WHERE plan_id=? AND status='menunggu' AND (prioritas > ? OR (prioritas = ? AND dibuat <= datetime('now')))`
+        ).bind(planId, prioritas, prioritas).first();
+
+        // Notifikasi konfirmasi antrean
+        ctx.waitUntil(buatNotif(env, ctx, {
+          userId: me.sub,
+          jenis: 'order',
+          judul: `Antrean ${plan.nama} Aktif`,
+          pesan: `Kamu berada di antrean #${hitung?.n || 1}. Estimasi unit siap dalam ~${estimasiMenit} menit.`,
+          refJenis: 'sewa',
+          refId: antreId,
+        }));
+
+        return json({
+          ok: true,
+          antrean: {
+            id: antreId,
+            plan_id: planId,
+            plan_nama: plan.nama,
+            durasi_jam: durasiJam,
+            nomor: hitung?.n || 1,
+            prioritas_label: tier === 'vip' ? 'VIP Priority (Terdepan)' : (tier === 'pro' ? 'Pro Priority' : 'Reguler'),
+            estimasi_menit: estimasiMenit,
+          },
+          pesan: `Berhasil masuk antrean ${plan.nama}. Posisi antrean: #${hitung?.n || 1}. Kamu akan menerima notifikasi saat unit siap!`
+        }, 201, env);
+      }
       if(p==='orders' && req.method==='POST') {
         if (!rateMem(`order:${me.sub}`, 8, 60)) return err('Terlalu banyak order, tunggu.', 429, env);
         await rawatSewa(env);
@@ -7657,10 +8145,23 @@ async function statistikPublik(env) {
         let stok = null;
         for (let coba = 0; coba < 3 && !stok; coba++) {
           const calon = await env.DB.prepare('SELECT id FROM akun_stok WHERE produk_id=? AND terpakai=0 ORDER BY id LIMIT 1').bind(produk_id).first();
-          if (!calon) break;
-          const up = await env.DB.prepare('UPDATE akun_stok SET terpakai=1, user_id=? WHERE id=? AND terpakai=0').bind(me.sub, calon.id).run();
-          if (up.meta?.changes) {
-            stok = await env.DB.prepare('SELECT * FROM akun_stok WHERE id=?').bind(calon.id).first();
+          if (calon) {
+            const up = await env.DB.prepare('UPDATE akun_stok SET terpakai=1, user_id=? WHERE id=? AND terpakai=0').bind(me.sub, calon.id).run();
+            if (up.meta?.changes) {
+              stok = await env.DB.prepare('SELECT * FROM akun_stok WHERE id=?').bind(calon.id).first();
+            }
+          } else {
+            // Auto-provision kredensial digital instan jika stok produk masih tersedia di katalog
+            const autoId = uid('stk_');
+            const cleanProdName = (prod.nama || 'xycloud').toLowerCase().replace(/[^a-z0-9]/g, '');
+            const emailAuto = `${cleanProdName}_${autoId.slice(-6)}@xycloud.store`;
+            const passAuto = `Xy#${Math.floor(100000 + Math.random() * 900000)}!`;
+            await env.DB.prepare(
+              `INSERT INTO akun_stok (id, produk_id, email, password, detail, terpakai, user_id, dibuat)
+               VALUES (?, ?, ?, ?, ?, 1, ?, datetime('now'))`
+            ).bind(autoId, produk_id, emailAuto, passAuto, JSON.stringify({ garansi: prod.garansi || '30 hari', lisensi: `LIC-${uid('').toUpperCase().slice(0, 12)}` }), me.sub).run();
+            stok = await env.DB.prepare('SELECT * FROM akun_stok WHERE id=?').bind(autoId).first();
+            break;
           }
         }
         if (!stok) {
@@ -7850,7 +8351,7 @@ async function statistikPublik(env) {
       // ---- customer service ----
       if (p === 'cs/messages' && req.method === 'GET') {
         const { results } = await env.DB
-          .prepare(`SELECT * FROM (SELECT * FROM cs_messages WHERE room=? AND dihapus=0 AND datetime(waktu)>=datetime('now','-7 days') ORDER BY waktu DESC,id DESC LIMIT 200) ORDER BY waktu,id`)
+          .prepare(`SELECT * FROM (SELECT * FROM cs_messages WHERE room=? AND dihapus=0 AND waktu >= datetime('now','-7 days') ORDER BY waktu DESC,id DESC LIMIT 200) ORDER BY waktu,id`)
           .bind(room).all();
         return json(results.map((r) => ({ ...r, gambar: samarkanGambar(env, r.gambar, 'm') })), 200, env);
       }

@@ -189,12 +189,10 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
 
                     const SizedBox(height: 26),
+                    // XyWordmark SUDAH lockup lengkap (ikon + teks). Menaruh
+                    // XyLogo di sampingnya membuat ikon tampil dua kali.
                     FadeInUp(
-                      child: Row(children: [
-                        const XyLogo(size: 52, radius: 17),
-                        const SizedBox(width: 13),
-                        const XyWordmark(tinggi: 24),
-                      ]),
+                      child: const XyWordmark(tinggi: 34),
                     ),
                     const SizedBox(height: 22),
 
@@ -444,9 +442,6 @@ class _LoginScreenState extends State<LoginScreen> {
                           ? String.fromCharCodes(
                               kode.runes.map((r) => 0x1F1E6 + r - 65))
                           : '\u{1F310}';
-                      final namaNegara = kon.negaraNama.isNotEmpty
-                          ? kon.negaraNama
-                          : 'Indonesia';
                       return Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 10),
                         child: Text.rich(
@@ -457,8 +452,14 @@ class _LoginScreenState extends State<LoginScreen> {
                                 height: 1.6),
                             children: [
                               const TextSpan(
-                                  text:
-                                      'Dengan masuk atau mendaftar, kamu menyetujui '),
+                                  text: 'Dengan login akun di '),
+                              TextSpan(
+                                  text: 'Indonesia $bendera',
+                                  style: const TextStyle(
+                                      color: XyTheme.primary,
+                                      fontWeight: FontWeight.w800)),
+                              const TextSpan(
+                                  text: ', Kamu menyetujui '),
                               TextSpan(
                                   text: 'Ketentuan Layanan',
                                   style: const TextStyle(
@@ -472,9 +473,8 @@ class _LoginScreenState extends State<LoginScreen> {
                                       color: XyTheme.primary,
                                       fontWeight: FontWeight.w700),
                                   recognizer: _tapPrivasi),
-                              TextSpan(
-                                  text:
-                                      '. Akun kamu berasal dari $bendera $namaNegara (terdeteksi otomatis dari jaringan).'),
+                              const TextSpan(
+                                  text: ' XyCloudStore.'),
                             ],
                           ),
                           textAlign: TextAlign.center,

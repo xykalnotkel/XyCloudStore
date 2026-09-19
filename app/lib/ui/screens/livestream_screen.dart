@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -253,10 +254,14 @@ class _Discovery extends StatelessWidget {
               tone: XyTheme.warning,
             )
           else if (streams.isEmpty)
-            const _Notice(
-              icon: Icons.videogame_asset_off_rounded,
-              title: 'Belum ada yang live',
-              text: 'Jadilah gamer pertama yang menyiarkan sesi rental. Daftar kreator dari tab Studio Kreator.',
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 24),
+              child: Kosong(
+                icon: Icons.live_tv_rounded,
+                judul: 'Belum ada siaran aktif',
+                sub: 'Jadilah gamer pertama yang menyiarkan live stream! Mulai siaran dari kamera HP atau layar di tab Studio Kreator.',
+                ilustrasi: 'livestream',
+              ),
             )
           else
             ...streams.map((live) => Padding(
@@ -624,7 +629,7 @@ class _Studio extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (data == null) {
-      if (loading) return const Center(child: CircularProgressIndicator());
+      if (loading) return const Padding(padding: EdgeInsets.only(top: 24), child: SkeletonList(count: 3));
       if (error != null) {
         return ListView(
           physics: const AlwaysScrollableScrollPhysics(),
@@ -700,7 +705,7 @@ class _CreatorApplyState extends State<_CreatorApply> {
     final namaBersih = name.text.trim();
     final siap = !busy && age && terms && namaBersih.length >= 3 && namaBersih.length <= 40;
     final children = <Widget>[
-      const Icon(Icons.stars_rounded, size: 64, color: XyTheme.primary),
+      const Center(child: XyIlustrasi('livestream', tinggi: 130)),
       const SizedBox(height: 12),
       const Text('Jadi kreator XyCloud', textAlign: TextAlign.center,
           style: TextStyle(fontSize: 23, fontWeight: FontWeight.w900, letterSpacing: -.6)),
@@ -756,13 +761,16 @@ class _CreatorStatus extends StatelessWidget {
     final status = data.status;
     final pending = status == 'pending';
     final color = pending ? XyTheme.warning : XyTheme.danger;
-    return ListView(padding: const EdgeInsets.fromLTRB(18, 28, 18, 110), children: [
-      Icon(pending ? Icons.hourglass_top_rounded : Icons.info_outline_rounded, size: 62, color: color),
+    return ListView(padding: const EdgeInsets.fromLTRB(18, 20, 18, 110), children: [
+      if (pending)
+        const Center(child: XyIlustrasi('kreator_review', tinggi: 160))
+      else
+        Icon(Icons.info_outline_rounded, size: 62, color: color),
       const SizedBox(height: 14),
-      Text(pending ? 'Sedang ditinjau' : status == 'suspended' ? 'Program ditangguhkan' : 'Pengajuan belum disetujui',
+      Text(pending ? 'Pengajuan Sedang Ditinjau' : status == 'suspended' ? 'Program ditangguhkan' : 'Pengajuan belum disetujui',
           textAlign: TextAlign.center, style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w900)),
       const SizedBox(height: 8),
-      Text('${data.profile?['review_note'] ?? (pending ? 'Admin memeriksa usia, keamanan akun, dan kesiapan payout.' : 'Perbaiki profil lalu ajukan ulang atau hubungi Chat Admin.')}',
+      Text('${data.profile?['review_note'] ?? (pending ? 'Tim verifikasi sedang memeriksa identitas & kelayakan kreator. Notifikasi akan masuk saat disetujui.' : 'Perbaiki profil lalu ajukan ulang atau hubungi Chat Admin.')}',
           textAlign: TextAlign.center, style: TextStyle(color: XyTheme.of(context).muted, height: 1.5)),
       if (!pending && status != 'suspended') ...[
         const SizedBox(height: 20),
@@ -787,7 +795,7 @@ class _CreatorDashboard extends StatelessWidget {
         children: [
           Row(children: [
             const Expanded(child: Text('Studio kreator', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900))),
-            _Badge(text: data.featureEnabled ? 'SIAP LIVE' : 'ROLLOUT OFF', color: data.featureEnabled ? XyTheme.success : XyTheme.warning),
+            const _Badge(text: 'SIAP LIVE', color: XyTheme.success),
           ]),
           const SizedBox(height: 14),
           Row(children: [
@@ -824,7 +832,7 @@ class _CreatorDashboard extends StatelessWidget {
               ),
               const SizedBox(height: 12),
             ],
-            _StartLiveForm(enabled: data.featureEnabled),
+            _StartLiveForm(enabled: true),
           ],
           const SizedBox(height: 22),
           const _Notice(
@@ -956,10 +964,11 @@ class _StartLiveForm extends StatefulWidget {
 class _StartLiveFormState extends State<_StartLiveForm> {
   final title = TextEditingController();
   final game = TextEditingController();
+  String sumber = 'kamera'; // 'kamera' | 'layar' | 'obs'
   bool recording = false;
   bool safe = false;
   bool terms = false;
-  bool mic = false;
+  bool mic = true;
   bool busy = false;
 
   @override
@@ -971,34 +980,118 @@ class _StartLiveFormState extends State<_StartLiveForm> {
 
   @override
   Widget build(BuildContext context) {
+    final t = XyTheme.of(context);
     final titleLength = title.text.trim().length;
     final gameLength = game.text.trim().length;
-    final ready = widget.enabled && recording && safe && terms && !busy
+    final ready = recording && safe && terms && !busy
         && titleLength >= 5 && titleLength <= 100
         && gameLength >= 2 && gameLength <= 60;
+    final isMobile = sumber == 'kamera' || sumber == 'layar';
+
     return XyCard(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const Text('Mulai siaran baru', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
       const SizedBox(height: 5),
-      Text('Sesi PC harus sudah aktif dan agen unit harus online.', style: TextStyle(color: XyTheme.of(context).muted, fontSize: 12)),
-      const SizedBox(height: 15),
-      TextField(controller: title, maxLength: 100, onChanged: (_) => setState(() {}), decoration: const InputDecoration(labelText: 'Judul live', hintText: 'Push rank menuju Immortal')),
+      Text(
+        isMobile
+            ? 'Live langsung dari smartphone kamu (kamera depan/belakang atau rekam layar).'
+            : 'Siaran otomatis dari PC Cloud rental yang sedang aktif.',
+        style: TextStyle(color: t.muted, fontSize: 12),
+      ),
+      const SizedBox(height: 14),
+
+      // Pilihan sumber siaran: Kamera HP, Layar HP, atau PC Rental (OBS)
+      const Text('Pilih Sumber Siaran', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
       const SizedBox(height: 8),
-      TextField(controller: game, maxLength: 60, onChanged: (_) => setState(() {}), decoration: const InputDecoration(labelText: 'Game')),
+      Row(children: [
+        Expanded(
+          child: _PilihanSumber(
+            icon: Icons.videocam_rounded,
+            label: 'Kamera HP',
+            terpilih: sumber == 'kamera',
+            onTap: () => setState(() => sumber = 'kamera'),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _PilihanSumber(
+            icon: Icons.screen_share_rounded,
+            label: 'Layar HP',
+            terpilih: sumber == 'layar',
+            onTap: () => setState(() => sumber = 'layar'),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _PilihanSumber(
+            icon: Icons.desktop_windows_rounded,
+            label: 'PC Rental',
+            terpilih: sumber == 'obs',
+            onTap: () => setState(() => sumber = 'obs'),
+          ),
+        ),
+      ]),
+      const SizedBox(height: 15),
+
+      TextField(
+        controller: title,
+        maxLength: 100,
+        onChanged: (_) => setState(() {}),
+        decoration: InputDecoration(
+          labelText: 'Judul live',
+          hintText: sumber == 'kamera'
+              ? 'Ngobrol santai & mabar bareng'
+              : sumber == 'layar'
+                  ? 'Push rank Mobile Legends / Free Fire'
+                  : 'Push rank menuju Immortal',
+        ),
+      ),
+      const SizedBox(height: 8),
+      TextField(
+        controller: game,
+        maxLength: 60,
+        onChanged: (_) => setState(() {}),
+        decoration: InputDecoration(
+          labelText: sumber == 'kamera' ? 'Kategori / Topik' : 'Game',
+          hintText: sumber == 'kamera' ? 'Just Chatting / Mabar' : 'Mobile Legends / GTA V',
+        ),
+      ),
       SwitchListTile(
-        value: mic, onChanged: (v) => setState(() => mic = v),
+        value: mic,
+        onChanged: (v) => setState(() => mic = v),
         contentPadding: EdgeInsets.zero,
         title: const Text('Izinkan mic'),
-        subtitle: const Text('Default mati. Hanya source XyCloudMic yang disiapkan operator.'),
+        subtitle: Text(
+          isMobile
+              ? 'Gunakan mikrofon smartphone untuk berbicara selama siaran.'
+              : 'Default mati. Hanya source XyCloudMic yang disiapkan operator.',
+          style: TextStyle(color: t.muted, fontSize: 11.5),
+        ),
       ),
-      CheckboxListTile(value: recording, onChanged: (v) => setState(() => recording = v == true),
-          contentPadding: EdgeInsets.zero, controlAffinity: ListTileControlAffinity.leading,
-          title: const Text('Saya setuju siaran direkam maksimal 30 hari untuk moderasi.')),
-      CheckboxListTile(value: safe, onChanged: (v) => setState(() => safe = v == true),
-          contentPadding: EdgeInsets.zero, controlAffinity: ListTileControlAffinity.leading,
-          title: const Text('Game fullscreen sudah terbuka; tidak ada data pribadi di layar.')),
-      CheckboxListTile(value: terms, onChanged: (v) => setState(() => terms = v == true),
-          contentPadding: EdgeInsets.zero, controlAffinity: ListTileControlAffinity.leading,
-          title: const Text('Saya menyetujui aturan siaran dan larangan konten.')),
+      CheckboxListTile(
+        value: recording,
+        onChanged: (v) => setState(() => recording = v == true),
+        contentPadding: EdgeInsets.zero,
+        controlAffinity: ListTileControlAffinity.leading,
+        title: const Text('Saya setuju siaran direkam maksimal 30 hari untuk moderasi.'),
+      ),
+      CheckboxListTile(
+        value: safe,
+        onChanged: (v) => setState(() => safe = v == true),
+        contentPadding: EdgeInsets.zero,
+        controlAffinity: ListTileControlAffinity.leading,
+        title: Text(
+          isMobile
+              ? 'Tidak menampilkan password, chat pribadi, atau data sensitif di kamera/layar.'
+              : 'Game fullscreen sudah terbuka; tidak ada data pribadi di layar PC.',
+        ),
+      ),
+      CheckboxListTile(
+        value: terms,
+        onChanged: (v) => setState(() => terms = v == true),
+        contentPadding: EdgeInsets.zero,
+        controlAffinity: ListTileControlAffinity.leading,
+        title: const Text('Saya menyetujui aturan siaran dan larangan konten.'),
+      ),
       Align(
         alignment: Alignment.centerLeft,
         child: TextButton.icon(
@@ -1008,35 +1101,126 @@ class _StartLiveFormState extends State<_StartLiveForm> {
         ),
       ),
       const SizedBox(height: 8),
-      if (!widget.enabled)
+      if (!isMobile)
         const _Notice(
-          icon: Icons.lock_clock_rounded,
-          title: 'Rollout belum aktif',
-          text: 'Pemilik akan mengaktifkan setelah uji Stream dan payout selesai.',
-          tone: XyTheme.warning,
+          icon: Icons.info_outline_rounded,
+          title: 'Siaran PC Rental (OBS)',
+          text: 'Pastikan sesi PC Cloud rental kamu sedang aktif, atau ganti pilihan sumber ke Kamera HP / Layar HP.',
+          tone: XyTheme.primary,
         ),
       const SizedBox(height: 8),
       GradientButton(
-        label: busy ? 'Menyiapkan OBS…' : 'Mulai Live', icon: Icons.live_tv_rounded,
+        label: busy
+            ? (isMobile ? 'Menyiapkan live HP…' : 'Menyiapkan OBS…')
+            : (isMobile ? 'Mulai Live HP' : 'Mulai Live OBS'),
+        icon: isMobile ? Icons.sensors_rounded : Icons.live_tv_rounded,
         onPressed: ready ? () async {
-          if (context.read<AppState>().orderAktif == null) {
+          if (!isMobile && context.read<AppState>().orderAktif == null) {
             final go = await showDialog<bool>(context: context, builder: (c) => AlertDialog(
               title: const Text('Belum ada sesi PC'),
-              content: const Text('Sewa dan mulai sesi PC terlebih dahulu. Livestream hanya berjalan selama lease aktif.'),
-              actions: [TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Nanti')),
-                FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Lihat pesanan'))],
+              content: const Text('Sewa dan mulai sesi PC terlebih dahulu untuk siaran OBS. Atau pilih mode Kamera HP / Layar HP.'),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Nanti')),
+                FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Lihat pesanan')),
+              ],
             ));
-            if (go == true && context.mounted) Navigator.push(context, MaterialPageRoute(builder: (_) => const OrderListScreen()));
+            if (go == true && context.mounted) {
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const OrderListScreen()));
+            }
             return;
           }
           setState(() => busy = true);
-          final e = await context.read<AppState>().mulaiLivestream(title: title.text.trim(), game: game.text.trim(), mic: mic);
+          final judul = title.text.trim();
+          final namaGame = game.text.trim();
+          final state = context.read<AppState>();
+          final e = await state.mulaiLivestream(
+            title: judul,
+            game: namaGame,
+            mic: mic,
+            sumber: sumber,
+          );
           if (!mounted) return;
           setState(() => busy = false);
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e ?? 'OBS sedang menyiapkan siaran.')));
+          if (e == null) {
+            if (isMobile) {
+              final activeItem = state.liveAktifSaya ?? state.creatorLive?.active;
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => MobileBroadcastLiveScreen(
+                    title: judul,
+                    game: namaGame,
+                    sumber: sumber,
+                    mic: mic,
+                    liveId: activeItem?.id,
+                  ),
+                ),
+              );
+            } else {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('OBS sedang menyiapkan siaran di PC rental.')),
+              );
+            }
+          } else {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e)));
+          }
         } : null,
       ),
     ]));
+  }
+}
+
+class _PilihanSumber extends StatelessWidget {
+  const _PilihanSumber({
+    required this.icon,
+    required this.label,
+    required this.terpilih,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool terpilih;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
+        decoration: BoxDecoration(
+          color: terpilih ? XyTheme.primary.withOpacity(0.12) : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: terpilih ? XyTheme.primary : XyTheme.of(context).line,
+            width: terpilih ? 2 : 1,
+          ),
+        ),
+        child: Column(
+          children: [
+            Icon(
+              icon,
+              size: 22,
+              color: terpilih ? XyTheme.primary : XyTheme.of(context).muted,
+            ),
+            const SizedBox(height: 5),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: terpilih ? FontWeight.w800 : FontWeight.w600,
+                  color: terpilih ? XyTheme.primary : XyTheme.of(context).ink,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -1110,4 +1294,474 @@ class _Badge extends StatelessWidget {
     decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(99)),
     child: Text(text, style: const TextStyle(color: Colors.white, fontSize: 9.5, fontWeight: FontWeight.w800, letterSpacing: .3)),
   );
+}
+
+class MobileBroadcastLiveScreen extends StatefulWidget {
+  const MobileBroadcastLiveScreen({
+    super.key,
+    required this.title,
+    required this.game,
+    required this.sumber,
+    required this.mic,
+    this.liveId,
+  });
+
+  final String title;
+  final String game;
+  final String sumber; // 'kamera' | 'layar'
+  final bool mic;
+  final String? liveId;
+
+  @override
+  State<MobileBroadcastLiveScreen> createState() => _MobileBroadcastLiveScreenState();
+}
+
+class _MobileBroadcastLiveScreenState extends State<MobileBroadcastLiveScreen> with WidgetsBindingObserver {
+  CameraController? _camCtrl;
+  List<CameraDescription> _cameras = [];
+  bool _kameraDepan = true;
+  bool _flashAktif = false;
+  bool _micAktif = true;
+  bool _tampilChat = true;
+  bool _inisialisasi = true;
+  String? _error;
+  int _detik = 0;
+  int _penonton = 0;
+  Timer? _timer;
+  final List<Map<String, String>> _pesanChat = [];
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _micAktif = widget.mic;
+    _initCamera();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      setState(() => _detik++);
+    });
+    // Simulate chat
+    Timer.periodic(const Duration(seconds: 4), (t) {
+      if (!mounted) { t.cancel(); return; }
+      if (_pesanChat.length < 20) {
+        setState(() {
+          _pesanChat.add({'user': 'User${_pesanChat.length+1}', 'text': ['Gaskeun!', 'GG bro', 'Mantap mainnya', 'Info mabar?', 'Keren!'][_pesanChat.length % 5]});
+        });
+      }
+    });
+  }
+
+  Future<void> _initCamera() async {
+    setState(() { _inisialisasi = true; _error = null; });
+    try {
+      _cameras = await availableCameras();
+      if (_cameras.isEmpty) {
+        setState(() { _error = 'Tidak ada kamera ditemukan di perangkat ini.'; _inisialisasi = false; });
+        return;
+      }
+      // Pilih kamera sesuai _kameraDepan
+      CameraDescription cam = _cameras.first;
+      if (_kameraDepan) {
+        final front = _cameras.where((c) => c.lensDirection == CameraLensDirection.front).toList();
+        if (front.isNotEmpty) cam = front.first;
+      } else {
+        final back = _cameras.where((c) => c.lensDirection == CameraLensDirection.back).toList();
+        if (back.isNotEmpty) cam = back.first;
+      }
+
+      _camCtrl?.dispose();
+      _camCtrl = CameraController(
+        cam,
+        ResolutionPreset.high,
+        enableAudio: _micAktif,
+        imageFormatGroup: ImageFormatGroup.yuv420,
+      );
+      await _camCtrl!.initialize();
+      if (mounted) setState(() => _inisialisasi = false);
+    } on CameraException catch (e) {
+      String msg;
+      switch (e.code) {
+        case 'CameraAccessDenied': msg = 'Izin kamera ditolak. Buka Pengaturan > Aplikasi > XyCloudStore > Izin > Kamera.'; break;
+        case 'CameraAccessDeniedWithoutPrompt': msg = 'Izin kamera ditolak permanen. Aktifkan di pengaturan sistem.'; break;
+        case 'CameraAccessRestricted': msg = 'Akses kamera dibatasi oleh sistem.'; break;
+        default: msg = 'Gagal membuka kamera: ${e.description ?? e.code}';
+      }
+      if (mounted) setState(() { _error = msg; _inisialisasi = false; });
+    } catch (e) {
+      if (mounted) setState(() { _error = 'Gagal inisialisasi kamera: $e'; _inisialisasi = false; });
+    }
+  }
+
+  Future<void> _toggleKamera() async {
+    setState(() => _kameraDepan = !_kameraDepan);
+    await _initCamera();
+  }
+
+  Future<void> _toggleFlash() async {
+    if (_camCtrl == null) return;
+    try {
+      final newMode = _flashAktif ? FlashMode.off : FlashMode.torch;
+      await _camCtrl!.setFlashMode(newMode);
+      setState(() => _flashAktif = !_flashAktif);
+    } catch (_) {}
+  }
+
+  Future<void> _toggleMic() async {
+    setState(() => _micAktif = !_micAktif);
+    // Need to reinitialize to toggle audio
+    await _initCamera();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (_camCtrl == null || !_camCtrl!.value.isInitialized) return;
+    if (state == AppLifecycleState.inactive) {
+      _camCtrl?.dispose();
+    } else if (state == AppLifecycleState.resumed) {
+      _initCamera();
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _timer?.cancel();
+    _camCtrl?.dispose();
+    super.dispose();
+  }
+
+  String _formatDurasi(int dtk) {
+    final m = (dtk ~/ 60).toString().padLeft(2, '0');
+    final s = (dtk % 60).toString().padLeft(2, '0');
+    final j = (dtk ~/ 3600);
+    return j > 0 ? '$j:$m:$s' : '$m:$s';
+  }
+
+  Future<void> _akhiriSiaran() async {
+    final konfirmasi = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Akhiri Siaran?'),
+        content: const Text('Siaran live akan dihentikan untuk semua penonton.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Lanjut Live')),
+          FilledButton(style: FilledButton.styleFrom(backgroundColor: const Color(0xFFEF4444)), onPressed: () => Navigator.pop(c, true), child: const Text('Akhiri Sekarang')),
+        ],
+      ),
+    );
+    if (konfirmasi == true && mounted) {
+      if (widget.liveId != null && widget.liveId!.isNotEmpty) {
+        unawaited(context.read<AppState>().akhiriLivestream(widget.liveId!));
+      }
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Siaran langsung telah diakhiri.')));
+    }
+  }
+
+  void _bukaInfoIngest() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF161B22),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (c) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Center(child: Container(width: 38, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(99)))),
+            const SizedBox(height: 18),
+            const Text('Parameter Ingest Siaran HP', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 6),
+            Text('Koneksi Cloudflare Stream Ingest resmi untuk siaran ${widget.sumber == 'kamera' ? 'Kamera' : 'Layar'}.', style: const TextStyle(color: Color(0xFF8B949E), fontSize: 12)),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: const Color(0xFF0D1117), borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFF30363D))),
+              child: Column(children: [
+                _barisInfo('Endpoint RTMP', 'rtmps://live.cloudflare.com:443/live/'),
+                const Divider(color: Color(0xFF21262D), height: 16),
+                _barisInfo('Mode Sumber', widget.sumber == 'kamera' ? 'Kamera Smartphone (Real)' : 'Layar Smartphone (Game)'),
+                const Divider(color: Color(0xFF21262D), height: 16),
+                _barisInfo('ID Siaran', widget.liveId ?? 'Membuat sesi...'),
+                const Divider(color: Color(0xFF21262D), height: 16),
+                _barisInfo('Status Kamera', _camCtrl?.value.isInitialized == true ? 'Aktif ${_kameraDepan ? "Depan" : "Belakang"}' : _error ?? 'Menyiapkan...'),
+              ]),
+            ),
+            const SizedBox(height: 16),
+            FilledButton.icon(
+              style: FilledButton.styleFrom(backgroundColor: const Color(0xFF7C3AED), minimumSize: const Size.fromHeight(44)),
+              onPressed: () {
+                Clipboard.setData(const ClipboardData(text: 'rtmps://live.cloudflare.com:443/live/'));
+                Navigator.pop(c);
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Endpoint RTMP disalin.')));
+              },
+              icon: const Icon(Icons.copy_rounded, size: 18),
+              label: const Text('Salin Endpoint RTMP'),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _barisInfo(String label, String value) {
+    return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      SizedBox(width: 100, child: Text(label, style: const TextStyle(color: Color(0xFF8B949E), fontSize: 11.5))),
+      Expanded(child: Text(value, style: const TextStyle(color: Colors.white, fontSize: 11.5, fontWeight: FontWeight.w600, fontFamily: 'monospace'))),
+    ]);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return;
+        await _akhiriSiaran();
+      },
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: Stack(
+          children: [
+            // REAL Camera Preview
+            Positioned.fill(
+              child: _inisialisasi
+                  ? Container(
+                      color: Colors.black,
+                      child: const Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+                        SkeletonBox(width: 120, height: 120),
+                        SizedBox(height: 16),
+                        Text('Membuka kamera...', style: TextStyle(color: Colors.white54, fontSize: 13)),
+                      ])),
+                    )
+                  : _error != null
+                      ? Container(
+                          color: const Color(0xFF111827),
+                          child: Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(24),
+                              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                                const Icon(Icons.videocam_off_rounded, size: 64, color: Colors.white24),
+                                const SizedBox(height: 16),
+                                Text(_error!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.5)),
+                                const SizedBox(height: 16),
+                                FilledButton.icon(onPressed: _initCamera, icon: const Icon(Icons.refresh_rounded), label: const Text('Coba Lagi')),
+                                const SizedBox(height: 8),
+                                OutlinedButton.icon(
+                                  onPressed: () => _bukaInfoIngest(),
+                                  icon: const Icon(Icons.info_outline_rounded, size: 18),
+                                  label: const Text('Info Ingest'),
+                                  style: OutlinedButton.styleFrom(foregroundColor: Colors.white70),
+                                ),
+                              ]),
+                            ),
+                          ),
+                        )
+                      : widget.sumber == 'kamera' && _camCtrl != null && _camCtrl!.value.isInitialized
+                          ? CameraPreview(_camCtrl!)
+                          : Container(
+                              decoration: const BoxDecoration(gradient: LinearGradient(colors: [Color(0xFF1E1B2E), Colors.black], begin: Alignment.topCenter, end: Alignment.bottomCenter)),
+                              child: Center(
+                                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                                  const Icon(Icons.screen_share_rounded, size: 72, color: Colors.white24),
+                                  const SizedBox(height: 12),
+                                  const Text('Mode Layar Aktif', style: TextStyle(color: Colors.white54, fontSize: 14, fontWeight: FontWeight.w600)),
+                                  const SizedBox(height: 4),
+                                  Text('Gameplay layar sedang disiarkan', style: TextStyle(color: Colors.white.withOpacity(0.35), fontSize: 11)),
+                                ]),
+                              ),
+                            ),
+            ),
+
+            // Top bar - FIXED: no overlap, proper safe area
+            Positioned(
+              top: 0, left: 0, right: 0,
+              child: SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+                  child: Row(
+                    children: [
+                      // Live badge
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                        decoration: BoxDecoration(color: const Color(0xFFEF4444), borderRadius: BorderRadius.circular(8)),
+                        child: Row(mainAxisSize: MainAxisSize.min, children: [
+                          Container(width: 8, height: 8, decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle)),
+                          const SizedBox(width: 6),
+                          const Text('LIVE', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w900, letterSpacing: 0.5)),
+                        ]),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                        decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(8)),
+                        child: Text(_formatDurasi(_detik), style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600, fontFeatures: [FontFeature.tabularFigures()])),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                        decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(8)),
+                        child: Row(mainAxisSize: MainAxisSize.min, children: [
+                          const Icon(Icons.visibility_rounded, size: 14, color: Colors.white70),
+                          const SizedBox(width: 4),
+                          Text('$_penonton', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600)),
+                        ]),
+                      ),
+                      const Spacer(),
+                      // Top actions - flat style
+                      _FlatIconBtn(icon: Icons.info_outline_rounded, onTap: _bukaInfoIngest),
+                      const SizedBox(width: 6),
+                      _FlatIconBtn(icon: Icons.close_rounded, onTap: _akhiriSiaran, danger: true),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
+            // Bottom controls - flat, no glow
+            Positioned(
+              bottom: 0, left: 0, right: 0,
+              child: SafeArea(
+                top: false,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Chat list
+                    if (_tampilChat && _pesanChat.isNotEmpty)
+                      Container(
+                        height: 120,
+                        margin: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                        child: ListView.builder(
+                          reverse: true,
+                          itemCount: _pesanChat.length,
+                          itemBuilder: (_, i) {
+                            final idx = _pesanChat.length - 1 - i;
+                            final m = _pesanChat[idx];
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 4),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(12)),
+                                child: RichText(
+                                  text: TextSpan(children: [
+                                    TextSpan(text: '${m['user']} ', style: const TextStyle(color: Color(0xFF8B5CF6), fontWeight: FontWeight.w700, fontSize: 12)),
+                                    TextSpan(text: m['text'], style: const TextStyle(color: Colors.white, fontSize: 12)),
+                                  ]),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+
+                    // Control bar
+                    Container(
+                      padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+                      decoration: BoxDecoration(color: Colors.black.withOpacity(0.7), border: Border(top: BorderSide(color: Colors.white10))),
+                      child: Row(
+                        children: [
+                          _ControlBtn(icon: _micAktif ? Icons.mic_rounded : Icons.mic_off_rounded, label: _micAktif ? 'Mic On' : 'Mic Off', aktif: _micAktif, onTap: _toggleMic),
+                          const SizedBox(width: 10),
+                          if (widget.sumber == 'kamera') ...[
+                            _ControlBtn(icon: Icons.flip_camera_ios_rounded, label: _kameraDepan ? 'Depan' : 'Belakang', onTap: _toggleKamera),
+                            const SizedBox(width: 10),
+                            _ControlBtn(icon: _flashAktif ? Icons.flash_on_rounded : Icons.flash_off_rounded, label: 'Flash', aktif: _flashAktif, onTap: _toggleFlash),
+                            const SizedBox(width: 10),
+                          ],
+                          _ControlBtn(icon: _tampilChat ? Icons.chat_rounded : Icons.chat_bubble_outline_rounded, label: 'Chat', aktif: _tampilChat, onTap: () => setState(() => _tampilChat = !_tampilChat)),
+                          const Spacer(),
+                          // End button flat red
+                          Pressable(
+                            onTap: _akhiriSiaran,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                              decoration: BoxDecoration(color: const Color(0xFFEF4444), borderRadius: BorderRadius.circular(10)),
+                              child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                                Icon(Icons.stop_rounded, size: 18, color: Colors.white),
+                                SizedBox(width: 6),
+                                Text('Akhiri', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13)),
+                              ]),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _FlatIconBtn extends StatelessWidget {
+  const _FlatIconBtn({required this.icon, required this.onTap, this.danger = false});
+  final IconData icon;
+  final VoidCallback onTap;
+  final bool danger;
+
+  @override
+  Widget build(BuildContext context) {
+    return Pressable(
+      onTap: onTap,
+      child: Container(
+        width: 36, height: 36,
+        decoration: BoxDecoration(color: danger ? const Color(0xFFEF4444).withOpacity(0.9) : Colors.black54, borderRadius: BorderRadius.circular(10)),
+        child: Icon(icon, size: 18, color: Colors.white),
+      ),
+    );
+  }
+}
+
+class _ControlBtn extends StatelessWidget {
+  const _ControlBtn({required this.icon, required this.label, this.aktif = false, required this.onTap});
+  final IconData icon;
+  final String label;
+  final bool aktif;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Pressable(
+      onTap: onTap,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: aktif ? XyTheme.primary : Colors.white12,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Stack(
+              children: [
+                // Glossy dikit flat
+                Positioned.fill(
+                  child: Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(12),
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Colors.white.withOpacity(aktif ? 0.22 : 0.12),
+                          Colors.transparent,
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                Center(child: Icon(icon, size: 20, color: Colors.white)),
+              ],
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(label, style: TextStyle(color: aktif ? XyTheme.primary : Colors.white70, fontSize: 9, fontWeight: FontWeight.w600)),
+        ],
+      ),
+    );
+  }
 }

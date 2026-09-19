@@ -75,8 +75,10 @@ CREATE TABLE akun_stok (
   produk_id  TEXT NOT NULL,
   email      TEXT NOT NULL,
   password   TEXT NOT NULL,
+  detail     TEXT,
   terpakai   INTEGER NOT NULL DEFAULT 0,
-  user_id    TEXT
+  user_id    TEXT,
+  dibuat     TEXT
 );
 
 -- ------------------------------------------------------------
@@ -355,7 +357,7 @@ CREATE TABLE rilis (id INTEGER PRIMARY KEY CHECK (id = 1), versi TEXT NOT NULL, 
 --  sesi
 -- ------------------------------------------------------------
 DROP TABLE IF EXISTS sesi;
-CREATE TABLE sesi (id TEXT PRIMARY KEY, order_id TEXT, user_id TEXT NOT NULL, agen_id TEXT, status TEXT NOT NULL DEFAULT 'menyiapkan', pin TEXT, host TEXT, catatan TEXT, durasi_menit INTEGER NOT NULL DEFAULT 60, mulai TEXT, berakhir TEXT, dibuat TEXT NOT NULL DEFAULT (datetime('now')), client_state TEXT, client_last TEXT, client_route TEXT, client_latency_ms INTEGER, client_quality TEXT, client_disconnects INTEGER NOT NULL DEFAULT 0, client_reconnect_attempt INTEGER NOT NULL DEFAULT 0, client_reason TEXT);
+CREATE TABLE sesi (id TEXT PRIMARY KEY, order_id TEXT, user_id TEXT NOT NULL, agen_id TEXT, status TEXT NOT NULL DEFAULT 'menyiapkan', pin TEXT, host TEXT, host_lan TEXT, tunnel_host TEXT, relay_host TEXT, catatan TEXT, durasi_menit INTEGER NOT NULL DEFAULT 60, mulai TEXT, berakhir TEXT, dibuat TEXT NOT NULL DEFAULT (datetime('now')), client_state TEXT, client_last TEXT, client_route TEXT, client_latency_ms INTEGER, client_quality TEXT, client_disconnects INTEGER NOT NULL DEFAULT 0, client_reconnect_attempt INTEGER NOT NULL DEFAULT 0, client_reason TEXT);
 
 -- ------------------------------------------------------------
 --  setelan
@@ -664,6 +666,8 @@ CREATE TABLE IF NOT EXISTS dm (
 );
 CREATE INDEX IF NOT EXISTS idx_dm_dari ON dm(dari_id, waktu);
 CREATE INDEX IF NOT EXISTS idx_dm_ke   ON dm(ke_id, waktu);
+CREATE INDEX IF NOT EXISTS idx_dm_percakapan ON dm(dari_id, ke_id, waktu DESC);
+CREATE INDEX IF NOT EXISTS idx_dm_percakapan_balik ON dm(ke_id, dari_id, waktu DESC);
 CREATE TABLE IF NOT EXISTS simpan_post (
   post_id TEXT NOT NULL,
   user_id TEXT NOT NULL,
@@ -1095,10 +1099,66 @@ BEGIN
     WHERE payout_id=NEW.id AND status='reserved' AND NEW.status='rejected';
 END;
 
-INSERT OR IGNORE INTO setelan(kunci,nilai,diperbarui) VALUES('livestream_enabled','0',CURRENT_TIMESTAMP);
+INSERT OR IGNORE INTO setelan(kunci,nilai,diperbarui) VALUES('livestream_enabled','1',CURRENT_TIMESTAMP);
 INSERT OR IGNORE INTO setelan(kunci,nilai,diperbarui) VALUES('livestream_platform_fee_bps','2000',CURRENT_TIMESTAMP);
 INSERT OR IGNORE INTO setelan(kunci,nilai,diperbarui) VALUES('livestream_min_tip','5000',CURRENT_TIMESTAMP);
 INSERT OR IGNORE INTO setelan(kunci,nilai,diperbarui) VALUES('livestream_max_tip','500000',CURRENT_TIMESTAMP);
 INSERT OR IGNORE INTO setelan(kunci,nilai,diperbarui) VALUES('livestream_min_payout','100000',CURRENT_TIMESTAMP);
 INSERT OR IGNORE INTO setelan(kunci,nilai,diperbarui) VALUES('livestream_max_minutes','240',CURRENT_TIMESTAMP);
 INSERT OR IGNORE INTO setelan(kunci,nilai,diperbarui) VALUES('livestream_max_concurrent','2',CURRENT_TIMESTAMP);
+
+CREATE TABLE IF NOT EXISTS antrean_sewa (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  plan_id TEXT NOT NULL,
+  durasi_jam INTEGER NOT NULL DEFAULT 1,
+  prioritas INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'menunggu',
+  estimasi_menit INTEGER NOT NULL DEFAULT 30,
+  dibuat TEXT NOT NULL DEFAULT (datetime('now')),
+  dipanggil_pada TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_antrean_sewa_plan_status ON antrean_sewa(plan_id, status, prioritas DESC, dibuat ASC);
+
+CREATE TABLE IF NOT EXISTS stories (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  media_url TEXT,
+  tipe TEXT NOT NULL DEFAULT 'teks',
+  teks TEXT,
+  bg_gradient TEXT NOT NULL DEFAULT 'ungu',
+  privasi TEXT NOT NULL DEFAULT 'teman',
+  likes INTEGER NOT NULL DEFAULT 0,
+  reposts INTEGER NOT NULL DEFAULT 0,
+  dibuat TEXT NOT NULL,
+  berakhir TEXT NOT NULL,
+  gaya_teks TEXT DEFAULT 'normal',
+  warna_teks TEXT DEFAULT '#FFFFFF',
+  ukuran_teks INTEGER DEFAULT 21,
+  align_teks TEXT DEFAULT 'center',
+  bg_type TEXT DEFAULT 'gradient',
+  bg_warna TEXT DEFAULT '',
+  bg_image_url TEXT DEFAULT NULL,
+  teks_bg INTEGER DEFAULT 1,
+  teks_bg_warna TEXT DEFAULT '#00000073',
+  label TEXT DEFAULT '',
+  trim_start REAL DEFAULT 0,
+  trim_end REAL DEFAULT 0,
+  filter TEXT DEFAULT 'normal',
+  durasi_video REAL DEFAULT 0,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_stories_user_berakhir ON stories(user_id, berakhir);
+CREATE INDEX IF NOT EXISTS idx_stories_berakhir ON stories(berakhir);
+
+CREATE TABLE IF NOT EXISTS story_likes (
+  story_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  dibuat TEXT NOT NULL,
+  PRIMARY KEY (story_id, user_id),
+  FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+

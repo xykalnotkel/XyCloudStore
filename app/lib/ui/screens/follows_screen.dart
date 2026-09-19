@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/cache.dart';
 import '../../core/motion.dart';
 import '../../core/theme.dart';
 import '../../models/models.dart';
@@ -24,18 +25,44 @@ class _FollowsScreenState extends State<FollowsScreen> {
   List<IkutanItem> _pengikut = [];
   bool _memuat = true;
   String? _galat;
+  String _cari = '';
+  final _cariCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _cariCtrl.dispose();
+    super.dispose();
+  }
 
   @override
   void initState() {
     super.initState();
-    _muat();
+    _bacaCacheLaluMuat();
   }
 
-  Future<void> _muat() async {
-    setState(() {
-      _memuat = true;
-      _galat = null;
-    });
+  Future<void> _bacaCacheLaluMuat() async {
+    // WA style: tampilkan cache dulu 0ms
+    try {
+      final cacheIkut = await Cache.daftar('follows_mengikuti');
+      final cachePengikut = await Cache.daftar('follows_pengikut');
+      if (mounted && (cacheIkut.isNotEmpty || cachePengikut.isNotEmpty)) {
+        setState(() {
+          _mengikuti = cacheIkut.map((e) => IkutanItem.fromJson(Map<String, dynamic>.from(e))).toList();
+          _pengikut = cachePengikut.map((e) => IkutanItem.fromJson(Map<String, dynamic>.from(e))).toList();
+          _memuat = false;
+        });
+      }
+    } catch (_) {}
+    await _muat(sunyi: _mengikuti.isNotEmpty || _pengikut.isNotEmpty);
+  }
+
+  Future<void> _muat({bool sunyi = false}) async {
+    if (!sunyi) {
+      setState(() {
+        _memuat = true;
+        _galat = null;
+      });
+    }
     try {
       final repo = context.read<AppState>().repo;
       final hasil = await Future.wait([
@@ -48,8 +75,11 @@ class _FollowsScreenState extends State<FollowsScreen> {
         _pengikut = hasil[1];
         _memuat = false;
       });
+      // simpan cache
+      await Cache.simpan('follows_mengikuti', hasil[0].map((e) => e.toJson()).toList());
+      await Cache.simpan('follows_pengikut', hasil[1].map((e) => e.toJson()).toList());
     } catch (_) {
-      if (!mounted) return;
+      if (!mounted || sunyi) return;
       setState(() {
         _galat = 'Daftar belum bisa dimuat.';
         _memuat = false;
@@ -60,11 +90,19 @@ class _FollowsScreenState extends State<FollowsScreen> {
   @override
   Widget build(BuildContext context) {
     final t = XyTheme.of(context);
+    final q = _cari.trim().toLowerCase();
+    final listIkut = q.isEmpty
+        ? _mengikuti
+        : _mengikuti.where((x) => x.nama.toLowerCase().contains(q)).toList();
+    final listPengikut = q.isEmpty
+        ? _pengikut
+        : _pengikut.where((x) => x.nama.toLowerCase().contains(q)).toList();
+
     return DefaultTabController(
       length: 2,
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('Mengikuti & Pesan'),
+          title: const Text('Pesan & Pertemanan'),
           bottom: TabBar(
             labelColor: XyTheme.primary,
             unselectedLabelColor: t.muted,
@@ -76,28 +114,65 @@ class _FollowsScreenState extends State<FollowsScreen> {
             ],
           ),
         ),
-        body: _memuat
-            ? const Center(child: CircularProgressIndicator(color: XyTheme.primary))
-            : _galat != null
-                ? Kosong(
-                    icon: Icons.wifi_off_rounded,
-                    judul: 'Waduh',
-                    sub: _galat,
-                    aksi: GradientButton(label: 'Coba Lagi', onPressed: _muat),
-                  )
-                : TabBarView(children: [
-                    _daftar(_mengikuti, 'Belum mengikuti siapa pun',
-                        'Cari teman di Komunitas, buka profilnya, lalu tekan Ikuti.'),
-                    _daftar(_pengikut, 'Belum ada pengikut',
-                        'Rajin berdiskusi di Komunitas supaya makin dikenal.'),
-                  ]),
+        body: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+              child: TextField(
+                controller: _cariCtrl,
+                onChanged: (v) => setState(() => _cari = v),
+                decoration: InputDecoration(
+                  hintText: 'Cari nama teman untuk kirim pesan…',
+                  prefixIcon: const Icon(Icons.search_rounded, size: 20),
+                  suffixIcon: _cari.isEmpty
+                      ? null
+                      : IconButton(
+                          icon: const Icon(Icons.close_rounded, size: 18),
+                          onPressed: () {
+                            _cariCtrl.clear();
+                            setState(() => _cari = '');
+                          },
+                        ),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                ),
+              ),
+            ),
+            Expanded(
+              child: _galat != null && _mengikuti.isEmpty && _pengikut.isEmpty
+                  ? Kosong(
+                      icon: Icons.wifi_off_rounded,
+                      judul: 'Waduh',
+                      sub: _galat,
+                      aksi: GradientButton(label: 'Coba Lagi', onPressed: () => _muat()),
+                    )
+                  : _memuat && _mengikuti.isEmpty && _pengikut.isEmpty
+                      ? const SkeletonList(count: 6)
+                      : TabBarView(children: [
+                          _daftar(
+                              listIkut,
+                              'Belum mengikuti siapa pun',
+                              'Cari teman di Komunitas, buka profilnya, lalu tekan Ikuti.'),
+                          _daftar(
+                              listPengikut,
+                              'Belum ada pengikut',
+                              'Rajin berbagi di Feed Komunitas supaya teman-teman mengikuti profilmu.'),
+                        ]),
+            ),
+          ],
+        ),
       ),
     );
   }
 
   Widget _daftar(List<IkutanItem> items, String judulKosong, String subKosong) {
     if (items.isEmpty) {
-      return Kosong(icon: Icons.people_alt_outlined, judul: judulKosong, sub: subKosong);
+      return Kosong(
+        icon: Icons.people_alt_outlined,
+        judul: judulKosong,
+        sub: subKosong,
+        ilustrasi: 'pesan',
+      );
     }
     return RefreshIndicator(
       color: XyTheme.primary,

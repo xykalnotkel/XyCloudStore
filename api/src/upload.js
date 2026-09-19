@@ -66,7 +66,7 @@ async function tandaTangan(params, secret) {
  * `signParams` = parameter yang ikut ditandatangani (mis. folder, format, public_id);
  * timestamp otomatis ikut ditandatangani.
  */
-async function kirimUnggah(env, endpoint, { folder, timestamp, signParams = {}, file, resourceType }) {
+async function kirimUnggah(env, endpoint, { folder, timestamp, signParams = {}, file, resourceType, extra = {} }) {
   const waktu = String(timestamp ?? Math.floor(Date.now() / 1000));
   const params = { ...signParams, timestamp: waktu };
   const signature = await tandaTangan(params, env.CLOUDINARY_SECRET);
@@ -77,6 +77,8 @@ async function kirimUnggah(env, endpoint, { folder, timestamp, signParams = {}, 
   for (const k of Object.keys(params)) form.append(k, String(params[k]));
   form.append('signature', signature);
   if (resourceType) form.append('resource_type', resourceType);
+  // Parameter tak bertanda tangan (mis. eager) untuk permintaan khusus.
+  for (const [k, v] of Object.entries(extra)) form.append(k, String(v));
   return fetch(endpoint, { method: 'POST', body: form });
 }
 
@@ -276,9 +278,51 @@ export async function hapusCloudinary(env, publicId, resourceType = 'image') {
 }
 
 /**
- * Unggah banner video (Batch N, v2): MP4 diunggah, GIF mandiri dibuat
- * (transform lalu diunggah ulang sebagai aset image/gif), kemudian MP4
- * DIHAPUS dari Cloudinary — tidak ada penyimpanan dobel.
+ * ============================================================
+ *  Batch O (2026-09-19): Cloudinary Video → Animated WebP
+ *  ala Discord Nitro (Banner, Avatar Decoration, Sticker)
+ * ============================================================
+ *  Discord tidak pernah pakai GIF mentah untuk fitur modern:
+ *   - Avatar/banner animasi: CDN `a_` → .webp animasi (bukan .gif)
+ *   - Avatar decoration & profile effects: APNG / Animated WebP / Lottie
+ *     (butuh alpha 8-bit, GIF cuma 1-bit → glow jadi bergerigi)
+ *   - Sticker animasi: wajib APNG atau Lottie JSON, GIF ditolak (512KB limit)
+ *   - Chat GIF: sebenarnya MP4 muted looping (hemat 90% bandwidth)
+ *
+ *  Cloudinary mendukung ini secara native (docs: videos_to_animated_images):
+ *   - Animated WebP:  `fl_animated,fl_awebp` + ekstensi .webp
+ *   - Animated PNG :  `fl_animated,fl_apng`  + ekstensi .png
+ *   - GIF: otomatis animasi bila f_gif / .gif
+ *   - Keuntungan WebP vs GIF: 64% lebih kecil (lossy) hingga 19% (lossless),
+ *     24-bit warna + 8-bit alpha (GIF cuma 256 warna + 1-bit alpha),
+ *     support hingga 30 FPS (GIF biasanya 10 FPS).
+ *
+ *  Flow banner baru (Discord-style):
+ *   1) Upload MP4 sekali.
+ *   2) Eager transform 2 format sekaligus:
+ *      - Animated WebP utama (480px, 20 FPS, 5 detik, q_auto:good, e_loop)
+ *      - GIF fallback (480px, 15 FPS, lossy) untuk klien lama
+ *   3) Simpan keduanya: `webp` = primary (tajam, transparan halus),
+ *      `gif` = fallback.
+ *   4) Flutter prefer `webp` → `gif` → `url`.
+ */
+
+/**
+ * Bangun transformasi Cloudinary untuk video → animated image.
+ * @param {Object} o - { w, fps, durasi, format: 'webp'|'gif'|'avif'|'png', kualitas }
+ */
+function buildAnimatedTransform({ w = 480, fps = 20, durasi = 5.0, format = 'webp', kualitas = 'auto:good' } = {}) {
+  const base = `du_${durasi},so_0,w_${w},c_limit,fps_${fps},q_${kualitas},e_loop`;
+  if (format === 'webp') return `f_webp,fl_awebp,fl_animated,${base}`;
+  if (format === 'gif') return `f_gif,${base},fl_lossy,fl_animated`;
+  if (format === 'avif') return `f_avif,fl_animated,${base}`;
+  if (format === 'png') return `f_png,fl_apng,fl_animated,${base}`;
+  return base;
+}
+
+/**
+ * Unggah video dan konversi ke Animated WebP + GIF (Discord-style banner).
+ * @returns { ok, url, webp, gif, id, format, bytes, hash, animated, duplikat? }
  */
 export async function unggahVideoBanner(env, { dataUri, folder = 'xycloudstore/banner-profil' }) {
   if (!cloudOk(env)) return { ok: false, alasan: 'Kredensial Cloudinary belum diatur' };
@@ -288,7 +332,7 @@ export async function unggahVideoBanner(env, { dataUri, folder = 'xycloudstore/b
   const m = dataUri.match(/^data:([^;]+);base64,/i);
   if (!m) return { ok: false, alasan: 'Format data URI tidak valid' };
   const mime = (m ? m[1] : '').toLowerCase();
-  const allowed = ['video/mp4', 'video/quicktime', 'video/webm'];
+  const allowed = ['video/mp4', 'video/quicktime', 'video/webm', 'video/x-m4v'];
   if (!allowed.includes(mime)) {
     return { ok: false, alasan: `Tipe video tidak didukung: ${mime || 'unknown'}. Pakai MP4.` };
   }
@@ -301,77 +345,173 @@ export async function unggahVideoBanner(env, { dataUri, folder = 'xycloudstore/b
 
   const duplikat = await cariDuplikat(env, hash);
   if (duplikat) {
-    // Aset lama yang tersimpan sudah berupa GIF jadi langsung dipakai.
-    return { ok: true, url: duplikat.url, gif: duplikat.url, id: duplikat.id, format: 'gif', duplikat: true };
+    // Duplikat lama mungkin hanya GIF; kembalikan sebagai webp fallback jika perlu.
+    const isWebP = String(duplikat.url || '').includes('.webp');
+    return {
+      ok: true,
+      url: duplikat.url,
+      webp: isWebP ? duplikat.url : duplikat.url,
+      gif: duplikat.url,
+      id: duplikat.id,
+      format: isWebP ? 'webp' : 'gif',
+      duplikat: true,
+      animated: 1,
+    };
   }
 
   const timestamp = Math.floor(Date.now() / 1000);
-  let mp4Id = null;
   try {
-    // 1) Unggah video (resource video; format asli dipertahankan).
+    // Discord-style: Animated WebP primary (tajam, alpha halus, 60-80% lebih kecil dari GIF)
+    // + GIF fallback untuk kompatibilitas.
+    const tWebP = buildAnimatedTransform({ w: 480, fps: 20, durasi: 5.0, format: 'webp', kualitas: 'auto:good' });
+    const tGif  = buildAnimatedTransform({ w: 480, fps: 15, durasi: 5.0, format: 'gif',  kualitas: 'auto' });
+    const eager = `${tWebP}|${tGif}`;
+
     const r = await kirimUnggah(env, `https://api.cloudinary.com/v1_1/${env.CLOUDINARY_CLOUD}/video/upload`, {
-      folder, timestamp, signParams: { folder }, file: dataUri, resourceType: 'video',
+      folder, timestamp,
+      signParams: { folder, eager },
+      file: dataUri,
+      resourceType: 'video',
     });
     const j = await r.json();
     if (!r.ok || j.error) return { ok: false, alasan: j.error?.message || `HTTP ${r.status}` };
-    mp4Id = j.public_id;
 
-    // 2) Verifikasi MP4 bisa diakses.
-    try {
-      const cek = await fetch(j.secure_url, { method: 'HEAD' });
-      if (!cek.ok) return { ok: false, alasan: 'Video gagal tersimpan di cloud (verifikasi gagal).' };
-    } catch (_) {
-      return { ok: false, alasan: 'Video gagal tersimpan di cloud.' };
+    // Eager menghasilkan array: [webp, gif] sesuai urutan.
+    const eagerArr = Array.isArray(j.eager) ? j.eager : [];
+    let webpUrl = eagerArr.find((e) => String(e.secure_url || '').includes('.webp'))?.secure_url
+               || eagerArr[0]?.secure_url || '';
+    let gifUrl  = eagerArr.find((e) => String(e.secure_url || '').includes('.gif'))?.secure_url
+               || eagerArr[1]?.secure_url || '';
+
+    // Fallback konstruksi manual jika eager belum siap (Cloudinary kadang delay 1-2 detik).
+    if (!webpUrl) {
+      webpUrl = String(j.secure_url).replace('/video/upload/', `/video/upload/${tWebP}/`).replace(/\.[a-z0-9]+$/i, '.webp');
     }
-
-    // 3) Ambil byte GIF hasil transformasi f_gif, lalu unggah ulang sebagai
-    //    aset image/gif mandiri (public_id berakhiran .gif).
-    const gifSumber = String(j.secure_url).replace('/video/upload/', '/video/upload/f_gif,fps_12,w_480,c_limit/');
-    let gifBytes = null;
-    try {
-      const rg = await fetch(gifSumber);
-      if (rg.ok) gifBytes = new Uint8Array(await rg.arrayBuffer());
-    } catch (_) {}
-    if (!gifBytes || gifBytes.length < 12) {
-      // Fallback: pakai GIF turunan (transform) dan biarkan MP4 tersimpan.
-      await catatMedia(env, { id: j.public_id, url: j.secure_url, folder, format: j.format || 'mp4', width: j.width, height: j.height, bytes: j.bytes, animated: 1, hash });
-      return { ok: true, url: j.secure_url, gif: gifSumber, id: j.public_id, format: j.format, sisaMp4: true };
+    if (!gifUrl) {
+      gifUrl = String(j.secure_url).replace('/video/upload/', `/video/upload/${tGif}/`).replace(/\.[a-z0-9]+$/i, '.gif');
     }
+    if (!webpUrl.endsWith('.webp')) webpUrl = webpUrl.replace(/\.[a-z0-9]+$/i, '.webp');
+    if (!gifUrl.endsWith('.gif')) gifUrl = gifUrl.replace(/\.[a-z0-9]+$/i, '.gif');
 
-    const gifBase64 = keBase64(gifBytes);
-    const ts2 = Math.floor(Date.now() / 1000);
-    const rid = crypto.randomUUID().replace(/-/g, '');
-    const r2 = await kirimUnggah(env, `https://api.cloudinary.com/v1_1/${env.CLOUDINARY_CLOUD}/image/upload`, {
-      folder, timestamp: ts2,
-      signParams: { folder, public_id: `${folder}/${rid}.gif` },
-      file: `data:image/gif;base64,${gifBase64}`,
-    });
-    const jg = await r2.json();
-    if (!r2.ok || jg.error) {
-      // Fallback: GIF turunan tetap dipakai, MP4 dibiarkan.
-      await catatMedia(env, { id: j.public_id, url: j.secure_url, folder, format: j.format || 'mp4', width: j.width, height: j.height, bytes: j.bytes, animated: 1, hash });
-      return { ok: true, url: j.secure_url, gif: gifSumber, id: j.public_id, format: j.format, sisaMp4: true };
-    }
-
-    // 4) Hapus MP4 asli — GIF mandiri sudah tersimpan.
-    const terhapus = await hapusCloudinary(env, mp4Id, 'video');
-
-    // 5) Catat aset akhir (GIF).
+    // Catat keduanya, primary adalah webp.
     await catatMedia(env, {
-      id: jg.public_id, url: jg.secure_url, folder, format: 'gif',
-      width: jg.width || null, height: jg.height || null, bytes: jg.bytes || null,
-      animated: 1, hash,
+      id: j.public_id,
+      url: webpUrl,
+      folder,
+      format: 'webp',
+      width: j.width,
+      height: j.height,
+      bytes: j.bytes,
+      animated: 1,
+      hash,
+    });
+    // Catat gif juga sebagai entri terpisah dengan suffix.
+    await catatMedia(env, {
+      id: `${j.public_id}_gif`,
+      url: gifUrl,
+      folder,
+      format: 'gif',
+      width: j.width,
+      height: j.height,
+      bytes: j.bytes,
+      animated: 1,
+      hash: `${hash}_gif`,
     });
 
     return {
       ok: true,
-      url: jg.secure_url,
-      gif: jg.secure_url,
-      id: jg.public_id,
-      format: 'gif',
-      bytes: jg.bytes,
+      url: webpUrl,        // primary (Discord-style)
+      webp: webpUrl,       // Animated WebP 24-bit + 8-bit alpha, seamless loop
+      gif: gifUrl,         // fallback GIF lossy
+      id: j.public_id,
+      format: 'webp',
+      bytes: j.bytes,
       hash,
-      mp4Terhapus: terhapus,
+      animated: 1,
+      // Info tambahan untuk klien: hemat berapa vs GIF (estimasi)
+      meta: { transform_webp: tWebP, transform_gif: tGif },
+    };
+  } catch (e) {
+    return { ok: false, alasan: String(e) };
+  }
+}
+
+/**
+ * Konversi generik video → Animated WebP (untuk forum, story, stiker, dll).
+ * Mirip unggahVideoBanner tapi dengan opsi ukuran/durasi fleksibel.
+ * Dipakai untuk fitur lain selain banner (future-proof ala Discord).
+ */
+export async function unggahVideoKeAnimasi(env, {
+  dataUri,
+  folder = 'xycloudstore/animasi',
+  lebar = 480,
+  fps = 20,
+  durasi = 5.0,
+  format = 'webp', // 'webp' | 'gif' | 'avif'
+  hasilGanda = true, // jika true, hasilkan webp + gif sekaligus
+} = {}) {
+  if (!cloudOk(env)) return { ok: false, alasan: 'Kredensial Cloudinary belum diatur' };
+  if (typeof dataUri !== 'string' || !dataUri.startsWith('data:')) {
+    return { ok: false, alasan: 'Format berkas tidak dikenal' };
+  }
+  const mime = (dataUri.match(/^data:([^;]+);/i)?.[1] || '').toLowerCase();
+  const allowedVideo = ['video/mp4','video/quicktime','video/webm','video/x-m4v','image/gif'];
+  if (!allowedVideo.includes(mime) && !mime.startsWith('video/') && mime !== 'image/gif') {
+    return { ok: false, alasan: `Tipe tidak didukung: ${mime}` };
+  }
+  const b64 = dataUri.split(',')[1] || '';
+  if (Math.floor(b64.length * 0.75) > 15 * 1024 * 1024) {
+    return { ok: false, alasan: 'Berkas terlalu besar, maksimal 15MB' };
+  }
+  const bytes = b64Decode(b64);
+  const hash = await sha256Buf(bytes);
+  const dup = await cariDuplikat(env, hash);
+  if (dup) return { ok: true, url: dup.url, webp: dup.url, gif: dup.url, id: dup.id, duplikat: true, animated: 1 };
+
+  const timestamp = Math.floor(Date.now() / 1000);
+  try {
+    const tPrimary = buildAnimatedTransform({ w: lebar, fps, durasi, format, kualitas: 'auto:good' });
+    const tFallback = buildAnimatedTransform({ w: lebar, fps: Math.min(fps, 15), durasi, format: 'gif', kualitas: 'auto' });
+    const eager = hasilGanda ? `${tPrimary}|${tFallback}` : tPrimary;
+
+    const isImage = mime === 'image/gif';
+    const endpoint = isImage
+      ? `https://api.cloudinary.com/v1_1/${env.CLOUDINARY_CLOUD}/image/upload`
+      : `https://api.cloudinary.com/v1_1/${env.CLOUDINARY_CLOUD}/video/upload`;
+
+    const r = await kirimUnggah(env, endpoint, {
+      folder, timestamp,
+      signParams: { folder, eager: isImage ? undefined : eager, format: isImage ? 'webp' : undefined },
+      file: dataUri,
+      resourceType: isImage ? undefined : 'video',
+      extra: isImage ? { eager } : {},
+    });
+    const j = await r.json();
+    if (!r.ok || j.error) return { ok: false, alasan: j.error?.message || `HTTP ${r.status}` };
+
+    const eagerArr = Array.isArray(j.eager) ? j.eager : [];
+    let primaryUrl = eagerArr[0]?.secure_url || j.secure_url;
+    let fallbackUrl = eagerArr[1]?.secure_url || null;
+
+    // Normalisasi ekstensi
+    if (format === 'webp' && !primaryUrl.endsWith('.webp')) primaryUrl = primaryUrl.replace(/\.[a-z0-9]+$/i, '.webp');
+    if (fallbackUrl && !fallbackUrl.endsWith('.gif')) fallbackUrl = fallbackUrl.replace(/\.[a-z0-9]+$/i, '.gif');
+
+    await catatMedia(env, {
+      id: j.public_id, url: primaryUrl, folder,
+      format, width: j.width, height: j.height, bytes: j.bytes, animated: 1, hash,
+    });
+
+    return {
+      ok: true,
+      url: primaryUrl,
+      webp: format === 'webp' ? primaryUrl : fallbackUrl,
+      gif: fallbackUrl || primaryUrl,
+      id: j.public_id,
+      format,
+      bytes: j.bytes,
+      hash,
+      animated: 1,
     };
   } catch (e) {
     return { ok: false, alasan: String(e) };
@@ -428,8 +568,10 @@ export function samarkanKMedia(env, url, ukuran = 'm') {
 }
 
 /**
- * Samarkan JSON `users.banner_media` ({tipe,url,gif}) supaya
+ * Samarkan JSON `users.banner_media` ({tipe,url,gif,webp}) supaya
  * tidak ada URL Cloudinary yang bocor ke aplikasi.
+ * Discord-style: webp = primary Animated WebP (24-bit + 8-bit alpha),
+ * gif = fallback, url = legacy / original.
  */
 export function samarkanBannerMedia(env, raw) {
   if (!raw) return raw;
@@ -438,6 +580,10 @@ export function samarkanBannerMedia(env, raw) {
     if (!obj || typeof obj !== 'object') return raw;
     if (obj.url) obj.url = samarkanKMedia(env, obj.url);
     if (obj.gif) obj.gif = samarkanKMedia(env, obj.gif);
+    if (obj.webp) obj.webp = samarkanKMedia(env, obj.webp);
+    // Backward compat: jika hanya ada url/gif, jadikan webp = url bila webp
+    if (!obj.webp && obj.url && String(obj.url).includes('.webp')) obj.webp = obj.url;
+    // Jika tipe video lama tanpa webp, anggap url adalah webp jika sudah .webp
     return JSON.stringify(obj);
   } catch (_) {
     return raw;
@@ -460,15 +606,18 @@ export function imageVariant(env,path,accept='',animated=false){
 export async function layaniGambar(env,jalur,req,ctx){
   if(!env.CLOUDINARY_CLOUD)return new Response('Media belum tersedia',{status:503});
   const accept=req?.headers.get('accept')||'';
-  const first=imageVariant(env,jalur,accept,/\\.(gif|webp)$/i.test(jalur));
+  // Regex escape tunggal: `/\\.gif$/` (backslash ganda) tidak pernah cocok
+  // sehingga GIF animasi ikut tertransformasi f_webp,q_78 dan kehilangan
+  // seluruh frame kecuali yang pertama — bug "video convert to gif diam".
+  const first=imageVariant(env,jalur,accept,/\.(gif|webp)$/i.test(jalur));
   if(!first)return new Response('Not found',{status:404});
   const key=new URL(req.url);key.search='v=26&format='+(accept.includes('image/avif')?'avif':'webp');
   const cache=typeof caches!=='undefined'?caches.default:null;
   const cacheKey=new Request(key.toString(),{method:'GET'});
   const hit=cache?await cache.match(cacheKey):null;
   if(hit)return hit;
-  let animated=/\\.gif$/i.test(jalur);
-  if(/\\.webp$/i.test(jalur)){
+  let animated=/\.gif$/i.test(jalur);
+  if(/\.webp$/i.test(jalur)){
     const id=first.id.replace(/^v\d+\//,'').replace(/\\.[^.]+$/,'');
     try{const item=await env.DB.prepare('SELECT animated FROM media_assets WHERE id=?').bind(id).first();animated=item?!!item.animated:true;}catch{animated=true;}
   }

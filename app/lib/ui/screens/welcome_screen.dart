@@ -50,11 +50,9 @@ class _WelcomeScreenState extends State<WelcomeScreen> with SingleTickerProvider
 
               FadeInUp(
                 delay: const Duration(milliseconds: 80),
-                child: Row(children: [
-                  const XyLogo(size: 52, radius: 17, putih: true),
-                  const SizedBox(width: 13),
-                  const XyWordmark(tinggi: 26, putih: true),
-                ]),
+                // XyWordmark sudah lockup lengkap (ikon + teks); XyLogo di
+                // sampingnya membuat ikon tampil dua kali.
+                child: const XyWordmark(tinggi: 34, putih: true),
               ),
 
               const SizedBox(height: 10),

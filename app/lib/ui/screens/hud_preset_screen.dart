@@ -723,11 +723,11 @@ class _HudPresetScreenState extends State<HudPresetScreen> {
       ]);
 
   Widget _kosong(String judul, String isi) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 40),
+        padding: const EdgeInsets.symmetric(vertical: 24),
         child: Column(children: [
-          const Icon(Icons.gamepad_outlined, size: 46, color: XyTheme.muted),
+          const XyIlustrasi('gamepad', tinggi: 140),
           const SizedBox(height: 12),
-          Text(judul, style: const TextStyle(fontWeight: FontWeight.w800)),
+          Text(judul, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
           const SizedBox(height: 5),
           Text(isi,
               textAlign: TextAlign.center,

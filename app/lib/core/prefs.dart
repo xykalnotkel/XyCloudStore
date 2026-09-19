@@ -209,4 +209,14 @@ class Prefs {
       await _aman.delete(key: _kToken);
     } catch (_) {}
   }
+
+  // ---------- generic (untuk layout profil custom grid dll) ----------
+  static Future<String?> getString(String key) async =>
+      (await SharedPreferences.getInstance()).getString(key);
+
+  static Future<void> setString(String key, String value) async =>
+      (await SharedPreferences.getInstance()).setString(key, value);
+
+  static Future<void> remove(String key) async =>
+      (await SharedPreferences.getInstance()).remove(key);
 }

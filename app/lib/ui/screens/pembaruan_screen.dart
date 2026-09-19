@@ -152,7 +152,7 @@ class _PembaruanScreenState extends State<PembaruanScreen> {
                   Text('Fitur makin mulus & cepat.',
                       textAlign: TextAlign.center,
                       style: TextStyle(
-                          color: skema ? Colors.white.withOpacity(.85) : Colors.white,
+                          color: skema ? Colors.white.withOpacity(.85) : XyTheme.of(context).muted,
                           fontSize: 13)),
                 ]),
               ),

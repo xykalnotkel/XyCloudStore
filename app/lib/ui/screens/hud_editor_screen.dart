@@ -7,6 +7,7 @@ import '../../core/pengaturan.dart';
 import '../../core/theme.dart';
 import '../../data/native_stream.dart';
 import '../../models/models.dart';
+import '../widgets/custom_dropdown.dart';
 
 /// Editor HUD selalu dibuka landscape agar koordinat pratinjau sama dengan
 /// layar streaming native. Seluruh posisi relatif, sehingga preset tetap rapi
@@ -541,25 +542,31 @@ class _HudEditorScreenState extends State<HudEditorScreen> {
                         child: AnimatedContainer(
                           duration: const Duration(milliseconds: 100),
                           alignment: Alignment.center,
+                          // HUD streaming bulat (circle) & outline border saja (bukan kotak solid).
                           decoration: BoxDecoration(
-                            color: const Color(0xFF263541).withOpacity(b.opacity),
-                            borderRadius: BorderRadius.circular(14),
+                            shape: BoxShape.circle,
+                            color: _terpilihId == b.id
+                                ? const Color(0x33A78BFA)
+                                : Colors.white.withOpacity(0.06 * b.opacity),
                             border: Border.all(
                               color: _terpilihId == b.id
                                   ? const Color(0xFFA78BFA)
-                                  : Colors.white.withOpacity(.35),
-                              width: _terpilihId == b.id ? 3 : 1,
+                                  : Colors.white.withOpacity(0.80 * b.opacity),
+                              width: _terpilihId == b.id ? 2.6 : 1.6,
                             ),
                             boxShadow: _terpilihId == b.id
-                                ? [BoxShadow(
-                                    color: const Color(0xFF7C3AED).withOpacity(.45),
-                                    blurRadius: 12)]
+                                ? [
+                                    BoxShadow(
+                                      color: const Color(0xFF7C3AED).withOpacity(.55),
+                                      blurRadius: 14,
+                                    )
+                                  ]
                                 : null,
                           ),
                           child: FittedBox(
                             fit: BoxFit.scaleDown,
                             child: Padding(
-                              padding: const EdgeInsets.all(5),
+                              padding: const EdgeInsets.all(6),
                               child: Text(b.label,
                                   style: const TextStyle(
                                       color: Colors.white,
@@ -665,14 +672,29 @@ class _HudEditorScreenState extends State<HudEditorScreen> {
             divisions: 15,
             onChanged: (v) => _ubahTombol(p.copyWith(opacity: v)),
           ),
-          DropdownButtonFormField<String>(
+          XyDropdown<String>(
+            label: 'Cara Tekan',
             value: p.cara,
             isDense: true,
-            decoration: const InputDecoration(labelText: 'Cara tekan'),
-            items: const [
-              DropdownMenuItem(value: 'tahan', child: Text('Tahan (turun–lepas)')),
-              DropdownMenuItem(value: 'ketuk', child: Text('Ketuk sekali')),
-              DropdownMenuItem(value: 'toggle', child: Text('Toggle aktif/mati')),
+            options: const [
+              XyDropdownOption(
+                value: 'tahan',
+                label: 'Tahan (turun–lepas)',
+                icon: Icons.touch_app_rounded,
+                sub: 'Cocok untuk tombol gerak & aksi berkelanjutan',
+              ),
+              XyDropdownOption(
+                value: 'ketuk',
+                label: 'Ketuk sekali',
+                icon: Icons.ads_click_rounded,
+                sub: 'Satu sentuhan langsung eksekusi',
+              ),
+              XyDropdownOption(
+                value: 'toggle',
+                label: 'Toggle aktif/mati',
+                icon: Icons.toggle_on_rounded,
+                sub: 'Ketuk untuk mengunci tombol aktif',
+              ),
             ],
             onChanged: (v) {
               if (v != null) _ubahTombol(p.copyWith(cara: v));

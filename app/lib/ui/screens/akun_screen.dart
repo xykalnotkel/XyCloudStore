@@ -32,7 +32,7 @@ class _AkunScreenState extends State<AkunScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Beli Akun', style: TextStyle(fontWeight: FontWeight.w700, letterSpacing: -.4)),
+        title: const Text('Toko Digital', style: TextStyle(fontWeight: FontWeight.w700, letterSpacing: -.4)),
         actions: [Padding(padding: const EdgeInsets.only(right: 16), child: Center(child: LiveDot(state: s.koneksi)))],
       ),
       body: Column(children: [
@@ -41,7 +41,7 @@ class _AkunScreenState extends State<AkunScreen> {
           child: TextField(
             onChanged: (v) => setState(() => cari = v),
             decoration: const InputDecoration(
-              hintText: 'Cari akun, game, atau layanan...',
+              hintText: 'Cari produk, akun game, atau voucher...',
               prefixIcon: Icon(Icons.search_rounded),
             ),
           ),

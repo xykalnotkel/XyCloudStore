@@ -46,6 +46,10 @@ class _LegalScreenState extends State<LegalScreen> {
         return 'Kebijakan Privasi';
       case 'refund':
         return 'Kebijakan Pengembalian Dana';
+      case 'komunitas':
+        return 'Panduan Komunitas';
+      case 'live':
+        return 'Ketentuan Kreator & Siaran';
       default:
         return 'Syarat dan Ketentuan';
     }

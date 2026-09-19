@@ -1,0 +1,52 @@
+name: Build XyCloud Agent (Windows)
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: agent-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  agent-windows:
+    name: Build Agen Windows (xycloud-agent.exe)
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout kode
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Pasang toolchain Rust (stable-msvc)
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Bangun rilis native (cargo build --release)
+        shell: pwsh
+        working-directory: agent-gui/src-native
+        run: |
+          cargo build --release
+          $exe = Get-Item "target/release/xycloud-agent.exe" -ErrorAction SilentlyContinue
+          if (-not $exe) { throw "xycloud-agent.exe tidak ditemukan setelah cargo build" }
+          Write-Host "EXE:" $exe.FullName $exe.Length
+
+      - name: Smoke-test versi
+        shell: pwsh
+        working-directory: agent-gui/src-native
+        run: |
+          $p = Start-Process -FilePath .\target\release\xycloud-agent.exe -ArgumentList '--veri' `
+            -Wait -PassThru -NoNewWindow -RedirectStandardOutput ..\..\veri.txt
+          Get-Content ..\..\veri.txt
+          if ($p.ExitCode -ne 0) { throw "Smoke-test --veri gagal (exit $($p.ExitCode))" }
+          Remove-Item ..\..\veri.txt -Force -ErrorAction SilentlyContinue
+
+      - name: Unggah artifact xycloud-agent.exe
+        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4
+        with:
+          name: xycloud-agent-windows
+          path: agent-gui/src-native/target/release/xycloud-agent.exe
+          if-no-files-found: error

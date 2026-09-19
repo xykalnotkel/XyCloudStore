@@ -162,13 +162,33 @@ export const LISENSI = [
   ['Material Symbols', 'Google', 'Apache-2.0'],
 ];
 
+const KOMUNITAS = [
+  ['Prinsip Saling Menghormati',
+   'XyCloudStore adalah wadah bagi para gamer, kreator, dan peminat teknologi cloud. Seluruh pengguna wajib saling menghargai. Dilarang melakukan pelecehan, intimidasi, penghinaan berdasarkan SARA, perundungan siber (cyberbullying), atau ancaman kekerasan dalam bentuk apa pun.'],
+  ['Konten Diskusi dan Feed',
+   'Gunakan ruang Feed Komunitas untuk berbagi informasi game, tips konfigurasi streaming, ulasan unit rental, pengalaman bermain, dan diskusi sehat seputar teknologi. Hindari pembuatan postingan yang hanya berisi konten tidak relevan, spam beruntun, atau promosi sampah.'],
+  ['Larangan Konten Sensitif dan Melanggar Hukum',
+   'Dilarang keras mengunggah teks, gambar, atau media yang memuat pornografi, kekerasan ekstrem, perjudian online, obat-obatan terlarang, atau aktivitas lain yang bertentangan dengan hukum di Republik Indonesia.'],
+  ['Keamanan Akun dan Anti-Phishing',
+   'Dilarang menyebarkan tautan berbahaya, software perusak (malware), cheat berbahaya, atau situs phishing. Dilarang membagikan data pribadi (doxxing) milik orang lain atau meminta password, OTP, atau informasi login rahasia pengguna lain.'],
+  ['Transaksi Jual Beli Aman',
+   'Seluruh transaksi akun digital, rental PC, top up saldo, dan tips kreator wajib dilakukan melalui sistem resmi aplikasi XyCloudStore. Dilarang mengajak transaksi langsung di luar sistem untuk mencegah penipuan. Transaksi di luar sistem resmi tidak dilindungi oleh garansi kami.'],
+  ['Sistem Moderasi dan Sanksi',
+   'Konten yang dilaporkan oleh pengguna akan ditinjau oleh tim moderator. Pelanggaran terhadap panduan ini dapat berakibat pada penghapusan postingan, pembatasan fitur chat/komentar sementara, hingga pemblokiran akun dan perangkat secara permanen.'],
+];
+
 /** Halaman HTML bertema ungu untuk dibuka di browser. */
 export function halamanLegal(jenis) {
   const judul = jenis === 'privasi' ? 'Kebijakan Privasi'
     : jenis === 'refund' ? 'Kebijakan Pengembalian Dana'
+    : jenis === 'komunitas' ? 'Panduan Komunitas'
     : jenis === 'live' ? 'Ketentuan Kreator XyCloud Live'
     : 'Syarat dan Ketentuan';
-  const isi = jenis === 'privasi' ? PRIVASI : jenis === 'refund' ? REFUND : jenis === 'live' ? LIVE : SYARAT;
+  const isi = jenis === 'privasi' ? PRIVASI
+    : jenis === 'refund' ? REFUND
+    : jenis === 'komunitas' ? KOMUNITAS
+    : jenis === 'live' ? LIVE
+    : SYARAT;
 
   const bagian = isi
     .map(
@@ -239,10 +259,15 @@ export function halamanLegal(jenis) {
 
 /** Versi data mentah untuk ditampilkan di dalam aplikasi. */
 export function isiLegal(jenis) {
-  const isi = jenis === 'privasi' ? PRIVASI : jenis === 'refund' ? REFUND : jenis === 'live' ? LIVE : SYARAT;
+  const isi = jenis === 'privasi' ? PRIVASI
+    : jenis === 'refund' ? REFUND
+    : jenis === 'komunitas' ? KOMUNITAS
+    : jenis === 'live' ? LIVE
+    : SYARAT;
   return {
     judul: jenis === 'privasi' ? 'Kebijakan Privasi'
       : jenis === 'refund' ? 'Kebijakan Pengembalian Dana'
+      : jenis === 'komunitas' ? 'Panduan Komunitas'
       : jenis === 'live' ? 'Ketentuan Kreator XyCloud Live'
       : 'Syarat dan Ketentuan',
     pembaruan: PEMBARUAN,

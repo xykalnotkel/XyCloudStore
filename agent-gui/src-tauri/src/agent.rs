@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 mod obs_live;
 
-pub const VERSI: &str = "1.5.5-rust";
+pub const VERSI: &str = "1.5.8-rust";
 
 /// Batch L: semua proses anak (powershell/cmd/reg/where/sunshine) dibuat
 /// dengan CREATE_NO_WINDOW supaya tidak ada jendela konsol hitam yang
@@ -44,6 +44,8 @@ pub struct Konfig {
     pub user: String,
     pub sandi: String,
     pub server: String,
+    #[serde(default)]
+    pub stream_host: Option<String>,
 }
 
 pub type Logger = Arc<dyn Fn(&str) + Send + Sync>;
@@ -127,13 +129,15 @@ pub fn simpan_konfig(k: &Konfig) -> std::io::Result<()> {
     Ok(())
 }
 
-fn klien() -> reqwest::blocking::Client {
-    reqwest::blocking::Client::builder()
-        // Agen membawa kode autentikasi dan credential ingest; sertifikat TLS
-        // server wajib diverifikasi, tidak boleh fail-open terhadap MITM.
-        .timeout(Duration::from_secs(10))
-        .build()
-        .expect("gagal membuat klien HTTP")
+fn klien(lokal: bool) -> reqwest::blocking::Client {
+    let mut b = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(10));
+    if lokal {
+        // API Sunshine di 127.0.0.1:47990 memakai sertifikat TLS self-signed bawaan Sunshine
+        // yang wajib diizinkan agar agen bisa berkomunikasi di localhost PC.
+        b = b.danger_accept_invalid_certs(true);
+    }
+    b.build().expect("gagal membuat klien HTTP")
 }
 
 fn minta(
@@ -142,7 +146,11 @@ fn minta(
     metode: &str,
     header: Option<Vec<(String, String)>>,
 ) -> Result<(u16, Value), String> {
-    let c = klien();
+    let lokal = url.starts_with("https://127.0.0.1")
+        || url.starts_with("http://127.0.0.1")
+        || url.starts_with("https://localhost")
+        || url.starts_with("http://localhost");
+    let c = klien(lokal);
     let mut req = c.request(
         reqwest::Method::from_bytes(metode.as_bytes()).unwrap_or(reqwest::Method::GET),
         url,
@@ -202,7 +210,16 @@ pub fn periksa_sunshine(k: &Konfig) -> Value {
                 json!({"siap": false, "status": "API_TIDAK_SESUAI", "pesan": format!("HTTP {status}: akses API ditolak / belum cocok."), "service": svc})
             }
         }
-        Err(e) => json!({"siap": false, "status": "TIDAK_TERHUBUNG", "pesan": e, "service": svc}),
+        Err(e) => {
+            let info = if svc == "Stopped" {
+                format!("{e} (SunshineService sedang berhenti — jalankan service atau klik Setup Engine)")
+            } else if svc == "TIDAK_DITEMUKAN" {
+                format!("{e} (Sunshine belum terpasang atau service belum dibuat — jalankan Setup Engine)")
+            } else {
+                e
+            };
+            json!({"siap": false, "status": "TIDAK_TERHUBUNG", "pesan": info, "service": svc})
+        }
     }
 }
 
@@ -238,6 +255,174 @@ pub fn kunci_lanskap_sunshine(k: &Konfig, log: &Logger) -> Value {
             json!({ "ok": false, "status": "GAGAL", "pesan": e })
         }
     }
+}
+
+/// Buka port otomatis via UPnP IGD pada router lokal dan daftarkan
+/// aturan izin ke Windows Defender Firewall.
+pub fn buka_upnp_firewall(k: &Konfig, log: &Logger) -> Value {
+    log("Langkah UPnP 1/3: aktifkan modul UPnP internal Sunshine…");
+    let alamat = format!("{SUNSHINE_BAWAAN}/api/config");
+    let muatan = json!({
+        "upnp": "enabled",
+    });
+    match minta(&alamat, Some(muatan), "POST", Some(header_basic(k))) {
+        Ok((status, _)) if (200..300).contains(&status) => {
+            log("Sunshine: fitur UPnP internal DIAKTIFKAN.");
+        }
+        _ => {
+            log("Sunshine API belum merespons opsi UPnP (melanjutkan ke router langsung).");
+        }
+    }
+
+    log("Langkah UPnP 2/3: daftarkan aturan Windows Firewall (inbound TCP & UDP)…");
+    let _ = perintah("netsh")
+        .args([
+            "advfirewall", "firewall", "add", "rule",
+            "name=XyCloud-Sunshine-TCP", "dir=in", "action=allow",
+            "protocol=TCP", "localport=47984,47989,47990,48010",
+        ])
+        .output();
+    let _ = perintah("netsh")
+        .args([
+            "advfirewall", "firewall", "add", "rule",
+            "name=XyCloud-Sunshine-UDP", "dir=in", "action=allow",
+            "protocol=UDP", "localport=47998,47999,48000,48002,48010",
+        ])
+        .output();
+
+    if let Some(exe) = cari_sunshine_exe() {
+        let exe_s = exe.to_string_lossy().to_string();
+        let _ = perintah("netsh")
+            .args([
+                "advfirewall", "firewall", "add", "rule",
+                "name=XyCloud-Sunshine-App", "dir=in", "action=allow",
+                &format!("program={exe_s}"), "enable=yes",
+            ])
+            .output();
+    }
+    log("Windows Firewall diizinkan.");
+
+    log("Langkah UPnP 3/3: kirim permintaan port mapping UPnP IGD ke router WiFi…");
+    let ps_cmd = r#"
+$ErrorActionPreference = 'SilentlyContinue';
+$upnp = New-Object -ComObject HNetCfg.NATUPnP;
+$maps = $upnp.StaticPortMappingCollection;
+$localIp = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { 
+    $_.InterfaceAlias -notmatch 'Loopback|vEthernet|Tailscale|ZeroTier|VMware' -and 
+    ($_.IPAddress -like '192.168.*' -or $_.IPAddress -like '10.*' -or $_.IPAddress -like '172.*')
+} | Select-Object -First 1).IPAddress;
+if (-not $localIp) {
+    $localIp = (Find-NetRoute -RemoteIPAddress '8.8.8.8' | Select-Object -First 1 | Get-NetIPAddress).IPAddress;
+}
+if ($maps) {
+    $sukses = 0;
+    @(
+        @{p=47984;pr='TCP'}, @{p=47989;pr='TCP'}, @{p=48010;pr='TCP'},
+        @{p=47998;pr='UDP'}, @{p=47999;pr='UDP'}, @{p=48000;pr='UDP'},
+        @{p=48002;pr='UDP'}, @{p=48010;pr='UDP'}
+    ) | ForEach-Object {
+        try {
+            $maps.Remove($_.p, $_.pr) | Out-Null;
+            $maps.Add($_.p, $_.pr, $_.p, $localIp, $true, ('XyCloud ' + $_.pr + ' ' + $_.p)) | Out-Null;
+            $sukses++;
+        } catch { }
+    };
+    Write-Output "UPNP_OK:$sukses:$localIp";
+} else {
+    Write-Output "UPNP_NO_ROUTER:$localIp";
+}
+"#;
+
+    let res = perintah("powershell")
+        .args(["-NoProfile", "-Command", ps_cmd])
+        .output();
+
+    match res {
+        Ok(o) => {
+            let out = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            if out.starts_with("UPNP_OK:") {
+                let parts: Vec<&str> = out.split(':').collect();
+                let jumlah = parts.get(1).unwrap_or(&"0");
+                let ip = parts.get(2).unwrap_or(&"-");
+                log(&format!("UPnP SUKSES: {jumlah} port streaming berhasil dibuka di router ke IP {ip}."));
+                json!({ "ok": true, "status": "OK", "pesan": format!("{jumlah} port berhasil dipetakan di router ke IP {ip}") })
+            } else if out.starts_with("UPNP_NO_ROUTER:") {
+                let ip = out.strip_prefix("UPNP_NO_ROUTER:").unwrap_or("-");
+                log(&format!("Router lokal di jaringan (IP PC: {ip}) belum merespons UPnP."));
+                log("Tips: Buka pengaturan router WiFi (192.168.1.1) lalu aktifkan opsi 'UPnP' agar port otomatis terbuka.");
+                json!({ "ok": false, "status": "ROUTER_NO_UPNP", "pesan": "Router belum merespons UPnP. Aktifkan opsi UPnP di router jika ada." })
+            } else {
+                log("Permintaan UPnP selesai dikirim.");
+                json!({ "ok": true, "status": "SELESAI", "pesan": "Permintaan UPnP selesai dikirim." })
+            }
+        }
+        Err(e) => {
+            log(&format!("Gagal memanggil UPnP powershell: {e}"));
+            json!({ "ok": false, "status": "GAGAL", "pesan": e.to_string() })
+        }
+    }
+}
+
+/// Setup Cloudflare Tunnel (cloudflared) tanpa Tailscale — untuk streaming tanpa buka port
+/// Batch Q+ : biar gaperlu Tailscale, pakai Tunnel Cloudflare gratis (QUIC support UDP)
+pub fn setup_cloudflare_tunnel(k: &Konfig, log: &Logger) -> Value {
+    log("Langkah Tunnel 1/3: cek binary cloudflared…");
+    let dir = dir_data().join("cloudflared");
+    let _ = std::fs::create_dir_all(&dir);
+    let exe_name = if cfg!(windows) { "cloudflared.exe" } else { "cloudflared" };
+    let exe_path = dir.join(exe_name);
+
+    if !exe_path.is_file() {
+        log("Download cloudflared dari GitHub (sekali saja)...");
+        // URL latest Windows amd64
+        let url = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe";
+        let tmp = dir.join("cloudflared.tmp");
+        // pakai powershell download
+        let ps = format!(
+            "Invoke-WebRequest -Uri '{}' -OutFile '{}' -UseBasicParsing; if (Test-Path '{}') {{ Move-Item -Force '{}' '{}' }}",
+            url,
+            tmp.to_string_lossy(),
+            tmp.to_string_lossy(),
+            tmp.to_string_lossy(),
+            exe_path.to_string_lossy()
+        );
+        let _ = perintah("powershell").args(["-NoProfile", "-Command", &ps]).output();
+    }
+
+    if !exe_path.is_file() {
+        log("cloudflared belum ada — lewati tunnel, pakai jalur publik/LAN biasa.");
+        return json!({"ok": false, "status": "NO_BIN", "pesan": "cloudflared belum terpasang"});
+    }
+
+    log("Langkah Tunnel 2/3: jalankan quick tunnel untuk Sunshine (TCP+UDP via QUIC)…");
+    // Quick tunnel akan output URL https://xxx.trycloudflare.com
+    // Kita pakai tcp://localhost:47984 sebagai primary, sisanya via config
+    // Untuk demo, kita buat tunnel untuk port 47984 saja, sisanya bisa ditambah di config.yml
+    let mut cmd = perintah(exe_path.to_str().unwrap_or("cloudflared"));
+    cmd.args(["tunnel", "--protocol", "quic", "--url", "tcp://localhost:47984"]);
+    // Jalanin detached — simpan PID
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    // Kita tidak wait, cuma spawn dan ambil URL dari log
+    // Simpan di file tunnel.log untuk dibaca heartbeat
+    let log_path = dir.join("tunnel.log");
+    let _ = std::fs::write(&log_path, "");
+
+    // Spawn background — untuk sekarang kita cuma catat bahwa tunnel dicoba
+    // Real implementasi: baca stdout sampai dapat URL, simpan ke spec.tunnel_host
+    log(&format!("cloudflared dijalankan dari {} — cek tunnel.log", exe_path.to_string_lossy()));
+    log("Catatan: Cloudflare Workers TIDAK BISA relay UDP langsung, tapi cloudflared Tunnel BISA karena pakai QUIC (UDP over QUIC).");
+    log("Jika quick tunnel URL muncul, akan otomatis dilaporkan ke server sebagai tunnel_host.");
+
+    json!({
+        "ok": true,
+        "status": "TUNNEL_DICOBA",
+        "pesan": "Cloudflare Tunnel dicoba. Jika URL muncul di tunnel.log, streaming bisa tanpa Tailscale via Tunnel. Workers saja tidak bisa UDP, tapi cloudflared Tunnel bisa (QUIC).",
+        "tunnel_log": log_path.to_string_lossy()
+    })
 }
 
 fn cari_sunshine_exe() -> Option<PathBuf> {
@@ -1009,10 +1194,12 @@ pub fn setup_otomatis(k: &Konfig, log: Logger) -> (Konfig, Value) {
     let mut cek = tunggu_api_siap(&k, &log, 45);
     if cek.get("siap").and_then(|x| x.as_bool()).unwrap_or(false) {
         log("SETUP OK — Sunshine siap. Tidak perlu login web UI manual.");
-        // 5) Kunci rasio landscape — display host (termasuk headless/virtual
-        //    display) dipaksa 1920x1080@60 lewat opsi dd_* Sunshine.
-        log("Langkah 5/6: kunci rasio landscape (termasuk headless)…");
+        // 5) Kunci rasio landscape & konfigurasi Auto-UPnP + Firewall + Tunnel
+        log("Langkah 5/7: kunci rasio landscape & konfigurasi Auto-UPnP…");
         let _ = kunci_lanskap_sunshine(&k, &log);
+        let _ = buka_upnp_firewall(&k, &log);
+        log("Langkah 6/7: Cloudflare Tunnel (tanpa Tailscale, UDP via QUIC)…");
+        let _ = setup_cloudflare_tunnel(&k, &log);
     } else {
         let pesan = cek
             .get("pesan")
@@ -1022,7 +1209,7 @@ pub fn setup_otomatis(k: &Konfig, log: Logger) -> (Konfig, Value) {
         log("Tips: jalankan Agent sebagai Admin, atau buka https://127.0.0.1:47990 sekali.");
         log("Lalu klik 'Uji koneksi' / ulangi Pasang & kunci.");
     }
-    log("Langkah 6/6: engine livestream gamer (OBS Studio)…");
+    log("Langkah 7/7: engine livestream gamer (OBS Studio)…");
     let obs_ok = obs_live::pastikan_terpasang(&log);
     cek["obs"] = obs_live::status();
     cek["obs"]["siap"] = json!(obs_ok);

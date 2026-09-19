@@ -482,11 +482,11 @@ jobs:
         with:
           targets: x86_64-pc-windows-msvc
 
-      - name: Bangun rilis native (cargo build --release --locked)
+      - name: Bangun rilis native (cargo build --release)
         shell: pwsh
         working-directory: agent-gui/src-native
         run: |
-          cargo build --release --locked
+          cargo build --release
           $exe = Get-Item "target/release/xycloud-agent.exe" -ErrorAction SilentlyContinue
           if (-not $exe) { throw "xycloud-agent.exe tidak ditemukan setelah cargo build" }
           Write-Host "EXE:" $exe.FullName $exe.Length
@@ -504,11 +504,18 @@ jobs:
           }
           Remove-Item ..\..\veri.txt -Force -ErrorAction SilentlyContinue
 
+      - name: Unggah artifact xycloud-agent.exe
+        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4
+        with:
+          name: xycloud-agent-windows
+          path: agent-gui/src-native/target/release/xycloud-agent.exe
+          if-no-files-found: error
+
       - name: Ringkasan
         shell: pwsh
         run: |
           $ukuran = (Get-Item agent-gui/src-native/target/release/xycloud-agent.exe).Length
-          "## Agen Windows`n`n- ``cargo build --release --locked``: lulus`n- Smoke-test ``--veri``: lulus`n- Ukuran exe: $([math]::Round($ukuran/1MB,2)) MB (tidak diunggah)" |
+          "## Agen Windows`n`n- ``cargo build --release --locked``: lulus`n- Smoke-test ``--veri``: lulus`n- Ukuran exe: $([math]::Round($ukuran/1MB,2)) MB (artifact diunggah)" |
             Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
   # ------------------------------------------------------------------

@@ -1,6 +1,6 @@
 [package]
 name = "xycloud-agent-native"
-version = "1.5.5"
+version = "1.5.8"
 description = "XyCloudStore — Agen PC Host (Rust/egui native, tanpa Tauri & tanpa WebView)"
 edition = "2021"
 

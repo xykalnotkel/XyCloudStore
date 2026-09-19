@@ -63,7 +63,7 @@ class _VoucherScreenState extends State<VoucherScreen> {
               boxShadow: XyTheme.glow(XyTheme.primary, .22),
             ),
             child: Row(children: [
-              Container(width: 48, height: 48, decoration: BoxDecoration(color: Colors.white.withOpacity(.16), borderRadius: BorderRadius.circular(14)), child: const Icon(Icons.local_offer_rounded, color: Colors.white, size: 26)),
+              const XyIlustrasi('voucher', tinggi: 72),
               const SizedBox(width: 14),
               const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text('Punya kode voucher?', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 15)),

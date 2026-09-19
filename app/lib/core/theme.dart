@@ -121,124 +121,98 @@ class XyTheme {
     end: Alignment.bottomRight,
   );
 
-  // ---------- elevasi ----------
+  // ---------- elevasi — FLAT OPTIMIZED Batch P ----------
   /// Alias lama supaya kode lain tetap jalan.
   static const Color cyan = violet;
 
-  static List<BoxShadow> get shadowXs => [
-        BoxShadow(
-            color: ink.withOpacity(.035),
-            blurRadius: 8,
-            offset: const Offset(0, 2)),
-      ];
-  static List<BoxShadow> get shadowSm => [
-        BoxShadow(
-            color: ink.withOpacity(.05),
-            blurRadius: 16,
-            offset: const Offset(0, 6)),
-      ];
-  static List<BoxShadow> get shadowMd => [
-        BoxShadow(
-            color: ink.withOpacity(.07),
-            blurRadius: 28,
-            offset: const Offset(0, 12)),
-        BoxShadow(
-            color: ink.withOpacity(.03),
-            blurRadius: 4,
-            offset: const Offset(0, 1)),
-      ];
+  // Flat: no shadows by default (hemat compositing, lebih ringan di low-end)
+  static List<BoxShadow> get shadowXs => const [];
+  static List<BoxShadow> get shadowSm => const [];
+  static List<BoxShadow> get shadowMd => const [];
 
-  /// Kilau glossy violet-indigo (lebih terasa dari orchid sebelumnya)
-  /// Dipakai di kartu saldo, tombol hero, popup.
-  static List<BoxShadow> glow(Color c, [double o = .28]) => [
-        BoxShadow(
-            color: c.withOpacity((o.clamp(0.0, .40)).toDouble()),
-            blurRadius: 26,
-            offset: const Offset(0, 10)),
-        BoxShadow(
-            color: c.withOpacity((o * .45).clamp(0.0, .18).toDouble()),
-            blurRadius: 40,
-            offset: const Offset(0, 18)),
-      ];
+  /// Glow diabaikan untuk flat mode — return empty biar tidak ada blur mahal
+  static List<BoxShadow> glow(Color c, [double o = .28]) => const [];
 
-  // ---------- palet gelap — MIDNIGHT AURORA (Batch I) ----------
-  // Direvisi agar mode gelap tidak "pasaran": indigo sangat dalam berlapis
-  // aurora violet (lihat widgets/latar_aurora.dart), permukaan kaca, dan
-  // garis tepi yang sedikit lebih terang supaya kartu terasa bercahaya.
-  static const Color bgGelap = Color(0xFF0D0224); // indigo nyaris hitam
-  static const Color bgGelap2 = Color(0xFF1B0745); // indigo tengah (hero/grad)
-  static const Color surfaceGelap = Color(0xFF170A33); // permukaan kartu
-  static const Color surfaceGelap2 = Color(0xFF211148); // permukaan terangkat
-  static const Color lineGelap = Color(0xFF332059); // tepi kaca (lebih terang)
-  static const Color inkGelap = Color(0xFFF2EDFF);
-  static const Color mutedGelap = Color(0xFFA99CC8);
+  // ---------- palet gelap — TIKTOK STYLE (No Border, Abu-abu) ----------
+  // TikTok: background hitam pekat, card abu-abu gelap tanpa border, clean
+  // Light mode juga dibikin ala TikTok dark biar tidak ada garis border
+  static const Color bgGelap = Color(0xFF0A0A0A); // TikTok black
+  static const Color bgGelap2 = Color(0xFF141414); // TikTok subtle
+  static const Color surfaceGelap = Color(0xFF1E1E1E); // Card abu-abu TikTok
+  static const Color surfaceGelap2 = Color(0xFF262626); // Elevated
+  static const Color lineGelap = Color(0xFF1E1E1E); // No visible border — same as surface
+  static const Color inkGelap = Color(0xFFF1F1F2); // Teks putih TikTok
+  static const Color mutedGelap = Color(0xFF8A8B8F); // Muted abu TikTok
 
-  /// Gradasi kartu mode gelap: ungu sangat halus atas → bawah.
-  static const LinearGradient gradDarkCard = LinearGradient(
-    colors: [Color(0xFF1C0F3D), Color(0xFF150830)],
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-  );
+  /// Tanpa gradasi glassmorphism di kartu mode gelap — solid & crisp
+  static const LinearGradient? gradDarkCard = null;
 
   // ---------- tema ----------
   static ThemeData light() {
+    // TikTok style: even light mode pakai background hitam ke abu-abuan, card abu-abu tanpa border
     final base = ThemeData(
       useMaterial3: true,
-      brightness: Brightness.light,
+      brightness: Brightness.dark, // pakai dark brightness biar TikTok style di light mode juga
       colorScheme: ColorScheme.fromSeed(
         seedColor: primary,
         primary: primary,
-        surface: surface,
-        brightness: Brightness.light,
+        surface: surfaceGelap,
+        onSurface: inkGelap,
+        onSurfaceVariant: mutedGelap,
+        brightness: Brightness.dark,
       ),
-      // Latar aurora global digambar di MaterialApp.builder (Batch I);
-      // scaffold transparan supaya gradasi & blob terlihat di semua layar.
-      scaffoldBackgroundColor: Colors.transparent,
+      scaffoldBackgroundColor: const Color(0xFF0A0A0A),
       splashFactory: InkSparkle.splashFactory,
     );
 
     final text = GoogleFonts.interTextTheme(base.textTheme).apply(
-      bodyColor: ink,
-      displayColor: ink,
+      bodyColor: inkGelap,
+      displayColor: inkGelap,
     );
 
     return base.copyWith(
       textTheme: text.copyWith(
         displayLarge: text.displayLarge
-            ?.copyWith(fontWeight: FontWeight.w700, letterSpacing: -1),
+            ?.copyWith(color: inkGelap, fontWeight: FontWeight.w700, letterSpacing: -1),
         headlineMedium: text.headlineMedium
-            ?.copyWith(fontWeight: FontWeight.w700, letterSpacing: -1),
+            ?.copyWith(color: inkGelap, fontWeight: FontWeight.w700, letterSpacing: -1),
         titleLarge: text.titleLarge
-            ?.copyWith(fontWeight: FontWeight.w700, letterSpacing: -.5),
+            ?.copyWith(color: inkGelap, fontWeight: FontWeight.w700, letterSpacing: -.5),
         titleMedium: text.titleMedium
-            ?.copyWith(fontWeight: FontWeight.w600, letterSpacing: -.1),
-        bodyMedium: text.bodyMedium?.copyWith(height: 1.55),
-        labelLarge: text.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+            ?.copyWith(color: inkGelap, fontWeight: FontWeight.w600, letterSpacing: -.1),
+        titleSmall: text.titleSmall
+            ?.copyWith(color: inkGelap, fontWeight: FontWeight.w600),
+        bodyLarge: text.bodyLarge?.copyWith(color: inkGelap),
+        bodyMedium: text.bodyMedium?.copyWith(color: inkGelap, height: 1.55),
+        bodySmall: text.bodySmall?.copyWith(color: mutedGelap),
+        labelLarge: text.labelLarge?.copyWith(color: inkGelap, fontWeight: FontWeight.w700),
+        labelMedium: text.labelMedium?.copyWith(color: mutedGelap),
+        labelSmall: text.labelSmall?.copyWith(color: mutedGelap),
       ),
       appBarTheme: const AppBarTheme(
-        backgroundColor: Colors.transparent,
-        foregroundColor: ink,
+        backgroundColor: Color(0xFF0A0A0A),
+        foregroundColor: inkGelap,
         elevation: 0,
         scrolledUnderElevation: 0,
         surfaceTintColor: Colors.transparent,
         centerTitle: false,
         titleTextStyle: TextStyle(
-          color: ink,
+          color: inkGelap,
           fontSize: 18,
           fontWeight: FontWeight.w700,
           letterSpacing: -.4,
         ),
         systemOverlayStyle: SystemUiOverlayStyle(
           statusBarColor: Colors.transparent,
-          statusBarIconBrightness: Brightness.dark,
-          statusBarBrightness: Brightness.light,
+          statusBarIconBrightness: Brightness.light,
+          statusBarBrightness: Brightness.dark,
         ),
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
           backgroundColor: primary,
           foregroundColor: Colors.white,
-          disabledBackgroundColor: const Color(0xFFD9CFF0),
+          disabledBackgroundColor: const Color(0xFF2A2A2A),
           minimumSize: const Size.fromHeight(54),
           shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(XyRadius.tombol)),
@@ -248,10 +222,10 @@ class XyTheme {
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          foregroundColor: ink,
-          backgroundColor: surface,
+          foregroundColor: inkGelap,
+          backgroundColor: surfaceGelap,
           minimumSize: const Size.fromHeight(52),
-          side: const BorderSide(color: line),
+          side: BorderSide.none, // No border ala TikTok
           shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(XyRadius.tombol)),
           textStyle:
@@ -267,43 +241,43 @@ class XyTheme {
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: surface,
+        fillColor: surfaceGelap,
         contentPadding:
             const EdgeInsets.symmetric(horizontal: 18, vertical: 17),
-        prefixIconColor: muted,
-        suffixIconColor: muted,
+        prefixIconColor: mutedGelap,
+        suffixIconColor: mutedGelap,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(XyRadius.md),
-          borderSide: const BorderSide(color: line),
+          borderSide: BorderSide.none, // No border
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(XyRadius.md),
-          borderSide: const BorderSide(color: line),
+          borderSide: BorderSide.none,
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(XyRadius.md),
-          borderSide: const BorderSide(color: primary, width: 1.6),
+          borderSide: const BorderSide(color: primary, width: 1.2),
         ),
         errorBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(XyRadius.md),
           borderSide: const BorderSide(color: danger),
         ),
-        hintStyle: const TextStyle(color: muted, fontWeight: FontWeight.w500),
+        hintStyle: const TextStyle(color: mutedGelap, fontWeight: FontWeight.w500),
       ),
       chipTheme: base.chipTheme.copyWith(
-        backgroundColor: surface,
-        side: const BorderSide(color: line),
+        backgroundColor: surfaceGelap2,
+        side: BorderSide.none,
         labelStyle:
             const TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5),
         shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(XyRadius.pill)),
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       ),
-      dividerTheme: const DividerThemeData(color: line, space: 1, thickness: 1),
+      dividerTheme: const DividerThemeData(color: Color(0xFF1E1E1E), space: 1, thickness: 1),
       snackBarTheme: SnackBarThemeData(
-        backgroundColor: ink,
+        backgroundColor: surfaceGelap2,
         contentTextStyle: const TextStyle(
-            color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13),
+            color: inkGelap, fontWeight: FontWeight.w600, fontSize: 13),
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(XyRadius.sm)),
@@ -314,7 +288,7 @@ class XyTheme {
         surfaceTintColor: Colors.transparent,
       ),
       dialogTheme: DialogTheme(
-        backgroundColor: surface,
+        backgroundColor: surfaceGelap2,
         surfaceTintColor: Colors.transparent,
         shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(XyRadius.xl)),
@@ -326,7 +300,7 @@ class XyTheme {
     );
   }
 
-  /// Tema gelap: indigo tua #100030 + violet glossy, nyaman malam.
+  /// Tema gelap: TikTok style hitam pekat + card abu-abu tanpa border
   static ThemeData gelap() {
     final base = ThemeData(
       useMaterial3: true,
@@ -337,7 +311,7 @@ class XyTheme {
         surface: surfaceGelap,
         brightness: Brightness.dark,
       ),
-      scaffoldBackgroundColor: Colors.transparent,
+      scaffoldBackgroundColor: const Color(0xFF0A0A0A),
       splashFactory: InkSparkle.splashFactory,
     );
 
@@ -356,7 +330,7 @@ class XyTheme {
         bodyMedium: text.bodyMedium?.copyWith(height: 1.55),
       ),
       appBarTheme: const AppBarTheme(
-        backgroundColor: Colors.transparent,
+        backgroundColor: Color(0xFF0A0A0A),
         foregroundColor: inkGelap,
         elevation: 0,
         scrolledUnderElevation: 0,
@@ -389,7 +363,7 @@ class XyTheme {
           foregroundColor: inkGelap,
           backgroundColor: surfaceGelap,
           minimumSize: const Size.fromHeight(52),
-          side: const BorderSide(color: lineGelap),
+          side: BorderSide.none,
           shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(XyRadius.tombol)),
           textStyle:
@@ -412,23 +386,23 @@ class XyTheme {
         suffixIconColor: mutedGelap,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(XyRadius.md),
-          borderSide: const BorderSide(color: lineGelap),
+          borderSide: BorderSide.none,
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(XyRadius.md),
-          borderSide: const BorderSide(color: lineGelap),
+          borderSide: BorderSide.none,
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(XyRadius.md),
-          borderSide: const BorderSide(color: violet, width: 1.6),
+          borderSide: const BorderSide(color: violet, width: 1.2),
         ),
         hintStyle:
             const TextStyle(color: mutedGelap, fontWeight: FontWeight.w500),
       ),
       dividerTheme:
-          const DividerThemeData(color: lineGelap, space: 1, thickness: 1),
+          const DividerThemeData(color: Color(0xFF1E1E1E), space: 1, thickness: 1),
       snackBarTheme: SnackBarThemeData(
-        backgroundColor: surfaceGelap,
+        backgroundColor: surfaceGelap2,
         contentTextStyle: const TextStyle(
             color: inkGelap, fontWeight: FontWeight.w600, fontSize: 13),
         behavior: SnackBarBehavior.floating,
@@ -459,24 +433,18 @@ class XyTheme {
 class XyPalette {
   const XyPalette(this.dark);
   final bool dark;
-  Color get bg => dark ? XyTheme.bgGelap : XyTheme.bg;
-  Color get surface => dark ? XyTheme.surfaceGelap : XyTheme.surface;
-
-  /// Permukaan terangkat (sheet/dialog/nav) — sedikit lebih terang di gelap.
-  Color get surfaceHigh => dark ? XyTheme.surfaceGelap2 : XyTheme.surface;
-  Color get ink => dark ? XyTheme.inkGelap : XyTheme.ink;
-  Color get inkSoft => dark ? const Color(0xFFC9BDE0) : XyTheme.inkSoft;
-  Color get muted => dark ? const Color(0xFFA99CC8) : XyTheme.muted;
-  Color get line => dark ? XyTheme.lineGelap : XyTheme.line;
-  Color get lineSoft => dark ? const Color(0xFF241447) : XyTheme.lineSoft;
-  Color get primarySoft => dark ? const Color(0xFF241447) : XyTheme.primarySoft;
-  Color get accent => dark ? XyTheme.lavender : XyTheme.primary;
-  LinearGradient get gradSoft => dark
-      ? const LinearGradient(colors: [Color(0xFF241447), Color(0xFF170A33)])
-      : XyTheme.gradSoft;
-
-  /// Gradasi kartu mode gelap (midnight aurora). Null di mode terang.
-  LinearGradient? get gradCard => dark ? XyTheme.gradDarkCard : null;
+  Color get bg => const Color(0xFF0A0A0A); // TikTok black untuk light & dark
+  Color get surface => const Color(0xFF1E1E1E); // Card abu-abu TikTok
+  Color get surfaceHigh => const Color(0xFF262626);
+  Color get ink => const Color(0xFFF1F1F2);
+  Color get inkSoft => const Color(0xFFC7C7C7);
+  Color get muted => const Color(0xFF8A8B8F);
+  Color get line => const Color(0xFF1E1E1E); // No visible border
+  Color get lineSoft => const Color(0xFF232323);
+  Color get primarySoft => const Color(0xFF262626);
+  Color get accent => XyTheme.lavender;
+  LinearGradient? get gradSoft => null;
+  LinearGradient? get gradCard => null;
 }
 
 
