@@ -72,19 +72,31 @@ void main() {
                 builder: (context) => XyCard(
                     child: Text('Terbaca',
                         style: TextStyle(color: XyTheme.of(context).ink)))))));
-    final containers =
-        tester.widgetList<AnimatedContainer>(find.byType(AnimatedContainer));
-    // Batch I: kartu mode gelap memakai gradasi midnight (XyTheme.gradDarkCard)
-    // alih-alih warna datar; keduanya sama-sama "permukaan gelap".
-    expect(
-        containers.any((x) {
-          final d = x.decoration as BoxDecoration?;
-          if (d?.color == XyTheme.surfaceGelap) return true;
-          final g = d?.gradient;
-          final target = XyTheme.gradDarkCard?.colors.first;
-          return g is LinearGradient && target != null && g.colors.first == target;
-        }),
-        true);
+    // Batch P flat: XyCard sekarang Container (Stateless) bukan AnimatedContainer.
+    // Dukung keduanya supaya test tidak rapuh terhadap optimasi.
+    final animated = tester
+        .widgetList<AnimatedContainer>(find.byType(AnimatedContainer))
+        .map((x) => x.decoration as BoxDecoration?);
+    final containers = tester
+        .widgetList<Container>(find.byType(Container))
+        .map((x) => x.decoration as BoxDecoration?);
+    final allDecorations = [...animated, ...containers];
+
+    bool isGelap(BoxDecoration? d) {
+      if (d == null) return false;
+      if (d.color == XyTheme.surfaceGelap) return true;
+      // compat gradDarkCard jika masih ada (Batch I)
+      final g = d.gradient;
+      final target = XyTheme.gradDarkCard?.colors.first;
+      if (g is LinearGradient && target != null && g.colors.first == target) {
+        return true;
+      }
+      return false;
+    }
+
+    expect(allDecorations.any(isGelap), true,
+        reason:
+            'XyCard harus pakai surfaceGelap (flat) atau gradDarkCard (legacy)');
     expect(tester.widget<Text>(find.text('Terbaca')).style!.color,
         XyTheme.inkGelap);
     await tester.pumpWidget(const SizedBox());
