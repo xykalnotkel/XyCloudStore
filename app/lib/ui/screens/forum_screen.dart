@@ -2116,7 +2116,7 @@ class _SheetBuatStoryState extends State<_SheetBuatStory> {
                   final f = await GaleriPicker.pilihGambar(context);
                   if (f != null && mounted) {
                     final bytes = await f.readAsBytes();
-                    final uri = await Kompres.dataUri(bytes, f.name, maxSisi: 1080, kualitas: 75);
+                    final uri = await Kompres.dataUri(bytes, f.path.split('/').last, maxSisi: 1080, kualitas: 75);
                     setState(() => _mediaDataUri = uri);
                   }
                 },
