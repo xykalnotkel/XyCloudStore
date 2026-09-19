@@ -110,7 +110,7 @@ class BilahOffline extends StatelessWidget {
               color: XyTheme.warning.withOpacity(.12),
               padding: const EdgeInsets.fromLTRB(16, 9, 10, 9),
               child: Row(children: [
-                Icon(Icons.cloud_off_rounded, size: 16, color: XyTheme.warning),
+                const Icon(Icons.cloud_off_rounded, size: 16, color: XyTheme.warning),
                 const SizedBox(width: 9),
                 Expanded(
                   child: Text(

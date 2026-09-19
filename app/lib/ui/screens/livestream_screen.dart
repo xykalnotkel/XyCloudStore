@@ -1105,7 +1105,7 @@ class _StartLiveFormState extends State<_StartLiveForm> {
           icon: Icons.info_outline_rounded,
           title: 'Siaran PC Rental (OBS)',
           text: 'Pastikan sesi PC Cloud rental kamu sedang aktif, atau ganti pilihan sumber ke Kamera HP / Layar HP.',
-          tone: XyTheme.info,
+          tone: XyTheme.primary,
         ),
       const SizedBox(height: 8),
       GradientButton(

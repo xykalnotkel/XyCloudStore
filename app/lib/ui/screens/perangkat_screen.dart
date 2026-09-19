@@ -4,6 +4,7 @@ import '../../core/motion.dart';
 import '../../core/theme.dart';
 import '../../providers/app_state.dart';
 import '../widgets/common.dart';
+import '../widgets/lembar.dart';
 
 /// ============================================================
 ///  Manajemen Perangkat Login (Active Sessions & Devices)

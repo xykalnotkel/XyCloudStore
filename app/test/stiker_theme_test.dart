@@ -81,8 +81,8 @@ void main() {
           final d = x.decoration as BoxDecoration?;
           if (d?.color == XyTheme.surfaceGelap) return true;
           final g = d?.gradient;
-          return g is LinearGradient &&
-              g.colors.first == XyTheme.gradDarkCard.colors.first;
+          final target = XyTheme.gradDarkCard?.colors.first;
+          return g is LinearGradient && target != null && g.colors.first == target;
         }),
         true);
     expect(tester.widget<Text>(find.text('Terbaca')).style!.color,

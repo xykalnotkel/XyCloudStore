@@ -1387,7 +1387,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     } catch (e) {
       if (idx >= 0 && idx < stories.length) {
         final item = stories[idx];
-        stories[idx] = item.copyWith(reposts: math.max(0, item.reposts - 1));
+        stories[idx] = item.copyWith(reposts: max(0, item.reposts - 1));
         notifyListeners();
       }
       return _pesan(e);
