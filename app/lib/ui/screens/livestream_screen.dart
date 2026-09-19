@@ -1142,7 +1142,7 @@ class _StartLiveFormState extends State<_StartLiveForm> {
           setState(() => busy = false);
           if (e == null) {
             if (isMobile) {
-              final activeItem = state.liveAktifSaya ?? state.creatorLive.active;
+              final activeItem = state.liveAktifSaya ?? state.creatorLive?.active;
               Navigator.push(
                 context,
                 MaterialPageRoute(

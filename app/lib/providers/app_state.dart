@@ -1411,14 +1411,12 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   List<ForumPost> forum = [];
   Set<String> forumDisukai = {};
   Set<String> penggunaDiikuti = {};
-  bool _diikutiPernahDimuat = false;
 
   Future<void> muatPenggunaDiikuti() async {
     if (user == null) return;
     try {
       final list = await _repo.followsSaya(arah: 'mengikuti');
       penggunaDiikuti = list.map((e) => e.id).toSet();
-      _diikutiPernahDimuat = true;
       notifyListeners();
     } catch (_) {}
   }

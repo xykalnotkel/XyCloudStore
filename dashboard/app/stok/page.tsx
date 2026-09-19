@@ -102,7 +102,7 @@ export default function StokPage() {
               k: "aksi",
               label: "Aksi",
               render: (r) => (
-                <Btn tone="sekunder" onClick={() => bukaModalTambah(r.produk_id)}>
+                <Btn tone="ghost" onClick={() => bukaModalTambah(r.produk_id)}>
                   <KeyRound size={13} className="mr-1 inline" /> + Stok
                 </Btn>
               ),
@@ -140,7 +140,7 @@ export default function StokPage() {
           </Field>
 
           <div className="flex justify-end gap-2 pt-2">
-            <Btn tone="batal" onClick={() => setModalBuka(false)}>
+            <Btn tone="ghost" onClick={() => setModalBuka(false)}>
               Batal
             </Btn>
             <Btn tone="utama" disabled={busy} onClick={simpanStok}>
