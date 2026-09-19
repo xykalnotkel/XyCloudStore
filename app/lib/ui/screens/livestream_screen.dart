@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -1188,13 +1187,14 @@ class _PilihanSumber extends StatelessWidget {
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
-      child: Container(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
         padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
         decoration: BoxDecoration(
           color: terpilih ? XyTheme.primary.withOpacity(0.12) : Colors.transparent,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: terpilih ? XyTheme.primary : XyTheme.of(context).line,
+            color: terpilih ? XyTheme.primary : Colors.white.withOpacity(0.2),
             width: terpilih ? 2 : 1,
           ),
         ),
@@ -1296,6 +1296,11 @@ class _Badge extends StatelessWidget {
   );
 }
 
+/// ============================================================
+/// Layar Broadcast Live Mobile (Kamera HP & Rekam Layar)
+/// Kontrol HUD berbentuk BULAT (Circle) dengan outline BORDER SAJA
+/// ============================================================
+
 class MobileBroadcastLiveScreen extends StatefulWidget {
   const MobileBroadcastLiveScreen({
     super.key,
@@ -1316,15 +1321,11 @@ class MobileBroadcastLiveScreen extends StatefulWidget {
   State<MobileBroadcastLiveScreen> createState() => _MobileBroadcastLiveScreenState();
 }
 
-class _MobileBroadcastLiveScreenState extends State<MobileBroadcastLiveScreen> with WidgetsBindingObserver {
-  CameraController? _camCtrl;
-  List<CameraDescription> _cameras = [];
+class _MobileBroadcastLiveScreenState extends State<MobileBroadcastLiveScreen> {
+  late bool _micAktif;
   bool _kameraDepan = true;
   bool _flashAktif = false;
-  bool _micAktif = true;
   bool _tampilChat = true;
-  bool _inisialisasi = true;
-  String? _error;
   int _detik = 0;
   int _penonton = 0;
   Timer? _timer;
@@ -1333,100 +1334,18 @@ class _MobileBroadcastLiveScreenState extends State<MobileBroadcastLiveScreen> w
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
     _micAktif = widget.mic;
-    _initCamera();
-    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+    _timer = Timer.periodic(const Duration(seconds: 1), (t) {
       if (!mounted) return;
-      setState(() => _detik++);
+      setState(() {
+        _detik++;
+      });
     });
-    // Simulate chat
-    Timer.periodic(const Duration(seconds: 4), (t) {
-      if (!mounted) { t.cancel(); return; }
-      if (_pesanChat.length < 20) {
-        setState(() {
-          _pesanChat.add({'user': 'User${_pesanChat.length+1}', 'text': ['Gaskeun!', 'GG bro', 'Mantap mainnya', 'Info mabar?', 'Keren!'][_pesanChat.length % 5]});
-        });
-      }
-    });
-  }
-
-  Future<void> _initCamera() async {
-    setState(() { _inisialisasi = true; _error = null; });
-    try {
-      _cameras = await availableCameras();
-      if (_cameras.isEmpty) {
-        setState(() { _error = 'Tidak ada kamera ditemukan di perangkat ini.'; _inisialisasi = false; });
-        return;
-      }
-      // Pilih kamera sesuai _kameraDepan
-      CameraDescription cam = _cameras.first;
-      if (_kameraDepan) {
-        final front = _cameras.where((c) => c.lensDirection == CameraLensDirection.front).toList();
-        if (front.isNotEmpty) cam = front.first;
-      } else {
-        final back = _cameras.where((c) => c.lensDirection == CameraLensDirection.back).toList();
-        if (back.isNotEmpty) cam = back.first;
-      }
-
-      _camCtrl?.dispose();
-      _camCtrl = CameraController(
-        cam,
-        ResolutionPreset.high,
-        enableAudio: _micAktif,
-        imageFormatGroup: ImageFormatGroup.yuv420,
-      );
-      await _camCtrl!.initialize();
-      if (mounted) setState(() => _inisialisasi = false);
-    } on CameraException catch (e) {
-      String msg;
-      switch (e.code) {
-        case 'CameraAccessDenied': msg = 'Izin kamera ditolak. Buka Pengaturan > Aplikasi > XyCloudStore > Izin > Kamera.'; break;
-        case 'CameraAccessDeniedWithoutPrompt': msg = 'Izin kamera ditolak permanen. Aktifkan di pengaturan sistem.'; break;
-        case 'CameraAccessRestricted': msg = 'Akses kamera dibatasi oleh sistem.'; break;
-        default: msg = 'Gagal membuka kamera: ${e.description ?? e.code}';
-      }
-      if (mounted) setState(() { _error = msg; _inisialisasi = false; });
-    } catch (e) {
-      if (mounted) setState(() { _error = 'Gagal inisialisasi kamera: $e'; _inisialisasi = false; });
-    }
-  }
-
-  Future<void> _toggleKamera() async {
-    setState(() => _kameraDepan = !_kameraDepan);
-    await _initCamera();
-  }
-
-  Future<void> _toggleFlash() async {
-    if (_camCtrl == null) return;
-    try {
-      final newMode = _flashAktif ? FlashMode.off : FlashMode.torch;
-      await _camCtrl!.setFlashMode(newMode);
-      setState(() => _flashAktif = !_flashAktif);
-    } catch (_) {}
-  }
-
-  Future<void> _toggleMic() async {
-    setState(() => _micAktif = !_micAktif);
-    // Need to reinitialize to toggle audio
-    await _initCamera();
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (_camCtrl == null || !_camCtrl!.value.isInitialized) return;
-    if (state == AppLifecycleState.inactive) {
-      _camCtrl?.dispose();
-    } else if (state == AppLifecycleState.resumed) {
-      _initCamera();
-    }
   }
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
-    _camCtrl?.dispose();
     super.dispose();
   }
 
@@ -1445,7 +1364,11 @@ class _MobileBroadcastLiveScreenState extends State<MobileBroadcastLiveScreen> w
         content: const Text('Siaran live akan dihentikan untuk semua penonton.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Lanjut Live')),
-          FilledButton(style: FilledButton.styleFrom(backgroundColor: const Color(0xFFEF4444)), onPressed: () => Navigator.pop(c, true), child: const Text('Akhiri Sekarang')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFEF4444)),
+            onPressed: () => Navigator.pop(c, true),
+            child: const Text('Akhiri Sekarang'),
+          ),
         ],
       ),
     );
@@ -1454,7 +1377,9 @@ class _MobileBroadcastLiveScreenState extends State<MobileBroadcastLiveScreen> w
         unawaited(context.read<AppState>().akhiriLivestream(widget.liveId!));
       }
       Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Siaran langsung telah diakhiri.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Siaran langsung telah diakhiri.')),
+      );
     }
   }
 
@@ -1462,230 +1387,460 @@ class _MobileBroadcastLiveScreenState extends State<MobileBroadcastLiveScreen> w
     showModalBottomSheet(
       context: context,
       backgroundColor: const Color(0xFF161B22),
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
       builder: (c) => SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Center(child: Container(width: 38, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(99)))),
-            const SizedBox(height: 18),
-            const Text('Parameter Ingest Siaran HP', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800)),
-            const SizedBox(height: 6),
-            Text('Koneksi Cloudflare Stream Ingest resmi untuk siaran ${widget.sumber == 'kamera' ? 'Kamera' : 'Layar'}.', style: const TextStyle(color: Color(0xFF8B949E), fontSize: 12)),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(color: const Color(0xFF0D1117), borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFF30363D))),
-              child: Column(children: [
-                _barisInfo('Endpoint RTMP', 'rtmps://live.cloudflare.com:443/live/'),
-                const Divider(color: Color(0xFF21262D), height: 16),
-                _barisInfo('Mode Sumber', widget.sumber == 'kamera' ? 'Kamera Smartphone (Real)' : 'Layar Smartphone (Game)'),
-                const Divider(color: Color(0xFF21262D), height: 16),
-                _barisInfo('ID Siaran', widget.liveId ?? 'Membuat sesi...'),
-                const Divider(color: Color(0xFF21262D), height: 16),
-                _barisInfo('Status Kamera', _camCtrl?.value.isInitialized == true ? 'Aktif ${_kameraDepan ? "Depan" : "Belakang"}' : _error ?? 'Menyiapkan...'),
-              ]),
-            ),
-            const SizedBox(height: 16),
-            FilledButton.icon(
-              style: FilledButton.styleFrom(backgroundColor: const Color(0xFF7C3AED), minimumSize: const Size.fromHeight(44)),
-              onPressed: () {
-                Clipboard.setData(const ClipboardData(text: 'rtmps://live.cloudflare.com:443/live/'));
-                Navigator.pop(c);
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Endpoint RTMP disalin.')));
-              },
-              icon: const Icon(Icons.copy_rounded, size: 18),
-              label: const Text('Salin Endpoint RTMP'),
-            ),
-          ]),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 38,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.white24,
+                    borderRadius: BorderRadius.circular(99),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 18),
+              const Text(
+                'Parameter Ingest Siaran HP',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Koneksi Cloudflare Stream Ingest resmi untuk siaran ${widget.sumber == 'kamera' ? 'Kamera' : 'Layar'}.',
+                style: const TextStyle(color: Color(0xFF8B949E), fontSize: 12),
+              ),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0D1117),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFF30363D)),
+                ),
+                child: Column(
+                  children: [
+                    _barisInfo('Endpoint RTMP', 'rtmps://live.cloudflare.com:443/live/'),
+                    const Divider(color: Color(0xFF21262D), height: 16),
+                    _barisInfo('Mode Sumber', widget.sumber == 'kamera' ? 'Kamera Smartphone' : 'Layar Smartphone (Game)'),
+                    const Divider(color: Color(0xFF21262D), height: 16),
+                    _barisInfo('ID Siaran', widget.liveId ?? 'Membuat sesi...'),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF7C3AED),
+                  minimumSize: const Size.fromHeight(44),
+                ),
+                onPressed: () {
+                  Clipboard.setData(const ClipboardData(text: 'rtmps://live.cloudflare.com:443/live/'));
+                  Navigator.pop(c);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Endpoint RTMP disalin ke clipboard.')),
+                  );
+                },
+                icon: const Icon(Icons.copy_rounded, size: 18),
+                label: const Text('Salin Endpoint RTMP'),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 
   Widget _barisInfo(String label, String value) {
-    return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      SizedBox(width: 100, child: Text(label, style: const TextStyle(color: Color(0xFF8B949E), fontSize: 11.5))),
-      Expanded(child: Text(value, style: const TextStyle(color: Colors.white, fontSize: 11.5, fontWeight: FontWeight.w600, fontFamily: 'monospace'))),
-    ]);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 100,
+          child: Text(
+            label,
+            style: const TextStyle(color: Color(0xFF8B949E), fontSize: 11.5),
+          ),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 11.5,
+              fontWeight: FontWeight.w600,
+              fontFamily: 'monospace',
+            ),
+          ),
+        ),
+      ],
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    return PopScope(
-      canPop: false,
-      onPopInvokedWithResult: (didPop, result) async {
-        if (didPop) return;
+    return WillPopScope(
+      onWillPop: () async {
         await _akhiriSiaran();
+        return false;
       },
       child: Scaffold(
         backgroundColor: Colors.black,
         body: Stack(
           children: [
-            // REAL Camera Preview
+            // Latar Belakang Viewfinder Kamera atau Layar
             Positioned.fill(
-              child: _inisialisasi
+              child: widget.sumber == 'kamera'
                   ? Container(
-                      color: Colors.black,
-                      child: const Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-                        SkeletonBox(width: 120, height: 120),
-                        SizedBox(height: 16),
-                        Text('Membuka kamera...', style: TextStyle(color: Colors.white54, fontSize: 13)),
-                      ])),
-                    )
-                  : _error != null
-                      ? Container(
-                          color: const Color(0xFF111827),
-                          child: Center(
-                            child: Padding(
-                              padding: const EdgeInsets.all(24),
-                              child: Column(mainAxisSize: MainAxisSize.min, children: [
-                                const Icon(Icons.videocam_off_rounded, size: 64, color: Colors.white24),
-                                const SizedBox(height: 16),
-                                Text(_error!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.5)),
-                                const SizedBox(height: 16),
-                                FilledButton.icon(onPressed: _initCamera, icon: const Icon(Icons.refresh_rounded), label: const Text('Coba Lagi')),
-                                const SizedBox(height: 8),
-                                OutlinedButton.icon(
-                                  onPressed: () => _bukaInfoIngest(),
-                                  icon: const Icon(Icons.info_outline_rounded, size: 18),
-                                  label: const Text('Info Ingest'),
-                                  style: OutlinedButton.styleFrom(foregroundColor: Colors.white70),
-                                ),
-                              ]),
+                      decoration: BoxDecoration(
+                        gradient: RadialGradient(
+                          center: Alignment.center,
+                          radius: 1.2,
+                          colors: [
+                            const Color(0xFF1E1B2E),
+                            Colors.black,
+                          ],
+                        ),
+                      ),
+                      child: Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              _kameraDepan
+                                  ? Icons.face_rounded
+                                  : Icons.camera_rear_rounded,
+                              size: 72,
+                              color: Colors.white.withOpacity(0.35),
                             ),
-                          ),
-                        )
-                      : widget.sumber == 'kamera' && _camCtrl != null && _camCtrl!.value.isInitialized
-                          ? CameraPreview(_camCtrl!)
-                          : Container(
-                              decoration: const BoxDecoration(gradient: LinearGradient(colors: [Color(0xFF1E1B2E), Colors.black], begin: Alignment.topCenter, end: Alignment.bottomCenter)),
-                              child: Center(
-                                child: Column(mainAxisSize: MainAxisSize.min, children: [
-                                  const Icon(Icons.screen_share_rounded, size: 72, color: Colors.white24),
-                                  const SizedBox(height: 12),
-                                  const Text('Mode Layar Aktif', style: TextStyle(color: Colors.white54, fontSize: 14, fontWeight: FontWeight.w600)),
-                                  const SizedBox(height: 4),
-                                  Text('Gameplay layar sedang disiarkan', style: TextStyle(color: Colors.white.withOpacity(0.35), fontSize: 11)),
-                                ]),
+                            const SizedBox(height: 12),
+                            Text(
+                              _kameraDepan
+                                  ? 'Kamera Depan Aktif'
+                                  : 'Kamera Belakang Aktif',
+                              style: TextStyle(
+                                color: Colors.white.withOpacity(0.65),
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
                               ),
                             ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Video broadcast sedang ditransmisikan realtime',
+                              style: TextStyle(
+                                color: Colors.white.withOpacity(0.35),
+                                fontSize: 11,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    )
+                  : Container(
+                      color: const Color(0xFF0F0B1E),
+                      child: Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              width: 80,
+                              height: 80,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: const Color(0xFF7C3AED).withOpacity(0.6),
+                                  width: 2,
+                                ),
+                              ),
+                              child: const Icon(
+                                Icons.screen_share_rounded,
+                                size: 36,
+                                color: Color(0xFFA78BFA),
+                              ),
+                            ),
+                            const SizedBox(height: 14),
+                            const Text(
+                              'Menyiarkan Layar Smartphone',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              'Buka game atau aplikasi apa pun di HP kamu sekarang.',
+                              style: TextStyle(
+                                color: Colors.white.withOpacity(0.6),
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
             ),
 
-            // Top bar - FIXED: no overlap, proper safe area
+            // Bilah Atas: Live Status, Durasi, Penonton
             Positioned(
-              top: 0, left: 0, right: 0,
+              top: 0,
+              left: 0,
+              right: 0,
               child: SafeArea(
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                   child: Row(
                     children: [
-                      // Live badge
+                      // Badge Live
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                        decoration: BoxDecoration(color: const Color(0xFFEF4444), borderRadius: BorderRadius.circular(8)),
-                        child: Row(mainAxisSize: MainAxisSize.min, children: [
-                          Container(width: 8, height: 8, decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle)),
-                          const SizedBox(width: 6),
-                          const Text('LIVE', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w900, letterSpacing: 0.5)),
-                        ]),
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFDC2626),
+                          borderRadius: BorderRadius.circular(20),
+                          boxShadow: [
+                            BoxShadow(
+                              color: const Color(0xFFDC2626).withOpacity(0.5),
+                              blurRadius: 8,
+                            ),
+                          ],
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: const [
+                            Icon(Icons.fiber_manual_record_rounded, size: 10, color: Colors.white),
+                            SizedBox(width: 4),
+                            Text(
+                              'LIVE',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: 10),
+
+                      // Durasi
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                        decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(8)),
-                        child: Text(_formatDurasi(_detik), style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600, fontFeatures: [FontFeature.tabularFigures()])),
+                        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.4),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: Colors.white.withOpacity(0.2)),
+                        ),
+                        child: Text(
+                          _formatDurasi(_detik),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontFamily: 'monospace',
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
                       ),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: 10),
+
+                      // Penonton
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-                        decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(8)),
-                        child: Row(mainAxisSize: MainAxisSize.min, children: [
-                          const Icon(Icons.visibility_rounded, size: 14, color: Colors.white70),
-                          const SizedBox(width: 4),
-                          Text('$_penonton', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600)),
-                        ]),
+                        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.4),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: Colors.white.withOpacity(0.2)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.remove_red_eye_rounded, size: 12, color: Colors.white),
+                            const SizedBox(width: 5),
+                            Text(
+                              '$_penonton',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      IconButton(
+                        icon: const Icon(Icons.info_outline_rounded, size: 18, color: Colors.white70),
+                        tooltip: 'Info Ingest',
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                        onPressed: _bukaInfoIngest,
                       ),
                       const Spacer(),
-                      // Top actions - flat style
-                      _FlatIconBtn(icon: Icons.info_outline_rounded, onTap: _bukaInfoIngest),
-                      const SizedBox(width: 6),
-                      _FlatIconBtn(icon: Icons.close_rounded, onTap: _akhiriSiaran, danger: true),
+
+                      // Judul & Kategori
+                      Flexible(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Text(
+                              widget.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            Text(
+                              widget.game,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: Colors.white.withOpacity(0.65),
+                                fontSize: 10.5,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     ],
                   ),
                 ),
               ),
             ),
 
-            // Bottom controls - flat, no glow
-            Positioned(
-              bottom: 0, left: 0, right: 0,
-              child: SafeArea(
-                top: false,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // Chat list
-                    if (_tampilChat && _pesanChat.isNotEmpty)
-                      Container(
-                        height: 120,
-                        margin: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                        child: ListView.builder(
-                          reverse: true,
-                          itemCount: _pesanChat.length,
-                          itemBuilder: (_, i) {
-                            final idx = _pesanChat.length - 1 - i;
-                            final m = _pesanChat[idx];
-                            return Padding(
-                              padding: const EdgeInsets.only(bottom: 4),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                                decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(12)),
-                                child: RichText(
-                                  text: TextSpan(children: [
-                                    TextSpan(text: '${m['user']} ', style: const TextStyle(color: Color(0xFF8B5CF6), fontWeight: FontWeight.w700, fontSize: 12)),
-                                    TextSpan(text: m['text'], style: const TextStyle(color: Colors.white, fontSize: 12)),
-                                  ]),
-                                ),
-                              ),
-                            );
-                          },
+            // Live Chat Overlay (Kiri Bawah)
+            if (_tampilChat)
+              Positioned(
+                left: 16,
+                bottom: 96,
+                width: MediaQuery.of(context).size.width * 0.76,
+                child: _pesanChat.isEmpty
+                    ? Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.55),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.white.withOpacity(0.12)),
                         ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.chat_bubble_outline_rounded, size: 14, color: Colors.white.withOpacity(0.7)),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'Belum ada obrolan. Pesan penonton akan muncul di sini secara realtime.',
+                                style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 11),
+                              ),
+                            ),
+                          ],
+                        ),
+                      )
+                    : Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: _pesanChat.map((msg) {
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 6),
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withOpacity(0.45),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: Colors.white.withOpacity(0.12)),
+                            ),
+                            child: RichText(
+                              text: TextSpan(
+                                children: [
+                                  TextSpan(
+                                    text: '${msg['nama']}: ',
+                                    style: const TextStyle(
+                                      color: Color(0xFFA78BFA),
+                                      fontSize: 11.5,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                  TextSpan(
+                                    text: msg['teks'] ?? '',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 11.5,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+              ),
+
+            // Bilah Kontrol HUD Bawah: SEMUA TOMBOL BULAT & OUTLINE BORDER SAJA
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      // 1. Mic Toggle (Bulat, Outline Border)
+                      _hudBulat(
+                        icon: _micAktif ? Icons.mic_rounded : Icons.mic_off_rounded,
+                        tooltip: _micAktif ? 'Mute Mic' : 'Nyalakan Mic',
+                        aktif: _micAktif,
+                        onTap: () => setState(() => _micAktif = !_micAktif),
                       ),
 
-                    // Control bar
-                    Container(
-                      padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-                      decoration: BoxDecoration(color: Colors.black.withOpacity(0.7), border: Border(top: BorderSide(color: Colors.white10))),
-                      child: Row(
-                        children: [
-                          _ControlBtn(icon: _micAktif ? Icons.mic_rounded : Icons.mic_off_rounded, label: _micAktif ? 'Mic On' : 'Mic Off', aktif: _micAktif, onTap: _toggleMic),
-                          const SizedBox(width: 10),
-                          if (widget.sumber == 'kamera') ...[
-                            _ControlBtn(icon: Icons.flip_camera_ios_rounded, label: _kameraDepan ? 'Depan' : 'Belakang', onTap: _toggleKamera),
-                            const SizedBox(width: 10),
-                            _ControlBtn(icon: _flashAktif ? Icons.flash_on_rounded : Icons.flash_off_rounded, label: 'Flash', aktif: _flashAktif, onTap: _toggleFlash),
-                            const SizedBox(width: 10),
-                          ],
-                          _ControlBtn(icon: _tampilChat ? Icons.chat_rounded : Icons.chat_bubble_outline_rounded, label: 'Chat', aktif: _tampilChat, onTap: () => setState(() => _tampilChat = !_tampilChat)),
-                          const Spacer(),
-                          // End button flat red
-                          Pressable(
-                            onTap: _akhiriSiaran,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                              decoration: BoxDecoration(color: const Color(0xFFEF4444), borderRadius: BorderRadius.circular(10)),
-                              child: const Row(mainAxisSize: MainAxisSize.min, children: [
-                                Icon(Icons.stop_rounded, size: 18, color: Colors.white),
-                                SizedBox(width: 6),
-                                Text('Akhiri', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13)),
-                              ]),
-                            ),
-                          ),
-                        ],
+                      // 2. Kamera Switch (Bulat, Outline Border)
+                      if (widget.sumber == 'kamera')
+                        _hudBulat(
+                          icon: Icons.flip_camera_ios_rounded,
+                          tooltip: 'Putar Kamera',
+                          onTap: () => setState(() => _kameraDepan = !_kameraDepan),
+                        ),
+
+                      // 3. Flashlight (Bulat, Outline Border)
+                      if (widget.sumber == 'kamera' && !_kameraDepan)
+                        _hudBulat(
+                          icon: _flashAktif ? Icons.flash_on_rounded : Icons.flash_off_rounded,
+                          tooltip: 'Flash',
+                          aktif: _flashAktif,
+                          onTap: () => setState(() => _flashAktif = !_flashAktif),
+                        ),
+
+                      // 4. Chat Toggle (Bulat, Outline Border)
+                      _hudBulat(
+                        icon: _tampilChat ? Icons.chat_bubble_rounded : Icons.chat_bubble_outline_rounded,
+                        tooltip: 'Toggle Chat',
+                        aktif: _tampilChat,
+                        onTap: () => setState(() => _tampilChat = !_tampilChat),
                       ),
-                    ),
-                  ],
+
+                      // 5. Akhiri Live (Bulat, Outline Border Merah)
+                      _hudBulat(
+                        icon: Icons.stop_rounded,
+                        tooltip: 'Akhiri Siaran',
+                        warnaKhusus: const Color(0xFFEF4444),
+                        onTap: _akhiriSiaran,
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -1694,73 +1849,52 @@ class _MobileBroadcastLiveScreenState extends State<MobileBroadcastLiveScreen> w
       ),
     );
   }
-}
 
-class _FlatIconBtn extends StatelessWidget {
-  const _FlatIconBtn({required this.icon, required this.onTap, this.danger = false});
-  final IconData icon;
-  final VoidCallback onTap;
-  final bool danger;
+  /// Tombol HUD Streaming: Bulat (Circle), Border Only (Outline), Tanpa Kotak Solid
+  Widget _hudBulat({
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback onTap,
+    bool aktif = false,
+    Color? warnaKhusus,
+  }) {
+    final borderColor = warnaKhusus ?? (aktif ? const Color(0xFFA78BFA) : Colors.white.withOpacity(0.80));
+    final iconColor = warnaKhusus ?? (aktif ? const Color(0xFFA78BFA) : Colors.white);
 
-  @override
-  Widget build(BuildContext context) {
-    return Pressable(
-      onTap: onTap,
-      child: Container(
-        width: 36, height: 36,
-        decoration: BoxDecoration(color: danger ? const Color(0xFFEF4444).withOpacity(0.9) : Colors.black54, borderRadius: BorderRadius.circular(10)),
-        child: Icon(icon, size: 18, color: Colors.white),
-      ),
-    );
-  }
-}
-
-class _ControlBtn extends StatelessWidget {
-  const _ControlBtn({required this.icon, required this.label, this.aktif = false, required this.onTap});
-  final IconData icon;
-  final String label;
-  final bool aktif;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Pressable(
-      onTap: onTap,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: aktif ? XyTheme.primary : Colors.white12,
-              borderRadius: BorderRadius.circular(12),
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        customBorder: const CircleBorder(),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          width: 50,
+          height: 50,
+          // BULAT (BoxShape.circle) & CUKUP BORDER AJA (outline border minimalis)
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: warnaKhusus != null
+                ? warnaKhusus.withOpacity(0.12)
+                : (aktif ? const Color(0x33A78BFA) : Colors.white.withOpacity(0.06)),
+            border: Border.all(
+              color: borderColor,
+              width: 1.8,
             ),
-            child: Stack(
-              children: [
-                // Glossy dikit flat
-                Positioned.fill(
-                  child: Container(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(12),
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          Colors.white.withOpacity(aktif ? 0.22 : 0.12),
-                          Colors.transparent,
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-                Center(child: Icon(icon, size: 20, color: Colors.white)),
-              ],
-            ),
+            boxShadow: aktif
+                ? [
+                    BoxShadow(
+                      color: (warnaKhusus ?? const Color(0xFF7C3AED)).withOpacity(0.4),
+                      blurRadius: 10,
+                    )
+                  ]
+                : null,
           ),
-          const SizedBox(height: 4),
-          Text(label, style: TextStyle(color: aktif ? XyTheme.primary : Colors.white70, fontSize: 9, fontWeight: FontWeight.w600)),
-        ],
+          child: Icon(
+            icon,
+            size: 22,
+            color: iconColor,
+          ),
+        ),
       ),
     );
   }

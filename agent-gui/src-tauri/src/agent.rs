@@ -363,68 +363,6 @@ if ($maps) {
     }
 }
 
-/// Setup Cloudflare Tunnel (cloudflared) tanpa Tailscale — untuk streaming tanpa buka port
-/// Batch Q+ : biar gaperlu Tailscale, pakai Tunnel Cloudflare gratis (QUIC support UDP)
-pub fn setup_cloudflare_tunnel(k: &Konfig, log: &Logger) -> Value {
-    log("Langkah Tunnel 1/3: cek binary cloudflared…");
-    let dir = dir_data().join("cloudflared");
-    let _ = std::fs::create_dir_all(&dir);
-    let exe_name = if cfg!(windows) { "cloudflared.exe" } else { "cloudflared" };
-    let exe_path = dir.join(exe_name);
-
-    if !exe_path.is_file() {
-        log("Download cloudflared dari GitHub (sekali saja)...");
-        // URL latest Windows amd64
-        let url = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe";
-        let tmp = dir.join("cloudflared.tmp");
-        // pakai powershell download
-        let ps = format!(
-            "Invoke-WebRequest -Uri '{}' -OutFile '{}' -UseBasicParsing; if (Test-Path '{}') {{ Move-Item -Force '{}' '{}' }}",
-            url,
-            tmp.to_string_lossy(),
-            tmp.to_string_lossy(),
-            tmp.to_string_lossy(),
-            exe_path.to_string_lossy()
-        );
-        let _ = perintah("powershell").args(["-NoProfile", "-Command", &ps]).output();
-    }
-
-    if !exe_path.is_file() {
-        log("cloudflared belum ada — lewati tunnel, pakai jalur publik/LAN biasa.");
-        return json!({"ok": false, "status": "NO_BIN", "pesan": "cloudflared belum terpasang"});
-    }
-
-    log("Langkah Tunnel 2/3: jalankan quick tunnel untuk Sunshine (TCP+UDP via QUIC)…");
-    // Quick tunnel akan output URL https://xxx.trycloudflare.com
-    // Kita pakai tcp://localhost:47984 sebagai primary, sisanya via config
-    // Untuk demo, kita buat tunnel untuk port 47984 saja, sisanya bisa ditambah di config.yml
-    let mut cmd = perintah(exe_path.to_str().unwrap_or("cloudflared"));
-    cmd.args(["tunnel", "--protocol", "quic", "--url", "tcp://localhost:47984"]);
-    // Jalanin detached — simpan PID
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-    }
-    // Kita tidak wait, cuma spawn dan ambil URL dari log
-    // Simpan di file tunnel.log untuk dibaca heartbeat
-    let log_path = dir.join("tunnel.log");
-    let _ = std::fs::write(&log_path, "");
-
-    // Spawn background — untuk sekarang kita cuma catat bahwa tunnel dicoba
-    // Real implementasi: baca stdout sampai dapat URL, simpan ke spec.tunnel_host
-    log(&format!("cloudflared dijalankan dari {} — cek tunnel.log", exe_path.to_string_lossy()));
-    log("Catatan: Cloudflare Workers TIDAK BISA relay UDP langsung, tapi cloudflared Tunnel BISA karena pakai QUIC (UDP over QUIC).");
-    log("Jika quick tunnel URL muncul, akan otomatis dilaporkan ke server sebagai tunnel_host.");
-
-    json!({
-        "ok": true,
-        "status": "TUNNEL_DICOBA",
-        "pesan": "Cloudflare Tunnel dicoba. Jika URL muncul di tunnel.log, streaming bisa tanpa Tailscale via Tunnel. Workers saja tidak bisa UDP, tapi cloudflared Tunnel bisa (QUIC).",
-        "tunnel_log": log_path.to_string_lossy()
-    })
-}
-
 fn cari_sunshine_exe() -> Option<PathBuf> {
     let kandidat = [
         r"C:\Program Files\Sunshine\sunshine.exe",
@@ -1194,12 +1132,10 @@ pub fn setup_otomatis(k: &Konfig, log: Logger) -> (Konfig, Value) {
     let mut cek = tunggu_api_siap(&k, &log, 45);
     if cek.get("siap").and_then(|x| x.as_bool()).unwrap_or(false) {
         log("SETUP OK — Sunshine siap. Tidak perlu login web UI manual.");
-        // 5) Kunci rasio landscape & konfigurasi Auto-UPnP + Firewall + Tunnel
-        log("Langkah 5/7: kunci rasio landscape & konfigurasi Auto-UPnP…");
+        // 5) Kunci rasio landscape & konfigurasi Auto-UPnP + Firewall
+        log("Langkah 5/6: kunci rasio landscape & konfigurasi Auto-UPnP…");
         let _ = kunci_lanskap_sunshine(&k, &log);
         let _ = buka_upnp_firewall(&k, &log);
-        log("Langkah 6/7: Cloudflare Tunnel (tanpa Tailscale, UDP via QUIC)…");
-        let _ = setup_cloudflare_tunnel(&k, &log);
     } else {
         let pesan = cek
             .get("pesan")
@@ -1209,7 +1145,7 @@ pub fn setup_otomatis(k: &Konfig, log: Logger) -> (Konfig, Value) {
         log("Tips: jalankan Agent sebagai Admin, atau buka https://127.0.0.1:47990 sekali.");
         log("Lalu klik 'Uji koneksi' / ulangi Pasang & kunci.");
     }
-    log("Langkah 7/7: engine livestream gamer (OBS Studio)…");
+    log("Langkah 6/6: engine livestream gamer (OBS Studio)…");
     let obs_ok = obs_live::pastikan_terpasang(&log);
     cek["obs"] = obs_live::status();
     cek["obs"]["siap"] = json!(obs_ok);

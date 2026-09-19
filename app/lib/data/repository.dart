@@ -173,27 +173,7 @@ abstract class XyRepository {
 
   // ---------- stories (feed) ----------
   Future<List<StoryItem>> ambilStories();
-  Future<StoryItem> buatStory({
-    required String teks,
-    String? mediaUrl,
-    String tipe = 'teks',
-    String bgGradient = 'ungu',
-    String privasi = 'teman',
-    String gayaTeks = 'normal',
-    String warnaTeks = '#FFFFFF',
-    int ukuranTeks = 21,
-    String alignTeks = 'center',
-    String bgType = 'gradient',
-    String bgWarna = '',
-    String? bgImageUrl,
-    bool teksBg = true,
-    String teksBgWarna = '#00000073',
-    String label = '',
-    double trimStart = 0,
-    double trimEnd = 0,
-    String filter = 'normal',
-    double durasiVideo = 0,
-  });
+  Future<StoryItem> buatStory({required String teks, String? mediaUrl, String tipe = 'teks', String bgGradient = 'ungu', String privasi = 'teman'});
   Future<void> hapusStory(String id);
   Future<Map<String, dynamic>> likeStory(String id);
   Future<Map<String, dynamic>> repostStory(String id);
@@ -777,20 +757,6 @@ class RemoteRepository implements XyRepository {
     String tipe = 'teks',
     String bgGradient = 'ungu',
     String privasi = 'teman',
-    String gayaTeks = 'normal',
-    String warnaTeks = '#FFFFFF',
-    int ukuranTeks = 21,
-    String alignTeks = 'center',
-    String bgType = 'gradient',
-    String bgWarna = '',
-    String? bgImageUrl,
-    bool teksBg = true,
-    String teksBgWarna = '#00000073',
-    String label = '',
-    double trimStart = 0,
-    double trimEnd = 0,
-    String filter = 'normal',
-    double durasiVideo = 0,
   }) async {
     final res = await api.post('/stories', {
       'teks': teks,
@@ -798,20 +764,6 @@ class RemoteRepository implements XyRepository {
       'tipe': tipe,
       'bg_gradient': bgGradient,
       'privasi': privasi,
-      'gaya_teks': gayaTeks,
-      'warna_teks': warnaTeks,
-      'ukuran_teks': ukuranTeks,
-      'align_teks': alignTeks,
-      'bg_type': bgType,
-      'bg_warna': bgWarna,
-      if (bgImageUrl != null) 'bg_image_url': bgImageUrl,
-      'teks_bg': teksBg ? 1 : 0,
-      'teks_bg_warna': teksBgWarna,
-      'label': label,
-      'trim_start': trimStart,
-      'trim_end': trimEnd,
-      'filter': filter,
-      'durasi_video': durasiVideo,
     });
     return StoryItem.fromJson(Map<String, dynamic>.from(res));
   }
@@ -1402,20 +1354,6 @@ class MockRepository implements XyRepository {
     String tipe = 'teks',
     String bgGradient = 'ungu',
     String privasi = 'teman',
-    String gayaTeks = 'normal',
-    String warnaTeks = '#FFFFFF',
-    int ukuranTeks = 21,
-    String alignTeks = 'center',
-    String bgType = 'gradient',
-    String bgWarna = '',
-    String? bgImageUrl,
-    bool teksBg = true,
-    String teksBgWarna = '#00000073',
-    String label = '',
-    double trimStart = 0,
-    double trimEnd = 0,
-    String filter = 'normal',
-    double durasiVideo = 0,
   }) =>
       _delay(
         StoryItem(
@@ -1432,20 +1370,6 @@ class MockRepository implements XyRepository {
           dibuat: DateTime.now(),
           berakhir: DateTime.now().add(const Duration(hours: 24)),
           punyaSaya: true,
-          gayaTeks: gayaTeks,
-          warnaTeks: warnaTeks,
-          ukuranTeks: ukuranTeks,
-          alignTeks: alignTeks,
-          bgType: bgType,
-          bgWarna: bgWarna,
-          bgImageUrl: bgImageUrl,
-          teksBg: teksBg,
-          teksBgWarna: teksBgWarna,
-          label: label,
-          trimStart: trimStart,
-          trimEnd: trimEnd,
-          filter: filter,
-          durasiVideo: durasiVideo,
         ),
         200,
       );

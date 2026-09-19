@@ -357,7 +357,7 @@ CREATE TABLE rilis (id INTEGER PRIMARY KEY CHECK (id = 1), versi TEXT NOT NULL, 
 --  sesi
 -- ------------------------------------------------------------
 DROP TABLE IF EXISTS sesi;
-CREATE TABLE sesi (id TEXT PRIMARY KEY, order_id TEXT, user_id TEXT NOT NULL, agen_id TEXT, status TEXT NOT NULL DEFAULT 'menyiapkan', pin TEXT, host TEXT, host_lan TEXT, tunnel_host TEXT, relay_host TEXT, catatan TEXT, durasi_menit INTEGER NOT NULL DEFAULT 60, mulai TEXT, berakhir TEXT, dibuat TEXT NOT NULL DEFAULT (datetime('now')), client_state TEXT, client_last TEXT, client_route TEXT, client_latency_ms INTEGER, client_quality TEXT, client_disconnects INTEGER NOT NULL DEFAULT 0, client_reconnect_attempt INTEGER NOT NULL DEFAULT 0, client_reason TEXT);
+CREATE TABLE sesi (id TEXT PRIMARY KEY, order_id TEXT, user_id TEXT NOT NULL, agen_id TEXT, status TEXT NOT NULL DEFAULT 'menyiapkan', pin TEXT, host TEXT, catatan TEXT, durasi_menit INTEGER NOT NULL DEFAULT 60, mulai TEXT, berakhir TEXT, dibuat TEXT NOT NULL DEFAULT (datetime('now')), client_state TEXT, client_last TEXT, client_route TEXT, client_latency_ms INTEGER, client_quality TEXT, client_disconnects INTEGER NOT NULL DEFAULT 0, client_reconnect_attempt INTEGER NOT NULL DEFAULT 0, client_reason TEXT);
 
 -- ------------------------------------------------------------
 --  setelan
@@ -1133,20 +1133,6 @@ CREATE TABLE IF NOT EXISTS stories (
   reposts INTEGER NOT NULL DEFAULT 0,
   dibuat TEXT NOT NULL,
   berakhir TEXT NOT NULL,
-  gaya_teks TEXT DEFAULT 'normal',
-  warna_teks TEXT DEFAULT '#FFFFFF',
-  ukuran_teks INTEGER DEFAULT 21,
-  align_teks TEXT DEFAULT 'center',
-  bg_type TEXT DEFAULT 'gradient',
-  bg_warna TEXT DEFAULT '',
-  bg_image_url TEXT DEFAULT NULL,
-  teks_bg INTEGER DEFAULT 1,
-  teks_bg_warna TEXT DEFAULT '#00000073',
-  label TEXT DEFAULT '',
-  trim_start REAL DEFAULT 0,
-  trim_end REAL DEFAULT 0,
-  filter TEXT DEFAULT 'normal',
-  durasi_video REAL DEFAULT 0,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 

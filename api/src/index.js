@@ -7756,40 +7756,17 @@ async function statistikPublik(env) {
         const b = await req.json().catch(() => ({}));
         const teks = String(b.teks || '').trim();
         let mediaUrl = null;
-        let bgImageUrl = null;
-        // Batch Q: support data URI gambar + video, plus bg image
         if (b.media_url && String(b.media_url).startsWith('data:')) {
           const up = await unggahGambar(env, { dataUri: b.media_url, folder: 'xycloudstore/stories' });
           if (up.ok) mediaUrl = up.url;
         } else if (typeof b.media_url === 'string' && b.media_url.startsWith('https://')) {
           mediaUrl = b.media_url;
         }
-        if (b.bg_image_url && String(b.bg_image_url).startsWith('data:')) {
-          const upBg = await unggahGambar(env, { dataUri: b.bg_image_url, folder: 'xycloudstore/stories-bg' });
-          if (upBg.ok) bgImageUrl = upBg.url;
-        } else if (typeof b.bg_image_url === 'string' && b.bg_image_url.startsWith('https://')) {
-          bgImageUrl = b.bg_image_url;
-        }
         const tipe = ['teks', 'gambar', 'video'].includes(b.tipe) ? b.tipe : (mediaUrl ? 'gambar' : 'teks');
-        const bgGradient = ['ungu', 'emas', 'neon', 'senja', 'cyber', 'solid', 'image', 'video'].includes(b.bg_gradient) ? b.bg_gradient : 'ungu';
+        const bgGradient = ['ungu', 'emas', 'neon', 'senja', 'cyber'].includes(b.bg_gradient) ? b.bg_gradient : 'ungu';
         const privasi = b.privasi === 'publik' ? 'publik' : 'teman';
         if (!teks && !mediaUrl) return err('Story harus memiliki teks atau media.', 400, env);
-        if (teks.length > 1000) return err('Teks story maksimal 1000 karakter.', 400, env);
-
-        // Batch Q: gaya teks lengkap ala Instagram
-        const gayaTeks = ['normal','bold','italic','bold_italic','neon','pelangi','ketik','ombak','retro','minimal'].includes(b.gaya_teks) ? b.gaya_teks : 'normal';
-        const warnaTeks = /^#[0-9A-Fa-f]{6,8}$/.test(b.warna_teks) ? b.warna_teks : '#FFFFFF';
-        const ukuranTeks = Math.max(14, Math.min(48, Number(b.ukuran_teks) || 21));
-        const alignTeks = ['left','center','right'].includes(b.align_teks) ? b.align_teks : 'center';
-        const bgType = ['gradient','solid','image','video'].includes(b.bg_type) ? b.bg_type : 'gradient';
-        const bgWarna = /^#[0-9A-Fa-f]{6,8}$/.test(b.bg_warna) ? b.bg_warna : '';
-        const teksBg = b.teks_bg === 0 || b.teks_bg === false ? 0 : 1;
-        const teksBgWarna = /^#[0-9A-Fa-f]{6,8}$/.test(b.teks_bg_warna) ? b.teks_bg_warna : '#00000073';
-        const label = typeof b.label === 'string' ? b.label.slice(0, 2000) : (Array.isArray(b.label) ? JSON.stringify(b.label).slice(0,2000) : '');
-        const trimStart = Math.max(0, Number(b.trim_start) || 0);
-        const trimEnd = Math.max(0, Number(b.trim_end) || 0);
-        const filter = ['normal','bw','sepia','vintage','vivid','blur','warm','cool'].includes(b.filter) ? b.filter : 'normal';
-        const durasiVideo = Math.max(0, Number(b.durasi_video) || 0);
+        if (teks.length > 500) return err('Teks story maksimal 500 karakter.', 400, env);
 
         const id = uid('st_');
         const now = new Date();
@@ -7797,11 +7774,9 @@ async function statistikPublik(env) {
         const berakhir = new Date(now.getTime() + 24 * 3600 * 1000).toISOString();
 
         await env.DB.prepare(`
-          INSERT INTO stories (id, user_id, media_url, tipe, teks, bg_gradient, privasi, likes, reposts, dibuat, berakhir,
-            gaya_teks, warna_teks, ukuran_teks, align_teks, bg_type, bg_warna, bg_image_url, teks_bg, teks_bg_warna, label, trim_start, trim_end, filter, durasi_video)
-          VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).bind(id, me.sub, mediaUrl, tipe, teks, bgGradient, privasi, dibuat, berakhir,
-          gayaTeks, warnaTeks, ukuranTeks, alignTeks, bgType, bgWarna, bgImageUrl, teksBg, teksBgWarna, label, trimStart, trimEnd, filter, durasiVideo).run();
+          INSERT INTO stories (id, user_id, media_url, tipe, teks, bg_gradient, privasi, likes, reposts, dibuat, berakhir)
+          VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?)
+        `).bind(id, me.sub, mediaUrl, tipe, teks, bgGradient, privasi, dibuat, berakhir).run();
 
         const u = await env.DB.prepare('SELECT nama, foto, bingkai FROM users WHERE id = ?').bind(me.sub).first();
         const story = {
@@ -7821,20 +7796,6 @@ async function statistikPublik(env) {
           dibuat,
           berakhir,
           punya_saya: true,
-          gaya_teks: gayaTeks,
-          warna_teks: warnaTeks,
-          ukuran_teks: ukuranTeks,
-          align_teks: alignTeks,
-          bg_type: bgType,
-          bg_warna: bgWarna,
-          bg_image_url: bgImageUrl,
-          teks_bg: teksBg,
-          teks_bg_warna: teksBgWarna,
-          label,
-          trim_start: trimStart,
-          trim_end: trimEnd,
-          filter,
-          durasi_video: durasiVideo,
         };
         ctx.waitUntil(push(env, 'forum', 'story.baru', story));
         return json(story, 201, env);
