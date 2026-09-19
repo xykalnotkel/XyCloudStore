@@ -7,8 +7,9 @@ import '../widgets/common.dart';
 /// Video Editor Native - Trim/Cut video sebelum post
 /// Fitur: preview, trim slider, cut, filter, rotate, aspect ratio
 class VideoEditorScreen extends StatefulWidget {
-  const VideoEditorScreen({super.key, File? file, File? videoFile})
-      : file = file ?? videoFile ?? (throw ArgumentError('file/videoFile required')),
+  VideoEditorScreen({super.key, File? file, File? videoFile})
+      : assert(file != null || videoFile != null, 'file/videoFile required'),
+        file = file ?? videoFile!,
         videoFile = videoFile ?? file;
 
   final File file;
