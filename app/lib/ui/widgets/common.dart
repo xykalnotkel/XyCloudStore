@@ -11,9 +11,6 @@ export 'custom_dropdown.dart';
 // ============================================================
 //  Gambar jaringan dengan cache disk di perangkat
 // ============================================================
-/// Muat gambar dari CDN lalu SIMPAN di penyimpanan lokal (disk cache)
-/// supaya membuka ulang instan dan tidak mengunduh tiap kali.
-/// Tetap tampil utuh di tengah loading & saat error.
 class AppImage extends StatelessWidget {
   const AppImage(this.url,
       {super.key,
@@ -36,7 +33,8 @@ class AppImage extends StatelessWidget {
           width: lebar,
           fit: fit,
           memCacheWidth: (tinggi ?? 200).toInt() * 3,
-          fadeInDuration: const Duration(milliseconds: 150),
+          fadeInDuration: const Duration(milliseconds: 120),
+          fadeOutDuration: const Duration(milliseconds: 120),
           placeholder: (_, __) => placeholderKet
               ? const Shimmer()
               : const SizedBox.shrink(),
@@ -53,11 +51,14 @@ class AppImage extends StatelessWidget {
 }
 
 // ============================================================
-//  Kartu & permukaan
+//  Kartu & permukaan — FLAT OPTIMIZED Batch P
 // ============================================================
 
-/// Kartu premium: border tipis + shadow berlapis + efek tekan.
-class XyCard extends StatefulWidget {
+/// Kartu flat — optimasi 2026-09-19:
+/// Sebelumnya: shadow berlapis + gradasi + AnimatedScale + AnimatedContainer
+/// → overdraw & jank di low-end. Sekarang FLAT: border 1px + surface solid,
+/// tanpa shadow, tanpa gradasi, tanpa animasi. InkWell ringan untuk tap.
+class XyCard extends StatelessWidget {
   const XyCard({
     super.key,
     required this.child,
@@ -66,7 +67,7 @@ class XyCard extends StatefulWidget {
     this.radius = XyRadius.lg,
     this.color,
     this.border = true,
-    this.elevated = true,
+    this.elevated = false,
     this.gradient,
   });
 
@@ -76,97 +77,74 @@ class XyCard extends StatefulWidget {
   final double radius;
   final Color? color;
   final bool border;
-  final bool elevated;
-  final Gradient? gradient;
-
-  @override
-  State<XyCard> createState() => _XyCardState();
-}
-
-class _XyCardState extends State<XyCard> {
-  bool _down = false;
+  final bool elevated; // compat, diabaikan (flat)
+  final Gradient? gradient; // compat, diabaikan
 
   @override
   Widget build(BuildContext context) {
     final t = XyTheme.of(context);
-    // Mode gelap (Batch I): kartu pakai gradasi midnight halus + tepi kaca
-    // yang sedikit lebih terang supaya terlihat "glass", tidak datar.
-    final pakaiGradKartu =
-        widget.gradient == null && widget.color == null && t.gradCard != null;
-    final body = AnimatedScale(
-      scale: _down ? .975 : 1,
-      duration: const Duration(milliseconds: 130),
-      curve: Curves.easeOut,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        padding: widget.padding,
-        decoration: BoxDecoration(
-          color: pakaiGradKartu ? null : (widget.color ?? t.surface),
-          gradient: widget.gradient ?? (pakaiGradKartu ? t.gradCard : null),
-          borderRadius: BorderRadius.circular(widget.radius),
-          border: widget.border ? Border.all(color: t.line) : null,
-          boxShadow: widget.elevated ? (_down ? XyTheme.shadowXs : XyTheme.shadowSm) : null,
-        ),
-        child: DefaultTextStyle.merge(
-          style: TextStyle(color: t.ink),
-          child: RepaintBoundary(child: widget.child),
-        ),
+    final body = Container(
+      padding: padding,
+      decoration: BoxDecoration(
+        color: color ?? t.surface,
+        borderRadius: BorderRadius.circular(radius),
+        border: border ? Border.all(color: t.line) : null,
+      ),
+      child: DefaultTextStyle.merge(
+        style: TextStyle(color: t.ink),
+        child: child,
       ),
     );
 
-    if (widget.onTap == null) return body;
-    return GestureDetector(
-      onTapDown: (_) => setState(() => _down = true),
-      onTapUp: (_) => setState(() => _down = false),
-      onTapCancel: () => setState(() => _down = false),
-      onTap: widget.onTap,
-      behavior: HitTestBehavior.opaque,
-      child: body,
+    if (onTap == null) return body;
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(radius),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(radius),
+        onTap: () {
+          HapticFeedback.selectionClick();
+          onTap!();
+        },
+        child: body,
+      ),
     );
   }
 }
 
-/// Wrapper agar widget apa pun punya feedback tekan yang halus.
-class Pressable extends StatefulWidget {
+/// Wrapper tekan — flat ringan (tanpa AnimatedScale)
+class Pressable extends StatelessWidget {
   const Pressable({super.key, required this.child, this.onTap, this.scale = .96});
   final Widget child;
   final VoidCallback? onTap;
-  final double scale;
+  final double scale; // compat, diabaikan
 
-  @override
-  State<Pressable> createState() => _PressableState();
-}
-
-class _PressableState extends State<Pressable> {
-  bool _d = false;
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTapDown: (_) => setState(() => _d = true),
-      onTapUp: (_) => setState(() => _d = false),
-      onTapCancel: () => setState(() => _d = false),
-      onTap: widget.onTap == null
+    return InkWell(
+      borderRadius: BorderRadius.circular(XyRadius.sm),
+      onTap: onTap == null
           ? null
           : () {
               HapticFeedback.selectionClick();
-              widget.onTap!();
+              onTap!();
             },
-      child: AnimatedScale(
-        scale: _d ? widget.scale : 1,
-        duration: const Duration(milliseconds: 120),
-        child: widget.child,
-      ),
+      child: child,
     );
   }
 }
 
 // ============================================================
-//  Tombol
+//  Tombol — FLAT OPTIMIZED Batch P
 // ============================================================
 
-class GradientButton extends StatefulWidget {
-  GradientButton({
+/// Tombol flat — optimasi performa:
+/// Sebelumnya: Gradient + border berkilau 3 warna + 2 BoxShadow glow +
+/// AnimatedScale + AnimatedContainer + foregroundDecoration kaca = 6 layer.
+/// Sekarang: solid color, tanpa gradient/shadow/glow/scale. Material+InkWell.
+/// API sama supaya tidak breaking, gradient & glowColor diabaikan.
+class GradientButton extends StatelessWidget {
+  const GradientButton({
     super.key,
     required this.label,
     this.onPressed,
@@ -186,123 +164,52 @@ class GradientButton extends StatefulWidget {
   final Color glowColor;
 
   @override
-  State<GradientButton> createState() => _GradientButtonState();
-}
-
-/// Tombol aksen (revisi Batch I atas permintaan pemilik 2026-09-15):
-/// kembali ke bentuk PIL ROUNDED seperti semula — bukan "3D" bertepi keras —
-/// tetapi punya BORDER BERKILAU: cincin gradasi kaca (terang di atas, pekat
-/// di bawah) + sorot dalam halus + glow lembut. Kesan 3D premium datang dari
-/// kilau tepi, bukan dari bayangan keras. Saat ditekan: scale halus 0.975.
-class _GradientButtonState extends State<GradientButton> {
-  bool _tekan = false;
-
-  Color get _kilauAtas => Color.lerp(widget.glowColor, Colors.white, .78)!;
-  Color get _kilauTengah => Color.lerp(widget.glowColor, Colors.white, .22)!;
-  Color get _kilauBawah => Color.lerp(widget.glowColor, Colors.black, .42)!;
-
-  @override
   Widget build(BuildContext context) {
-    final mati = widget.onPressed == null || widget.loading;
+    final mati = onPressed == null || loading;
     final t = XyTheme.of(context);
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTapDown: mati ? null : (_) => setState(() => _tekan = true),
-      onTapUp: mati ? null : (_) => setState(() => _tekan = false),
-      onTapCancel: () => setState(() => _tekan = false),
-      onTap: widget.onPressed == null
-          ? null
-          : () {
-              HapticFeedback.lightImpact();
-              widget.onPressed!();
-            },
-      child: AnimatedScale(
-        scale: _tekan ? .975 : 1,
-        duration: const Duration(milliseconds: 110),
-        curve: Curves.easeOut,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 160),
-          height: widget.height,
-          // Border berkilau: padding = tebal cincin, gradasi cincin di luar.
-          padding: const EdgeInsets.all(1.5),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(XyRadius.tombol),
-            gradient: mati
-                ? null
-                : LinearGradient(
-                    colors: [_kilauAtas, _kilauTengah, _kilauBawah],
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    stops: const [0, .45, 1],
-                  ),
-            color: mati ? t.line : null,
-            boxShadow: mati
-                ? null
-                : [
-                    // Glow ungu lembut (mengecil saat ditekan).
-                    BoxShadow(
-                      color: widget.glowColor
-                          .withOpacity(_tekan ? .16 : .30),
-                      blurRadius: _tekan ? 12 : 20,
-                      offset: Offset(0, _tekan ? 4 : 9),
-                    ),
-                    // Sedikit kedalaman tanpa tepi keras.
-                    BoxShadow(
-                      color: Colors.black.withOpacity(.12),
-                      blurRadius: 3,
-                      offset: const Offset(0, 1),
-                    ),
-                  ],
-          ),
-          child: Container(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(XyRadius.tombol),
-              gradient: mati ? null : widget.gradient,
-              color: mati ? t.primarySoft : null,
-            ),
-            // Sorot kaca di separuh atas bidang tombol.
-            foregroundDecoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(XyRadius.tombol),
-              gradient: mati
-                  ? null
-                  : LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: const Alignment(0, .55),
-                      colors: [
-                        Colors.white.withOpacity(_tekan ? .10 : .16),
-                        Colors.white.withOpacity(0),
+    final bg = mati ? t.primarySoft : XyTheme.primary;
+    final fg = mati ? t.muted : Colors.white;
+
+    return SizedBox(
+      height: height,
+      child: Material(
+        color: bg,
+        borderRadius: BorderRadius.circular(XyRadius.tombol),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(XyRadius.tombol),
+          onTap: mati
+              ? null
+              : () {
+                  HapticFeedback.lightImpact();
+                  onPressed!();
+                },
+          child: Center(
+            child: loading
+                ? SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2.2, color: fg),
+                  )
+                : Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (icon != null) ...[
+                        Icon(icon, size: 18, color: fg),
+                        const SizedBox(width: 8),
                       ],
-                    ),
-            ),
-            child: Center(
-              child: widget.loading
-                  ? const SizedBox(
-                      width: 22,
-                      height: 22,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2.4, color: Colors.white))
-                  : Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        if (widget.icon != null) ...[
-                          Icon(widget.icon,
-                              size: 19,
-                              color:
-                                  mati ? t.muted : Colors.white),
-                          const SizedBox(width: 9),
-                        ],
-                        Text(
-                          widget.label,
-                          style: TextStyle(
-                            color: mati ? t.muted : Colors.white,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 15,
-                            letterSpacing: -.1,
-                          ),
+                      Text(
+                        label,
+                        style: TextStyle(
+                          color: fg,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 14.5,
+                          letterSpacing: -.1,
                         ),
-                      ],
-                    ),
-            ),
+                      ),
+                    ],
+                  ),
           ),
         ),
       ),
@@ -311,7 +218,7 @@ class _GradientButtonState extends State<GradientButton> {
 }
 
 // ============================================================
-//  Label & indikator
+//  Label & indikator — FLAT
 // ============================================================
 
 class Pill extends StatelessWidget {
@@ -325,7 +232,6 @@ class Pill extends StatelessWidget {
   Widget build(BuildContext context) {
     final bool isDark = Theme.of(context).brightness == Brightness.dark;
     final double lum = warna.computeLuminance();
-    // Cegah teks putih di latar putih/terang pada light mode
     final Color teksWarna = solid
         ? (lum > 0.65 ? (isDark ? XyTheme.inkGelap : XyTheme.ink) : Colors.white)
         : (lum > 0.65 ? (isDark ? XyTheme.inkGelap : XyTheme.primaryDeep) : warna);
@@ -362,7 +268,6 @@ class Pill extends StatelessWidget {
   }
 }
 
-/// Indikator koneksi realtime dengan pulse ring.
 class LiveDot extends StatelessWidget {
   const LiveDot({super.key,required this.state,this.compact=true});
   final RealtimeState state;
@@ -374,8 +279,6 @@ class LiveDot extends StatelessWidget {
       child:Padding(padding:const EdgeInsets.all(4),child:Container(width:8,height:8,decoration:BoxDecoration(color:color,shape:BoxShape.circle))));
   }
 }
-
-
 
 class SectionHeader extends StatelessWidget {
   const SectionHeader(this.judul, {super.key, this.sub, this.aksi, this.onAksi, this.top = 26});
@@ -436,10 +339,6 @@ class SpecChip extends StatelessWidget {
   }
 }
 
-// ============================================================
-//  Thumbnail generatif (tanpa aset eksternal)
-// ============================================================
-
 class GradientThumb extends StatelessWidget {
   const GradientThumb({
     super.key,
@@ -465,9 +364,8 @@ class GradientThumb extends StatelessWidget {
   );
 }
 
-
 // ============================================================
-//  Skeleton / shimmer
+//  Skeleton / shimmer — tetap ringan
 // ============================================================
 
 class Shimmer extends StatefulWidget {
@@ -508,14 +406,200 @@ class _ShimmerState extends State<Shimmer> with SingleTickerProviderStateMixin {
   }
 }
 
+class SkeletonBox extends StatelessWidget {
+  const SkeletonBox({
+    super.key,
+    this.width = double.infinity,
+    required this.height,
+    this.radius = 8,
+  });
+  final double width, height, radius;
+
+  @override
+  Widget build(BuildContext context) => Shimmer(width: width, height: height, radius: radius);
+}
+
+class SkeletonCard extends StatelessWidget {
+  const SkeletonCard({
+    super.key,
+    this.width = double.infinity,
+    this.height = 100,
+    this.radius = 16,
+    this.padding = const EdgeInsets.all(16),
+  });
+  final double width, height, radius;
+  final EdgeInsetsGeometry padding;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: width,
+      height: height,
+      padding: padding,
+      decoration: BoxDecoration(
+        color: XyTheme.of(context).surface,
+        borderRadius: BorderRadius.circular(radius),
+        border: Border.all(color: XyTheme.of(context).line),
+      ),
+      child: Shimmer(width: double.infinity, height: double.infinity, radius: radius > 4 ? radius - 4 : 4),
+    );
+  }
+}
+
+class SkeletonList extends StatelessWidget {
+  const SkeletonList({super.key, this.count = 5, this.itemHeight = 72});
+  final int count;
+  final double itemHeight;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView.separated(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      physics: const NeverScrollableScrollPhysics(),
+      shrinkWrap: true,
+      itemCount: count,
+      separatorBuilder: (_, __) => const SizedBox(height: 10),
+      itemBuilder: (_, __) => Container(
+        height: itemHeight,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: XyTheme.of(context).surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: XyTheme.of(context).line),
+        ),
+        child: Row(
+          children: [
+            const Shimmer(width: 44, height: 44, radius: 22),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: const [
+                  Shimmer(width: 140, height: 14, radius: 6),
+                  SizedBox(height: 8),
+                  Shimmer(width: 200, height: 11, radius: 4),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class SkeletonForumList extends StatelessWidget {
+  const SkeletonForumList({super.key, this.count = 4});
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView.separated(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      physics: const NeverScrollableScrollPhysics(),
+      shrinkWrap: true,
+      itemCount: count,
+      separatorBuilder: (_, __) => const SizedBox(height: 12),
+      itemBuilder: (_, __) => Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: XyTheme.of(context).surface,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: XyTheme.of(context).line),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Shimmer(width: 38, height: 38, radius: 19),
+                const SizedBox(width: 10),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: const [
+                    Shimmer(width: 110, height: 13, radius: 5),
+                    SizedBox(height: 5),
+                    Shimmer(width: 70, height: 10, radius: 4),
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            const Shimmer(width: double.infinity, height: 15, radius: 5),
+            const SizedBox(height: 8),
+            const Shimmer(width: 220, height: 15, radius: 5),
+            const SizedBox(height: 14),
+            Row(
+              children: const [
+                Shimmer(width: 50, height: 18, radius: 9),
+                SizedBox(width: 16),
+                Shimmer(width: 50, height: 18, radius: 9),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class SkeletonLiveGrid extends StatelessWidget {
+  const SkeletonLiveGrid({super.key, this.count = 4});
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    return GridView.builder(
+      padding: const EdgeInsets.all(16),
+      physics: const NeverScrollableScrollPhysics(),
+      shrinkWrap: true,
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        mainAxisSpacing: 14,
+        crossAxisSpacing: 14,
+        childAspectRatio: 0.82,
+      ),
+      itemCount: count,
+      itemBuilder: (_, __) => Container(
+        decoration: BoxDecoration(
+          color: XyTheme.of(context).surface,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: XyTheme.of(context).line),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: ClipRRect(
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(17)),
+                child: const Shimmer(width: double.infinity, height: double.infinity, radius: 0),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: const [
+                  Shimmer(width: 100, height: 13, radius: 5),
+                  SizedBox(height: 6),
+                  Shimmer(width: 60, height: 10, radius: 4),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 // ============================================================
-//  Empty state
+//  Empty state — flat
 // ============================================================
 
 class Kosong extends StatelessWidget {
   const Kosong({super.key, required this.icon, required this.judul, this.sub, this.aksi, this.ilustrasi = 'kosong'});
-
-  /// Nama berkas ilustrasi di assets/ilustrasi (tanpa ekstensi). Kosongkan untuk memakai ikon saja.
   final String ilustrasi;
   final IconData icon;
   final String judul;
@@ -530,34 +614,16 @@ class Kosong extends StatelessWidget {
         child: Column(mainAxisAlignment: MainAxisAlignment.center, mainAxisSize: MainAxisSize.min, children: [
           if (ilustrasi.isEmpty)
             Container(
-              width: 84,
-              height: 84,
+              width: 72,
+              height: 72,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                gradient: LinearGradient(
-                  colors: [XyTheme.primary.withOpacity(.10), XyTheme.violet.withOpacity(.10)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
+                color: XyTheme.of(context).primarySoft,
               ),
-              child: Icon(icon, size: 34, color: XyTheme.primary),
+              child: Icon(icon, size: 30, color: XyTheme.primary),
             )
           else
-            Stack(alignment: Alignment.center, children: [
-              Container(
-                width: 190,
-                height: 190,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: RadialGradient(colors: [
-                    XyTheme.violet.withOpacity(.14),
-                    XyTheme.violet.withOpacity(.03),
-                    Colors.transparent,
-                  ]),
-                ),
-              ),
-              XyIlustrasi(ilustrasi, tinggi: 168),
-            ]),
+            XyIlustrasi(ilustrasi, tinggi: 150),
           const SizedBox(height: 14),
           Text(judul, textAlign: TextAlign.center,
               style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15.5, letterSpacing: -.2)),
@@ -574,21 +640,16 @@ class Kosong extends StatelessWidget {
 }
 
 // ============================================================
-//  Logo
+//  Logo — flat
 // ============================================================
 
-/// Logo resmi XyCloudStore (ikon awan-X ungu).
 class XyLogo extends StatelessWidget {
-  const XyLogo({super.key, this.size = 64, this.radius = 22, this.putih = false, this.kotak = true, this.glow = true});
+  const XyLogo({super.key, this.size = 64, this.radius = 22, this.putih = false, this.kotak = true, this.glow = false});
   final double size;
   final double radius;
-
-  /// Pakai versi putih untuk latar ungu gelap.
   final bool putih;
-
-  /// Tampilkan kartu berlatar; kalau false hanya gambar logonya.
   final bool kotak;
-  final bool glow;
+  final bool glow; // compat, diabaikan flat
 
   @override
   Widget build(BuildContext context) {
@@ -596,7 +657,7 @@ class XyLogo extends StatelessWidget {
       putih ? 'assets/brand/logo_icon_putih.png' : 'assets/brand/logo_icon.png',
       width: size * (kotak ? .74 : 1),
       height: size * (kotak ? .74 : 1),
-      filterQuality: FilterQuality.high,
+      filterQuality: FilterQuality.medium,
     );
     if (!kotak) return SizedBox(width: size, height: size, child: Center(child: gambar));
 
@@ -606,15 +667,13 @@ class XyLogo extends StatelessWidget {
       decoration: BoxDecoration(
         color: putih ? Colors.white.withOpacity(.12) : Colors.white,
         borderRadius: BorderRadius.circular(radius),
-        border: putih ? Border.all(color: Colors.white.withOpacity(.18)) : Border.all(color: XyTheme.of(context).line),
-        boxShadow: glow && !putih ? XyTheme.glow(XyTheme.primary, .16) : null,
+        border: Border.all(color: putih ? Colors.white.withOpacity(.18) : XyTheme.of(context).line),
       ),
       child: Center(child: gambar),
     );
   }
 }
 
-/// Wordmark resmi XyCloudStore.
 class XyWordmark extends StatelessWidget {
   const XyWordmark({super.key, this.tinggi = 30, this.putih = false});
   final double tinggi;
@@ -624,24 +683,14 @@ class XyWordmark extends StatelessWidget {
   Widget build(BuildContext context) => Image.asset(
         putih ? 'assets/brand/wordmark_putih.png' : 'assets/brand/wordmark.png',
         height: tinggi,
-        filterQuality: FilterQuality.high,
+        filterQuality: FilterQuality.medium,
       );
 }
 
-/// Ilustrasi 3D bawaan aplikasi (hasil generate, latar sudah transparan).
 class XyIlustrasi extends StatelessWidget {
   const XyIlustrasi(this.nama, {super.key, this.tinggi = 200});
-  final String nama; // sewa | akun | cs | dompet | kosong | sukses | favorit | pc | order
+  final String nama;
   final double tinggi;
-
-  /// Ilustrasi yang pasti tersedia, dipakai sebagai jaring pengaman.
-  ///
-  /// Sebelumnya `Image.asset` dipasang TANPA `errorBuilder`, sehingga satu nama
-  /// berkas yang lupa disertakan langsung melempar "Unable to load asset" di
-  /// perangkat pengguna dan layarnya menampilkan kotak galat. Kasus nyatanya
-  /// terjadi di produksi (audit 2026-09-13): `favorit`, `pc`, dan `order`
-  /// dipakai tiga layar baru v3.3 tetapi berkasnya tidak ada, dan galatnya
-  /// sampai tercatat di tabel `galat`.
   static const String cadangan = 'kosong';
 
   @override
@@ -651,21 +700,16 @@ class XyIlustrasi extends StatelessWidget {
         fit: BoxFit.contain,
         filterQuality: FilterQuality.medium,
         errorBuilder: (context, error, stackTrace) => nama == cadangan
-            // Kalau bahkan cadangannya hilang, jangan melempar lagi: tampilkan
-            // ikon polos supaya layar tetap bisa dipakai.
             ? Icon(Icons.image_not_supported_outlined,
                 size: tinggi * .55, color: XyTheme.of(context).muted.withOpacity(.45))
             : XyIlustrasi(cadangan, tinggi: tinggi),
       );
 }
 
-
 // ============================================================
-//  Latar dekoratif
+//  Latar dekoratif — flat, tanpa blur berat
 // ============================================================
 
-/// Blob gradien lembut untuk latar layar onboarding / welcome.
-/// Batch I: bukan lagi warna datar — aurora penuh (lihat XyLatar).
 class AuroraBackground extends StatelessWidget {
   const AuroraBackground({super.key,this.child,this.dark=false});
   final Widget? child;final bool dark;
@@ -677,10 +721,6 @@ class DotGrid extends StatelessWidget {
   @override Widget build(BuildContext context)=>const SizedBox.shrink();
 }
 
-/// Animasi masuk berurutan untuk daftar item.
-/// Gerak masuk konten (stagger). Kebijakan gerak 2026-09-18: TANPA opacity —
-/// hanya translate vertikal yang settle, supaya tidak ada fade-in di
-/// seluruh aplikasi. Nama kelas dipertahankan agar pemanggil tidak berubah.
 class FadeInUp extends StatefulWidget {
   const FadeInUp({super.key, required this.child, this.delay = Duration.zero, this.offset = 18});
   final Widget child;
@@ -693,7 +733,7 @@ class FadeInUp extends StatefulWidget {
 
 class _FadeInUpState extends State<FadeInUp> with SingleTickerProviderStateMixin {
   late final AnimationController c =
-      AnimationController(vsync: this, duration: const Duration(milliseconds: 520));
+      AnimationController(vsync: this, duration: const Duration(milliseconds: 360))..repeat();
 
   @override
   void initState() {
@@ -723,7 +763,6 @@ class _FadeInUpState extends State<FadeInUp> with SingleTickerProviderStateMixin
   }
 }
 
-/// Angka yang menghitung naik saat berubah (untuk saldo).
 class AnimatedRupiah extends StatelessWidget {
   const AnimatedRupiah(this.nilai, {super.key, required this.style, required this.format});
   final int nilai;
@@ -734,14 +773,13 @@ class AnimatedRupiah extends StatelessWidget {
   Widget build(BuildContext context) {
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: 0, end: nilai.toDouble()),
-      duration: const Duration(milliseconds: 900),
+      duration: const Duration(milliseconds: 700),
       curve: Curves.easeOutCubic,
       builder: (_, v, __) => Text(format(v.round()), style: style),
     );
   }
 }
 
-/// Ring progres melingkar untuk provisioning.
 class ProgressRing extends StatelessWidget {
   ProgressRing({super.key, required this.value, this.size = 74, this.color = XyTheme.primary, this.label});
   final double value;
@@ -757,7 +795,7 @@ class ProgressRing extends StatelessWidget {
       child: Stack(alignment: Alignment.center, children: [
         TweenAnimationBuilder<double>(
           tween: Tween(begin: 0, end: value.clamp(0, 1)),
-          duration: const Duration(milliseconds: 700),
+          duration: const Duration(milliseconds: 500),
           curve: Curves.easeOutCubic,
           builder: (_, v, __) => CustomPaint(
             size: Size.square(size),
@@ -788,7 +826,7 @@ class _RingPainter extends CustomPainter {
       math.pi * 2 * v,
       false,
       Paint()
-        ..shader = LinearGradient(colors: [color, XyTheme.violet]).createShader(rect)
+        ..color = color
         ..strokeWidth = stroke
         ..style = PaintingStyle.stroke
         ..strokeCap = StrokeCap.round,
@@ -799,12 +837,6 @@ class _RingPainter extends CustomPainter {
   bool shouldRepaint(covariant _RingPainter old) => old.v != v;
 }
 
-/// ------------------------------------------------------------
-///  XyBarisMenu — baris menu datar (ikon + judul + sub + pemisah).
-/// ------------------------------------------------------------
-///  Daftar pengaturan sengaja tidak memakai kartu per item: lebih ringkas,
-///  mudah dipindai, dan tidak terlihat seperti tumpukan kotak. Tetap satu
-///  widget agar jarak, ukuran ikon, serta tipografinya konsisten.
 class XyBarisMenu extends StatelessWidget {
   const XyBarisMenu({
     super.key,
@@ -864,9 +896,6 @@ class XyBarisMenu extends StatelessWidget {
   }
 }
 
-/// ------------------------------------------------------------
-///  XyLabel — judul kecil di atas bidang input atau kelompok.
-/// ------------------------------------------------------------
 class XyLabel extends StatelessWidget {
   const XyLabel(this.teks, {super.key});
   final String teks;

@@ -206,7 +206,7 @@ class _ProfilPublikScreenState extends State<ProfilPublikScreen> {
     final p = _profil;
     return Scaffold(
       body: _memuat
-          ? const Center(child: CircularProgressIndicator(color: XyTheme.primary))
+          ? const Padding(padding: EdgeInsets.only(top: 80), child: SkeletonList(count: 4))
           : _galat != null
               ? Kosong(
                   icon: Icons.person_off_rounded,

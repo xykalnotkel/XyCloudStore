@@ -173,7 +173,7 @@ class _NotifikasiScreenState extends State<NotifikasiScreen> {
           // Konten Utama
           Expanded(
             child: s.notifMemuat && semua.isEmpty
-                ? const Center(child: CircularProgressIndicator())
+                ? const SkeletonList(count: 6)
                 : daftar.isEmpty
                     ? Center(
                         child: Kosong(

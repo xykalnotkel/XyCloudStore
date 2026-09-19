@@ -110,7 +110,7 @@ class _PerangkatScreenState extends State<PerangkatScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Perangkat Login')),
       body: _memuat
-          ? const Center(child: CircularProgressIndicator())
+          ? const SkeletonList(count: 3)
           : RefreshIndicator(
               onRefresh: _muat,
               child: ListView(

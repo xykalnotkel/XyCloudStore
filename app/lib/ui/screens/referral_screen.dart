@@ -99,7 +99,7 @@ class _ReferralScreenState extends State<ReferralScreen> {
       body: data == null && galat != null
           ? GagalMuat(pesan: galat!, ilustrasi: 'offline', onCoba: _muat)
           : data == null
-              ? const Center(child: CircularProgressIndicator())
+              ? const Padding(padding: EdgeInsets.all(20), child: SkeletonCard(height: 220))
               : ListView(
                   padding: const EdgeInsets.fromLTRB(20, 14, 20, 30),
                   children: [

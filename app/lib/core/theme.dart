@@ -121,45 +121,17 @@ class XyTheme {
     end: Alignment.bottomRight,
   );
 
-  // ---------- elevasi ----------
+  // ---------- elevasi — FLAT OPTIMIZED Batch P ----------
   /// Alias lama supaya kode lain tetap jalan.
   static const Color cyan = violet;
 
-  static List<BoxShadow> get shadowXs => [
-        BoxShadow(
-            color: ink.withOpacity(.035),
-            blurRadius: 8,
-            offset: const Offset(0, 2)),
-      ];
-  static List<BoxShadow> get shadowSm => [
-        BoxShadow(
-            color: ink.withOpacity(.05),
-            blurRadius: 16,
-            offset: const Offset(0, 6)),
-      ];
-  static List<BoxShadow> get shadowMd => [
-        BoxShadow(
-            color: ink.withOpacity(.07),
-            blurRadius: 28,
-            offset: const Offset(0, 12)),
-        BoxShadow(
-            color: ink.withOpacity(.03),
-            blurRadius: 4,
-            offset: const Offset(0, 1)),
-      ];
+  // Flat: no shadows by default (hemat compositing, lebih ringan di low-end)
+  static List<BoxShadow> get shadowXs => const [];
+  static List<BoxShadow> get shadowSm => const [];
+  static List<BoxShadow> get shadowMd => const [];
 
-  /// Kilau glossy violet-indigo (lebih terasa dari orchid sebelumnya)
-  /// Dipakai di kartu saldo, tombol hero, popup.
-  static List<BoxShadow> glow(Color c, [double o = .28]) => [
-        BoxShadow(
-            color: c.withOpacity((o.clamp(0.0, .40)).toDouble()),
-            blurRadius: 26,
-            offset: const Offset(0, 10)),
-        BoxShadow(
-            color: c.withOpacity((o * .45).clamp(0.0, .18).toDouble()),
-            blurRadius: 40,
-            offset: const Offset(0, 18)),
-      ];
+  /// Glow diabaikan untuk flat mode — return empty biar tidak ada blur mahal
+  static List<BoxShadow> glow(Color c, [double o = .28]) => const [];
 
   // ---------- palet gelap — GITHUB DARK STYLE ----------
   // Mengikuti preferensi pengguna: gaya solid, bersih, minimalis seperti

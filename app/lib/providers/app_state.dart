@@ -577,6 +577,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   bool liveMemuat = false;
   String? liveGalat;
   String? creatorLiveGalat;
+  LivestreamItem? liveAktifSaya;
 
   Future<void> muatLive({bool senyap = false}) async {
     await _muatLiveDenganHasil(senyap: senyap);
@@ -654,8 +655,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     String sumber = 'kamera',
   }) async {
     try {
-      await _repo.liveStart(title: title, game: game, micConsent: mic, sumber: sumber);
+      liveAktifSaya = await _repo.liveStart(title: title, game: game, micConsent: mic, sumber: sumber);
       await muatLive(senyap: true);
+      notifyListeners();
       return null;
     } catch (e) {
       return _pesan(e);
@@ -665,7 +667,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   Future<String?> akhiriLivestream(String id) async {
     try {
       await _repo.liveEnd(id);
+      if (liveAktifSaya?.id == id) liveAktifSaya = null;
       await muatLive(senyap: true);
+      notifyListeners();
       return null;
     } catch (e) {
       return _pesan(e);

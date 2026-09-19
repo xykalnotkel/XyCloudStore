@@ -628,7 +628,7 @@ class _Studio extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (data == null) {
-      if (loading) return const Center(child: CircularProgressIndicator());
+      if (loading) return const Padding(padding: EdgeInsets.only(top: 24), child: SkeletonList(count: 3));
       if (error != null) {
         return ListView(
           physics: const AlwaysScrollableScrollPhysics(),
@@ -1131,7 +1131,8 @@ class _StartLiveFormState extends State<_StartLiveForm> {
           setState(() => busy = true);
           final judul = title.text.trim();
           final namaGame = game.text.trim();
-          final e = await context.read<AppState>().mulaiLivestream(
+          final state = context.read<AppState>();
+          final e = await state.mulaiLivestream(
             title: judul,
             game: namaGame,
             mic: mic,
@@ -1141,6 +1142,7 @@ class _StartLiveFormState extends State<_StartLiveForm> {
           setState(() => busy = false);
           if (e == null) {
             if (isMobile) {
+              final activeItem = state.liveAktifSaya ?? state.creatorLive.active;
               Navigator.push(
                 context,
                 MaterialPageRoute(
@@ -1149,6 +1151,7 @@ class _StartLiveFormState extends State<_StartLiveForm> {
                     game: namaGame,
                     sumber: sumber,
                     mic: mic,
+                    liveId: activeItem?.id,
                   ),
                 ),
               );
@@ -1305,12 +1308,14 @@ class MobileBroadcastLiveScreen extends StatefulWidget {
     required this.game,
     required this.sumber,
     required this.mic,
+    this.liveId,
   });
 
   final String title;
   final String game;
   final String sumber; // 'kamera' | 'layar'
   final bool mic;
+  final String? liveId;
 
   @override
   State<MobileBroadcastLiveScreen> createState() => _MobileBroadcastLiveScreenState();
@@ -1322,14 +1327,9 @@ class _MobileBroadcastLiveScreenState extends State<MobileBroadcastLiveScreen> {
   bool _flashAktif = false;
   bool _tampilChat = true;
   int _detik = 0;
-  int _penonton = 12;
+  int _penonton = 0;
   Timer? _timer;
-
-  final List<Map<String, String>> _pesanChat = [
-    {'nama': 'DimasGamer', 'teks': 'Halo bang! Semangat livenya 🔥'},
-    {'nama': 'RinaPutri', 'teks': 'Keren banget grafisnya lancar!'},
-    {'nama': 'XyMember', 'teks': 'Gass push rank bang!'},
-  ];
+  final List<Map<String, String>> _pesanChat = [];
 
   @override
   void initState() {
@@ -1339,10 +1339,6 @@ class _MobileBroadcastLiveScreenState extends State<MobileBroadcastLiveScreen> {
       if (!mounted) return;
       setState(() {
         _detik++;
-        if (_detik % 7 == 0) {
-          _penonton += (_detik % 14 == 0 ? -1 : 2);
-          if (_penonton < 1) _penonton = 1;
-        }
       });
     });
   }
@@ -1377,11 +1373,119 @@ class _MobileBroadcastLiveScreenState extends State<MobileBroadcastLiveScreen> {
       ),
     );
     if (konfirmasi == true && mounted) {
+      if (widget.liveId != null && widget.liveId!.isNotEmpty) {
+        unawaited(context.read<AppState>().akhiriLivestream(widget.liveId!));
+      }
       Navigator.pop(context);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Siaran langsung telah diakhiri.')),
       );
     }
+  }
+
+  void _bukaInfoIngest() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF161B22),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (c) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 38,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.white24,
+                    borderRadius: BorderRadius.circular(99),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 18),
+              const Text(
+                'Parameter Ingest Siaran HP',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Koneksi Cloudflare Stream Ingest resmi untuk siaran ${widget.sumber == 'kamera' ? 'Kamera' : 'Layar'}.',
+                style: const TextStyle(color: Color(0xFF8B949E), fontSize: 12),
+              ),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0D1117),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFF30363D)),
+                ),
+                child: Column(
+                  children: [
+                    _barisInfo('Endpoint RTMP', 'rtmps://live.cloudflare.com:443/live/'),
+                    const Divider(color: Color(0xFF21262D), height: 16),
+                    _barisInfo('Mode Sumber', widget.sumber == 'kamera' ? 'Kamera Smartphone' : 'Layar Smartphone (Game)'),
+                    const Divider(color: Color(0xFF21262D), height: 16),
+                    _barisInfo('ID Siaran', widget.liveId ?? 'Membuat sesi...'),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF7C3AED),
+                  minimumSize: const Size.fromHeight(44),
+                ),
+                onPressed: () {
+                  Clipboard.setData(const ClipboardData(text: 'rtmps://live.cloudflare.com:443/live/'));
+                  Navigator.pop(c);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Endpoint RTMP disalin ke clipboard.')),
+                  );
+                },
+                icon: const Icon(Icons.copy_rounded, size: 18),
+                label: const Text('Salin Endpoint RTMP'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _barisInfo(String label, String value) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 100,
+          child: Text(
+            label,
+            style: const TextStyle(color: Color(0xFF8B949E), fontSize: 11.5),
+          ),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 11.5,
+              fontWeight: FontWeight.w600,
+              fontFamily: 'monospace',
+            ),
+          ),
+        ),
+      ],
+    );
   }
 
   @override
@@ -1574,6 +1678,14 @@ class _MobileBroadcastLiveScreenState extends State<MobileBroadcastLiveScreen> {
                           ],
                         ),
                       ),
+                      const SizedBox(width: 6),
+                      IconButton(
+                        icon: const Icon(Icons.info_outline_rounded, size: 18, color: Colors.white70),
+                        tooltip: 'Info Ingest',
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                        onPressed: _bukaInfoIngest,
+                      ),
                       const Spacer(),
 
                       // Judul & Kategori
@@ -1614,44 +1726,66 @@ class _MobileBroadcastLiveScreenState extends State<MobileBroadcastLiveScreen> {
               Positioned(
                 left: 16,
                 bottom: 96,
-                width: MediaQuery.of(context).size.width * 0.72,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: _pesanChat.map((msg) {
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: 6),
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withOpacity(0.45),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: Colors.white.withOpacity(0.12)),
-                      ),
-                      child: RichText(
-                        text: TextSpan(
+                width: MediaQuery.of(context).size.width * 0.76,
+                child: _pesanChat.isEmpty
+                    ? Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.55),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.white.withOpacity(0.12)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
                           children: [
-                            TextSpan(
-                              text: '${msg['nama']}: ',
-                              style: const TextStyle(
-                                color: Color(0xFFA78BFA),
-                                fontSize: 11.5,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                            TextSpan(
-                              text: msg['teks'] ?? '',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 11.5,
-                                fontWeight: FontWeight.w500,
+                            Icon(Icons.chat_bubble_outline_rounded, size: 14, color: Colors.white.withOpacity(0.7)),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'Belum ada obrolan. Pesan penonton akan muncul di sini secara realtime.',
+                                style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 11),
                               ),
                             ),
                           ],
                         ),
+                      )
+                    : Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: _pesanChat.map((msg) {
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 6),
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withOpacity(0.45),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: Colors.white.withOpacity(0.12)),
+                            ),
+                            child: RichText(
+                              text: TextSpan(
+                                children: [
+                                  TextSpan(
+                                    text: '${msg['nama']}: ',
+                                    style: const TextStyle(
+                                      color: Color(0xFFA78BFA),
+                                      fontSize: 11.5,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                  TextSpan(
+                                    text: msg['teks'] ?? '',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 11.5,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        }).toList(),
                       ),
-                    );
-                  }).toList(),
-                ),
               ),
 
             // Bilah Kontrol HUD Bawah: SEMUA TOMBOL BULAT & OUTLINE BORDER SAJA

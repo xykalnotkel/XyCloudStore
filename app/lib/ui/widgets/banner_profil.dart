@@ -43,21 +43,39 @@ class BannerProfil extends StatelessWidget {
       borderRadius: radius,
       child: Stack(fit: StackFit.passthrough, children: [
         // Dasar: media kustom bila ada, kalau gagal unduh → gradasi tema.
+        // Batch O (Discord-style): prefer Animated WebP (webp) — 24-bit + 8-bit alpha,
+        // 64% lebih kecil dari GIF, seamless loop tanpa delay. Fallback ke GIF.
         Positioned.fill(
           child: media != null
               ? CachedNetworkImage(
-                  imageUrl: media!.gif,
+                  imageUrl: media!.displayUrl,
                   fit: BoxFit.cover,
                   fadeInDuration: Duration.zero,
                   fadeOutDuration: Duration.zero,
+                  // Flutter Image natively supports Animated WebP (gaplessPlayback)
                   imageBuilder: (context, imageProvider) => Image(
                     image: imageProvider,
                     fit: BoxFit.cover,
                     gaplessPlayback: true,
+                    // Penting: filterQuality medium agar WebP animasi tetap tajam tapi hemat GPU
+                    filterQuality: FilterQuality.medium,
                   ),
                   placeholder: (_, __) => DecoratedBox(decoration: BoxDecoration(gradient: grad)),
-                  errorWidget: (_, __, ___) =>
-                      DecoratedBox(decoration: BoxDecoration(gradient: grad)),
+                  errorWidget: (_, __, ___) {
+                    // Jika WebP gagal (perangkat lama), coba fallback GIF
+                    if (media!.webp != media!.gif && media!.gif.isNotEmpty) {
+                      return CachedNetworkImage(
+                        imageUrl: media!.gif,
+                        fit: BoxFit.cover,
+                        fadeInDuration: Duration.zero,
+                        fadeOutDuration: Duration.zero,
+                        imageBuilder: (context, ip) => Image(image: ip, fit: BoxFit.cover, gaplessPlayback: true),
+                        placeholder: (_, __) => DecoratedBox(decoration: BoxDecoration(gradient: grad)),
+                        errorWidget: (_, __, ___) => DecoratedBox(decoration: BoxDecoration(gradient: grad)),
+                      );
+                    }
+                    return DecoratedBox(decoration: BoxDecoration(gradient: grad));
+                  },
                 )
               : DecoratedBox(decoration: BoxDecoration(gradient: grad)),
         ),

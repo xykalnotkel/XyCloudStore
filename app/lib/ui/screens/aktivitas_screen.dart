@@ -53,7 +53,7 @@ class _AktivitasScreenState extends State<AktivitasScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Aktivitas & Keamanan')),
       body: loading
-          ? const Center(child: CircularProgressIndicator())
+          ? const SkeletonList(count: 5)
           : RefreshIndicator(
               onRefresh: _load,
               child: ListView(

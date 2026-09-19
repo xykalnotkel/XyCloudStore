@@ -332,7 +332,7 @@ class KustomProfilScreen extends StatelessWidget {
           XyBarisMenu(
             ikon: Icons.panorama_outlined,
             judul: 'Banner',
-            sub: 'Warna, GIF, atau video yang otomatis menjadi GIF',
+            sub: 'Warna, Animated WebP ala Discord, GIF, atau video→WebP',
             tujuan: const UbahProfilScreen(fokus: FokusProfil.banner),
           ),
           const XyBarisMenu(
@@ -724,7 +724,7 @@ class _UbahProfilScreenState extends State<UbahProfilScreen> {
           setState(() {
             _progresBanner = null;
             _tahapBanner =
-                'Berkas selesai diunggah — server sedang mengonversi video → GIF…';
+                'Berkas selesai diunggah — server sedang mengonversi video → Animated WebP + GIF…';
           });
           return;
         }
@@ -752,8 +752,8 @@ class _UbahProfilScreenState extends State<UbahProfilScreen> {
     if (galat == null) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(video && mime == 'video/mp4'
-              ? 'Banner terpasang! Video diconvert ke GIF dan MP4 dihapus dari cloud (${detik.toStringAsFixed(0)} dtk).'
-              : 'Banner GIF terpasang!')));
+              ? 'Banner terpasang! Video diconvert ke Animated WebP (fallback GIF) dan MP4 dihapus dari cloud (${detik.toStringAsFixed(0)} dtk).'
+              : 'Banner terpasang! GIF otomatis dikonversi ke Animated WebP ala Discord.')));
     }
   }
 
@@ -1110,8 +1110,9 @@ class _UbahProfilScreenState extends State<UbahProfilScreen> {
                 SizedBox(
                   height: 96,
                   width: double.infinity,
-                  child: Image.network(u!.bannerMedia!.gif,
+                  child: Image.network(u!.bannerMedia!.displayUrl,
                       fit: BoxFit.cover,
+                      gaplessPlayback: true,
                       errorBuilder: (_, __, ___) => Container(
                             color: t.primarySoft,
                             alignment: Alignment.center,
@@ -1124,10 +1125,14 @@ class _UbahProfilScreenState extends State<UbahProfilScreen> {
                   top: 8,
                   child: Row(children: [
                     _PillBanner(
-                      ikon: u.bannerMedia!.tipe == 'video'
-                          ? Icons.movie_filter_rounded
-                          : Icons.gif_box_rounded,
-                      label: u.bannerMedia!.tipe == 'video' ? 'VIDEO→GIF' : 'GIF',
+                      ikon: u.bannerMedia!.isAnimatedWebP
+                          ? Icons.animation_rounded
+                          : (u.bannerMedia!.tipe == 'video'
+                              ? Icons.movie_filter_rounded
+                              : Icons.gif_box_rounded),
+                      label: u.bannerMedia!.isAnimatedWebP
+                          ? (u.bannerMedia!.isVideoOrigin ? 'VIDEO→WebP' : 'WebP ANIM')
+                          : (u.bannerMedia!.tipe == 'video' ? 'VIDEO→GIF' : 'GIF'),
                     ),
                     const SizedBox(width: 6),
                     Pressable(
@@ -1254,7 +1259,7 @@ class _UbahProfilScreenState extends State<UbahProfilScreen> {
                       ]),
                       const SizedBox(height: 2),
                       Text(
-                          'Pakai GIF, atau MP4 yang otomatis diconvert jadi GIF.',
+                          'Pakai GIF, atau MP4 yang otomatis diconvert jadi Animated WebP ala Discord (24-bit + alpha, 64% lebih kecil dari GIF).',
                           style: TextStyle(
                               color: t.muted, fontSize: 11.3, height: 1.4)),
                     ],

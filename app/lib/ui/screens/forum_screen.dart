@@ -319,7 +319,7 @@ class _ForumScreenState extends State<ForumScreen> {
                   onCoba: () => s.muatForum(paksa: true),
                 )
               : s.forumMemuat && s.forum.isEmpty
-                  ? const Center(child: CircularProgressIndicator())
+                  ? const SkeletonForumList(count: 4)
                   : daftar.isEmpty
                       ? Kosong(
                           icon: Icons.forum_outlined,

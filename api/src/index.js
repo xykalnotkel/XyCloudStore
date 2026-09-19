@@ -57,7 +57,7 @@ function bersihkanUser(env, u) {
 }
 import { kirimEmail } from './mail.js';
 import { kirimPush, kirimPushBanyak, siarkanPush } from './push.js';
-import { unggahGambar, unggahAudio, unggahVideoBanner, imporFotoSosial, samarkanGambar, samarkanKMedia, samarkanBannerMedia, layaniGambar, layaniMedia } from './upload.js';
+import { unggahGambar, unggahAudio, unggahVideoBanner, unggahVideoKeAnimasi, imporFotoSosial, samarkanGambar, samarkanKMedia, samarkanBannerMedia, layaniGambar, layaniMedia } from './upload.js';
 import { penyediaBayar, metodeTersedia, infoKonfigurasiPembayaran, buatTagihan, bacaPemberitahuan, cekStatusPenyedia, batalkanTagihan } from './bayar.js';
 import { setelan, simpanSetelan, jalankanPemeliharaan, statistikLengkap, catatLog, pantauKesehatan } from './sistem.js';
 import { TIER, diskonTier, segarkanTier, cekVoucher, pakaiVoucher, pakaiVoucherStrict, buatCadangan } from './loyal.js';
@@ -7146,9 +7146,20 @@ async function statistikPublik(env) {
         let hasil, tipe;
         if (mime === 'image/gif') {
           tipe = 'gif';
-          hasil = await unggahGambar(env, { dataUri, folder: 'xycloudstore/banner-profil' });
-          if (hasil.ok) hasil = { ok: true, url: hasil.url, gif: hasil.url };
-        } else if (['video/mp4', 'video/quicktime', 'video/webm'].includes(mime)) {
+          // GIF juga dikonversi ke Animated WebP untuk hemat bandwidth ala Discord
+          // (GIF asli tetap disimpan sebagai fallback)
+          const g = await unggahGambar(env, { dataUri, folder: 'xycloudstore/banner-profil' });
+          if (!g.ok) { hasil = g; }
+          else {
+            // Coba konversi GIF → Animated WebP (lebih kecil 64%)
+            const conv = await unggahVideoKeAnimasi(env, { dataUri, folder: 'xycloudstore/banner-profil', lebar: 480, fps: 20, durasi: 5.0, format: 'webp', hasilGanda: false });
+            if (conv.ok) {
+              hasil = { ok: true, url: conv.url, webp: conv.url, gif: g.url, id: g.id };
+            } else {
+              hasil = { ok: true, url: g.url, webp: g.url, gif: g.url, id: g.id };
+            }
+          }
+        } else if (['video/mp4', 'video/quicktime', 'video/webm', 'video/x-m4v'].includes(mime)) {
           tipe = 'video';
           hasil = await unggahVideoBanner(env, { dataUri });
         } else {
@@ -7159,12 +7170,19 @@ async function statistikPublik(env) {
         let verifOk = false;
         for (let i = 0; i < 3; i++) {
           try {
-            const cek = await fetch(hasil.url, { method: 'HEAD' });
+            const cek = await fetch(hasil.webp || hasil.url, { method: 'HEAD' });
             if (cek.ok || [200, 302, 304].includes(cek.status)) { verifOk = true; break; }
           } catch (_) {}
           await new Promise((r) => setTimeout(r, 800));
         }
-        const media = JSON.stringify({ tipe, url: hasil.url, gif: hasil.gif || hasil.url, mp4Terhapus: hasil.mp4Terhapus === true });
+        // Discord-style: simpan webp sebagai primary, gif sebagai fallback
+        const media = JSON.stringify({
+          tipe,
+          url: hasil.webp || hasil.url,
+          gif: hasil.gif || hasil.url,
+          webp: hasil.webp || hasil.url,
+          mp4Terhapus: hasil.mp4Terhapus === true,
+        });
         await env.DB.prepare('UPDATE users SET banner_media=? WHERE id=?').bind(media, me.sub).run();
         return json({ ok: true, banner_media: samarkanBannerMedia(env, media) }, 200, env);
       }

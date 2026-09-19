@@ -7,14 +7,38 @@ import 'dart:convert';
 // XyCloudStore — Model data (mirror dari tabel D1 Cloudflare)
 // ============================================================
 
-/// Media banner profil kustom (Batch I): GIF langsung, atau MP4 yang
-/// disajikan Cloudinary sebagai GIF animasi (transformasi f_gif).
+/// Media banner profil kustom (Batch I + O):
+/// - Batch I: GIF langsung, atau MP4 → GIF (f_gif)
+/// - Batch O (Discord-style): Video → Animated WebP (fl_animated,fl_awebp)
+///   + GIF fallback. Discord sendiri pakai teknik sama:
+///   * Avatar/banner animasi: `a_` hash → .webp (bukan .gif)
+///   * Avatar decoration/profile effect: APNG / Animated WebP / Lottie
+///     (butuh alpha 8-bit, GIF cuma 1-bit → glow bergerigi)
+///   * Stiker animasi: wajib APNG/Lottie, GIF ditolak (512KB limit)
+///   * Chat GIF: sebenarnya MP4 muted looping (hemat 90% bandwidth)
+///
+/// Cloudinary: `f_webp,fl_awebp,fl_animated,w_480,fps_20,du_5,q_auto:good,e_loop`
+/// menghasilkan Animated WebP 24-bit + 8-bit alpha, 64% lebih kecil dari GIF,
+/// seamless loop tanpa delay.
 class BannerMedia {
-  final String tipe; // 'gif' | 'video'
-  final String url; // berkas asli (gif/mp4)
-  final String gif; // URL sajian GIF animasi (untuk video = f_gif)
+  final String tipe; // 'gif' | 'video' | 'webp'
+  final String url; // berkas asli / primary display (webp preferred)
+  final String gif; // fallback GIF
+  final String webp; // primary Animated WebP (Discord Nitro style)
 
-  const BannerMedia({required this.tipe, required this.url, required this.gif});
+  const BannerMedia({
+    required this.tipe,
+    required this.url,
+    required this.gif,
+    String? webp,
+  }) : webp = webp ?? gif;
+
+  /// URL terbaik untuk ditampilkan: WebP animasi dulu (tajam, alpha halus),
+  /// baru GIF fallback, baru url legacy.
+  String get displayUrl => webp.isNotEmpty ? webp : (gif.isNotEmpty ? gif : url);
+  String get displayGifFallback => gif.isNotEmpty ? gif : url;
+  bool get isAnimatedWebP => webp.toLowerCase().endsWith('.webp') || webp.contains('.webp') || tipe == 'webp';
+  bool get isVideoOrigin => tipe == 'video';
 
   /// Server menyimpan kolom `banner_media` sebagai TEKS JSON; kadang sudah
   /// terurai jadi Map oleh klien JSON — terima keduanya.
@@ -28,16 +52,28 @@ class BannerMedia {
       } else if (v is Map) {
         m = Map<String, dynamic>.from(v);
       }
-      if (m == null || (m['url'] ?? '').toString().isEmpty) return null;
+      if (m == null) return null;
+      final url = (m['url'] ?? m['webp'] ?? m['gif'] ?? '').toString();
+      if (url.isEmpty) return null;
+      final gif = (m['gif'] ?? m['url']).toString();
+      final webp = (m['webp'] ?? m['url'] ?? gif).toString();
       return BannerMedia(
-        tipe: (m['tipe'] ?? 'gif').toString(),
-        url: m['url'].toString(),
-        gif: (m['gif'] ?? m['url']).toString(),
+        tipe: (m['tipe'] ?? (webp.endsWith('.webp') ? 'webp' : 'gif')).toString(),
+        url: url,
+        gif: gif,
+        webp: webp,
       );
     } catch (_) {
       return null;
     }
   }
+
+  Map<String, dynamic> toJson() => {
+        'tipe': tipe,
+        'url': url,
+        'gif': gif,
+        'webp': webp,
+      };
 }
 
 class UserProfile {
@@ -176,13 +212,7 @@ class UserProfile {
         'foto': foto,
         'bio': bio,
         'banner': banner,
-        'banner_media': bannerMedia == null
-            ? null
-            : {
-                'tipe': bannerMedia!.tipe,
-                'url': bannerMedia!.url,
-                'gif': bannerMedia!.gif,
-              },
+        'banner_media': bannerMedia == null ? null : bannerMedia!.toJson(),
         'bingkai': bingkai,
         'username': username,
         'nama_diubah_pada': namaDiubahPada,
