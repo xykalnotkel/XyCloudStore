@@ -482,11 +482,11 @@ jobs:
         with:
           targets: x86_64-pc-windows-msvc
 
-      - name: Bangun rilis native (cargo build --release --locked)
+      - name: Bangun rilis native (cargo build --release)
         shell: pwsh
         working-directory: agent-gui/src-native
         run: |
-          cargo build --release --locked
+          cargo build --release
           $exe = Get-Item "target/release/xycloud-agent.exe" -ErrorAction SilentlyContinue
           if (-not $exe) { throw "xycloud-agent.exe tidak ditemukan setelah cargo build" }
           Write-Host "EXE:" $exe.FullName $exe.Length
